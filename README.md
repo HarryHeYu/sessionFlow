@@ -1,5 +1,10 @@
 # Voyager 🧭
 
+[![tests](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+
 **One index across every AI coding agent on your machine.**
 
 [中文说明](README.zh-CN.md)
@@ -8,6 +13,12 @@ Voyager reads the local session data your agents already write — Codex,
 Claude Code, ZCode, DSH (DeepSeek Harness), and more — and turns it into a
 single searchable, exportable, resumable index. Pure local, no accounts,
 no cloud, no telemetry.
+
+![Voyager architecture: 8 agents, 8 storage formats, one index](docs/screenshots/architecture.png)
+
+Eight agents keep eight different formats; Voyager normalizes them into one
+SQLite index you can search, resume from, hand off to another agent, or query
+straight from inside an agent over MCP.
 
 ![Voyager in action](docs/screenshots/usage.png)
 
@@ -38,8 +49,31 @@ Voyager makes that history *one* thing you can query.
 ## Install
 
 ```sh
-pip install -e .            # core (Codex / Claude / ZCode adapters)
-pip install -e ".[dsh]"     # + DSH (needs zstandard)
+# isolated CLI install — no virtualenv juggling (recommended)
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+
+# or with pip (user-level)
+pip install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+
+# once the release is on PyPI (tracked in CHANGELOG.md)
+pipx install voyager
+```
+
+`[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
+optional and only needed for those features:
+
+```sh
+pip install "voyager @ git+https://github.com/HarryHeYu/voyager.git"          # core
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/voyager.git"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # + MCP server
+```
+
+Working on Voyager itself:
+
+```sh
+git clone https://github.com/HarryHeYu/voyager && cd voyager
+pip install -e ".[all,dev]"    # editable + extras + pytest
+python -m pytest tests/ -q     # 62 tests, synthetic fixtures, no provider data
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -106,6 +140,11 @@ explicitly instead of pretending.
 Voyager ships an MCP server, so agents can query the unified index with
 native tools instead of running commands:
 
+```sh
+pip install -e ".[mcp]"     # or: pip install "voyager[mcp]"
+voyager-mcp                 # same as: python -m voyager.mcp_server
+```
+
 ```json
 { "mcpServers": { "voyager": { "command": "python", "args": ["-m", "voyager.mcp_server"] } } }
 ```
@@ -113,7 +152,9 @@ native tools instead of running commands:
 Tools: `voyager_brief` (what are all my agents doing?), `voyager_search`,
 `voyager_list`, `voyager_show`, `voyager_handoff` (write a context package
 for another agent). Codex (`config.toml`), Claude Code (`claude mcp add`)
-and Cursor (`mcp.json`) are the tested hosts.
+and Cursor (`mcp.json`) are the tested hosts. Without the extra the server
+prints the install line above instead of a bare `ModuleNotFoundError` — the
+rest of the CLI never needs `mcp`.
 
 ## Supported platforms
 
@@ -132,6 +173,33 @@ Cursor and Antigravity adapters are marked experimental: Cursor reads its
 key-value store read-only and Antigravity decodes protobuf blobs
 heuristically (no public schema). Full per-field availability matrix and
 data-source paths for every tool are in [docs/RECON.md](docs/RECON.md).
+
+## Tests & CI
+
+Adapters are the part of Voyager that breaks when a vendor ships a storage
+change, so every platform has a regression test against a **synthetic**
+fixture — no real session data, no agent installation needed:
+
+```
+tests/
+├── fixtures/          # codex/claude/dsh/grok/kiro JSON+JSONL, zcode/cursor/antigravity SQL seeds
+├── conftest.py        # builds tmp trees (incl. zstd + SQLite) and repoints adapters at them
+├── test_codex.py  test_claude.py  test_zcode.py  test_dsh.py  test_grok.py
+├── test_cursor.py  test_kiro.py  test_antigravity.py  test_adapters.py
+└── test_store.py  test_export.py  test_handoff.py  test_cli.py  test_mcp.py
+```
+
+```sh
+python -m pytest tests/ -q                # 62 tests: adapters, store, export, handoff, CLI, MCP
+python scripts/run_tests_core_only.py     # same suite with no optional deps (skips extras)
+```
+
+CI ([.github/workflows/test.yml](.github/workflows/test.yml)) runs the suite
+on Python 3.10–3.13 (Linux) and 3.10/3.13 (Windows — the adapters deal with
+`%APPDATA%`, drive letters and backslashes), plus a core-only job proving the
+CLI works with zero optional dependencies. The store tests cover the
+"don't wreck my thousands of sessions" contract: repeated scans never
+duplicate, changed sources are re-parsed, vanished sources are pruned.
 
 ## Design
 

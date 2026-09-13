@@ -23,14 +23,30 @@ from ..model import new_event, new_session
 HOME = Path.home()
 CONV_DIR = HOME / ".gemini" / "antigravity" / "conversations"
 
-_PRINTABLE = re.compile(rb"[\x20-\x7e\x80-\xff][\x20-\x7e\x80-\xff]{15,}")
 # skip protobuf-noise strings: hex/uuid fragments and short base64-ish runs
 _NOISE = re.compile(r"^[0-9a-fA-F-]{20,}$")
 
 
+_PRINTABLE_CACHE: Dict[int, Any] = {}
+
+
+def _printable_re(min_len: int):
+    """Printable-run regex with the caller's minimum length baked in.
+
+    A fixed {15,} run length silently swallowed short-but-meaningful strings
+    (tool names like `run_command`, `toolu_...` ids) that the tool-call step
+    below asks for with min_len=4.
+    """
+    rx = _PRINTABLE_CACHE.get(min_len)
+    if rx is None:
+        rx = re.compile(rb"[\x20-\x7e\x80-\xff]{%d,}" % max(1, min_len))
+        _PRINTABLE_CACHE[min_len] = rx
+    return rx
+
+
 def _strings(blob: bytes, min_len: int = 16) -> List[str]:
     out = []
-    for m in _PRINTABLE.finditer(blob or b""):
+    for m in _printable_re(min_len).finditer(blob or b""):
         try:
             s = m.group(0).decode("utf-8", errors="replace")
         except Exception:
@@ -42,6 +58,8 @@ def _strings(blob: bytes, min_len: int = 16) -> List[str]:
 
 
 _EXIT_CODE = re.compile(r"exited with code (\d+)", re.I)
+# repo URLs inside the init payload: https(s) and scp-style git remotes
+_URL = re.compile(r"https?://[^\s\"'\\]+|git@[^\s\"'\\]+")
 
 
 class AntigravityAdapter(Adapter):
@@ -90,9 +108,9 @@ class AntigravityAdapter(Adapter):
                     if ss:
                         title_parts.append(ss[0])
                         ev(kind="user", role="user", content=ss[0][:5000])
-                        for u in re.findall(r"https?://[^\s\"']+", payload.decode(
-                                "utf-8", errors="replace")):
-                            if "git" in u and u not in git_urls:
+                        text = payload.decode("utf-8", errors="replace")
+                        for u in _URL.findall(text):
+                            if "git" in u.lower() and u not in git_urls:
                                 git_urls.append(u)
                 elif stype == 15:
                     ss = _strings(payload, 24)

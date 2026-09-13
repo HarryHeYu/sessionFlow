@@ -1,0 +1,6 @@
+{"type": "session", "version": 0, "id": "session-dsh-1", "createdAt": 1757000000000, "cwd": "E:/proj/demo", "delegationDepth": 0, "agentPreset": "standard"}
+{"type": "user/message", "time": 1757000001000, "seq": 1, "data": {"content": [{"type": "text", "text": "你好，跑个测试"}], "source": {"kind": "client"}}}
+{"type": "tool/call", "time": 1757000002000, "seq": 2, "data": {"callId": "d1", "name": "pwsh", "arguments": "{\"command\": \"dir\"}"}}
+{"type": "tool/result", "time": 1757000003000, "seq": 3, "data": {"message": {"source": {"callId": "d1"}}, "content": [{"type": "tool-result", "toolCallId": "d1", "content": [{"type": "text", "text": "ok"}]}]}}
+{"type": "assistant/message", "time": 1757000004000, "seq": 4, "data": {"message": {"content": [{"type": "reasoning", "reasoning": "想了一下"}, {"type": "text", "text": "测试完成"}]}}}
+{"type": "request/context", "time": 1757000005000, "seq": 5, "data": {"provider": "deepseek-official", "model": "deepseek-v4-pro", "contextWindow": 1000000}}

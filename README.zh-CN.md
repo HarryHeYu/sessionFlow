@@ -1,5 +1,10 @@
 # Voyager 🧭
 
+[![tests](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+
 **把你机器上所有 AI 编码 Agent 的会话历史，变成一份可查询的索引。**
 
 [English](README.md)
@@ -7,6 +12,11 @@
 Voyager 读取各 Agent 已经写在本机的会话数据——Codex、Claude Code、ZCode、
 DSH（DeepSeek Harness）等——整合成一份统一的历史库：可浏览、可搜索、可导出、
 可一键恢复原 Agent 继续对话。纯本地运行，无账号、无云端、无遥测。
+
+![Voyager 架构图：8 家 Agent、8 种存储格式、一份索引](docs/screenshots/architecture.png)
+
+8 家 Agent 各写各的格式，Voyager 把它们归一化成一份 SQLite 索引：可以搜、
+可以续、可以交接给另一个 Agent，也可以让 Agent 自己通过 MCP 直接查。
 
 ![Voyager 使用截图](docs/screenshots/usage.png)
 
@@ -33,8 +43,30 @@ JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成*
 ## 安装
 
 ```sh
-pip install -e .            # 核心（Codex / Claude / ZCode 适配器）
-pip install -e ".[dsh]"     # 加上 DSH（需要 zstandard）
+# 用 pipx 装成独立 CLI（推荐，不用折腾虚拟环境）
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+
+# 或者用 pip 装到用户目录
+pip install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+
+# 等 PyPI 发布后可简化为（进度见 CHANGELOG.md）
+pipx install voyager
+```
+
+`[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
+
+```sh
+pip install "voyager @ git+https://github.com/HarryHeYu/voyager.git"          # 核心
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/voyager.git"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # + MCP server
+```
+
+想改 Voyager 本身：
+
+```sh
+git clone https://github.com/HarryHeYu/voyager && cd voyager
+pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
+python -m pytest tests/ -q     # 62 个测试，全合成 fixture，不碰你的真实会话
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -90,6 +122,11 @@ codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager c
 
 Voyager 自带 MCP server，让 agent 用原生工具查询统一索引，而不需要跑命令：
 
+```sh
+pip install -e ".[mcp]"     # 或：pip install "voyager[mcp]"
+voyager-mcp                 # 等价于 python -m voyager.mcp_server
+```
+
 ```json
 { "mcpServers": { "voyager": { "command": "python", "args": ["-m", "voyager.mcp_server"] } } }
 ```
@@ -97,7 +134,8 @@ Voyager 自带 MCP server，让 agent 用原生工具查询统一索引，而不
 提供工具：`voyager_brief`（所有 agent 最近在忙什么）、`voyager_search`、
 `voyager_list`、`voyager_show`、`voyager_handoff`（为另一个 agent 生成上下文包）。
 已测试的宿主：Codex（`config.toml`）、Claude Code（`claude mcp add`）、
-Cursor（`mcp.json`）。
+Cursor（`mcp.json`）。没装 `mcp` 时，服务会打印上面那行安装命令而不是抛一个
+光秃秃的 `ModuleNotFoundError`；CLI 其余功能完全不需要它。
 
 ## 支持的平台
 
@@ -115,6 +153,32 @@ Cursor（`mcp.json`）。
 Cursor 与 Antigravity 适配器标记为实验性：Cursor 只读解析它的 KV 存储，
 Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。
 每个工具的逐字段可得性矩阵和数据源路径见 [docs/RECON.md](docs/RECON.md)。
+
+## 测试与 CI
+
+适配器是最容易坏的地方——各家 Agent 一改本地存储格式就可能解析失败——所以每个
+平台都有针对**合成 fixture** 的回归测试：不涉及任何真实会话数据，也不需要装
+任何 Agent：
+
+```
+tests/
+├── fixtures/          # codex/claude/dsh/grok/kiro 的 JSON+JSONL、zcode/cursor/antigravity 的 SQL 种子
+├── conftest.py        # 在临时目录里生成真实结构（含 zstd / SQLite）并把适配器指过去
+├── test_codex.py  test_claude.py  test_zcode.py  test_dsh.py  test_grok.py
+├── test_cursor.py  test_kiro.py  test_antigravity.py  test_adapters.py
+└── test_store.py  test_export.py  test_handoff.py  test_cli.py  test_mcp.py
+```
+
+```sh
+python -m pytest tests/ -q                # 62 个测试：适配器 / 索引 / 导出 / 接力 / CLI / MCP
+python scripts/run_tests_core_only.py     # 模拟"只装核心依赖"，可选依赖相关测试自动跳过
+```
+
+CI（[.github/workflows/test.yml](.github/workflows/test.yml)）在 Python 3.10–3.13
+（Linux）与 3.10/3.13（Windows，适配器要处理 `%APPDATA%`、盘符和反斜杠）上跑全量
+测试，另有一个"零可选依赖"任务证明核心 CLI 不依赖任何额外包。索引层的测试专门守住
+"不会把我的几千条会话索引坏"这条底线：重复扫描不重复、变更的 source 才重解析、
+消失的 source 才清理。
 
 ## 设计一句话
 

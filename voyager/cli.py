@@ -557,69 +557,85 @@ def main(argv=None) -> int:
         description="Unified local session manager for AI coding agents",
     )
     p.add_argument("--db", help=f"index db path (default {default_db_path()})")
+    # `--db` is accepted on either side of the subcommand: `voyager --db X stats`
+    # and `voyager stats --db X` both work. The subparser copy needs
+    # default=SUPPRESS, otherwise argparse's sub-namespace would overwrite a
+    # value given before the subcommand with its own default (None) — which
+    # silently redirects the whole command to ~/.voyager/index.db.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--db", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("scan", help="discover and index agent sessions")
+    sp = sub.add_parser("scan", help="discover and index agent sessions",
+                        parents=[common])
     sp.add_argument("--platform", help="comma list: codex,claude,zcode,dsh")
     sp.add_argument("--force", action="store_true", help="re-parse even if unchanged")
     sp.set_defaults(func=cmd_scan)
 
-    sp = sub.add_parser("list", help="list sessions")
+    sp = sub.add_parser("list", help="list sessions", parents=[common])
     sp.add_argument("--platform")
     sp.add_argument("--repo", help="filter by repo/cwd substring")
     sp.add_argument("--since", type=float, help="only sessions updated in last N days")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_list)
 
-    sp = sub.add_parser("show", help="show one session's timeline")
+    sp = sub.add_parser("show", help="show one session's timeline", parents=[common])
     sp.add_argument("session")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_show)
 
-    sp = sub.add_parser("search", help="full-text search across all sessions")
+    sp = sub.add_parser("search", help="full-text search across all sessions",
+                        parents=[common])
     sp.add_argument("query")
     sp.add_argument("--limit", type=int, default=50)
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_search)
 
-    sp = sub.add_parser("repo", help="timeline of all agent sessions for a repo")
+    sp = sub.add_parser("repo", help="timeline of all agent sessions for a repo",
+                        parents=[common])
     sp.add_argument("repo", help="repo root / remote / cwd substring")
     sp.set_defaults(func=cmd_repo)
 
-    sp = sub.add_parser("export", help="export a session")
+    sp = sub.add_parser("export", help="export a session", parents=[common])
     sp.add_argument("session")
     sp.add_argument("--format", choices=["md", "json"], default="md")
     sp.add_argument("--output", "-o")
     sp.set_defaults(func=cmd_export)
 
-    sp = sub.add_parser("resume", help="resume a session in its native agent")
+    sp = sub.add_parser("resume", help="resume a session in its native agent",
+                        parents=[common])
     sp.add_argument("session")
     sp.add_argument("--print", action="store_true", help="print command instead of running")
     sp.set_defaults(func=cmd_resume)
 
-    sp = sub.add_parser("files", help="list files touched by a session")
+    sp = sub.add_parser("files", help="list files touched by a session",
+                        parents=[common])
     sp.add_argument("session")
     sp.set_defaults(func=cmd_files)
 
-    sp = sub.add_parser("diff", help="rebuild file diffs (Claude file-history)")
+    sp = sub.add_parser("diff", help="rebuild file diffs (Claude file-history)",
+                        parents=[common])
     sp.add_argument("session")
     sp.add_argument("--file", help="filter by path substring")
     sp.set_defaults(func=cmd_diff)
 
-    sp = sub.add_parser("handoff", help="export a session as a context package for another agent")
+    sp = sub.add_parser("handoff", parents=[common],
+                        help="export a session as a context package for another agent")
     sp.add_argument("session")
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
     sp.add_argument("--output", "-o", help="package file path (default handoff-<provider>-<id>.md)")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the package")
     sp.set_defaults(func=cmd_handoff)
 
-    sp = sub.add_parser("watch", help="keep the index in sync automatically")
+    sp = sub.add_parser("watch", help="keep the index in sync automatically",
+                        parents=[common])
     sp.add_argument("--interval", type=int, default=300, help="seconds between scans (default 300)")
     sp.add_argument("--platform", help="limit to these providers (comma list)")
     sp.add_argument("--force", action="store_true")
     sp.set_defaults(func=cmd_watch)
 
-    sp = sub.add_parser("continue", help="pick work back up in one command (native resume, or auto-handoff)")
+    sp = sub.add_parser("continue", parents=[common],
+                        help="pick work back up in one command (native resume, or auto-handoff)")
     sp.add_argument("session", nargs="?", help="session id/prefix (default: newest session)")
     sp.add_argument("--repo", help="pick the newest session of this repo")
     sp.add_argument("--platform", help="pick the newest session of this provider")
@@ -627,18 +643,17 @@ def main(argv=None) -> int:
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
     sp.set_defaults(func=cmd_continue)
 
-    sp = sub.add_parser("brief", help="compact digest of recent agent activity (agent-friendly)")
+    sp = sub.add_parser("brief", parents=[common],
+                        help="compact digest of recent agent activity (agent-friendly)")
     sp.add_argument("--hours", type=float, default=48, help="look-back window (default 48h)")
     sp.add_argument("--repo", help="filter by repo/cwd substring")
     sp.add_argument("--limit", type=int, default=15)
     sp.set_defaults(func=cmd_brief)
 
-    sp = sub.add_parser("stats", help="index statistics")
+    sp = sub.add_parser("stats", help="index statistics", parents=[common])
     sp.set_defaults(func=cmd_stats)
 
     args = p.parse_args(argv)
-    if args.db is None:
-        args.db = None  # Store() resolves default
     return args.func(args)
 
 

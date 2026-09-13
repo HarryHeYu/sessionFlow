@@ -12,9 +12,17 @@ voyager/
 ├── model.py        # normalized Session/Event field whitelist
 ├── handoff.py      # context-package builder
 ├── export.py       # Markdown/JSON rendering
+├── mcp_server.py   # MCP tools (optional [mcp] extra)
 └── adapters/
     ├── base.py     # Adapter protocol, registry, git helpers
     └── *.py        # one module per platform
+
+tests/
+├── fixtures/       # synthetic provider data (text + SQL seeds)
+├── conftest.py     # tmp-tree builders, adapter_of / patch_paths fixtures
+└── test_*.py       # one file per adapter + store/export/handoff/cli/mcp
+
+.github/workflows/test.yml   # CI: py3.10-3.13 (linux), 3.10/3.13 (windows), core-only
 ```
 
 Core rule: **provider-specific logic stays inside `adapters/`**. The store
@@ -61,16 +69,26 @@ and CLI only know the normalized model (`model.py`). Every event keeps its
 
 ## Testing
 
-There is no mock framework; tests run against real on-disk data:
-
 ```sh
-python tests/test_store.py      # index-layer regressions (9 cases)
-python -m voyager.cli scan      # then exercise the CLI against your
-voyager list / show / search    # own real sessions
+pip install -e ".[all,dev]"
+python -m pytest tests/ -q            # the whole suite (62 tests, ~5s)
+python -m pytest tests/test_zcode.py  # one adapter
+python scripts/run_tests_core_only.py # simulate `pip install voyager` (no extras)
 ```
 
-If you add storage-layer logic, extend `tests/test_store.py` — it builds
-synthetic fixtures in a temp dir and needs no provider data.
+Tests never touch your real `~/.codex`, `~/.claude`, `~/.voyager` or any
+provider storage: adapters are pointed at synthetic fixtures built in
+`tmp_path` (see `tests/conftest.py`). Provider fixtures are text files /
+SQL seeds under `tests/fixtures/<provider>/` — reviewable in diffs, no
+binaries, no captured user data. SQLite and zstd artifacts are materialized
+from those seeds at test time.
+
+**Adding an adapter means adding its fixture + test**: `tests/fixtures/<p>/…`
+plus `tests/test_<p>.py`, using the `adapter_of` and `patch_paths` fixtures.
+The test must assert the normalized session fields *and* the event kinds, so
+a storage-format change upstream fails loudly instead of silently indexing
+garbage. CI (`.github/workflows/test.yml`) runs the suite on Python 3.10–3.13
+(Linux) and 3.10/3.13 (Windows).
 
 ## Docs
 

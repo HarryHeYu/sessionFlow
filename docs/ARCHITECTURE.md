@@ -1,5 +1,9 @@
 # Voyager 架构
 
+![架构图](screenshots/architecture.png)
+
+（图的生成脚本：`scripts/make_diagram.py`，改平台清单后重跑即可。）
+
 ## 数据流
 
 ```
@@ -49,6 +53,26 @@ tokenize=trigram：CJK 子串可搜（≥3 字符）；rowid=events.id，按会�
 ### 截断策略
 `content/tool_input/tool_output/stdout` 截 600KB，`raw_json` 截 8KB，FTS body 截
 600B——完整数据始终在 provider 原始文件里，事件里保留 source 指针（sources.path + seq）。
+
+## 测试与 CI
+
+适配器是唯一会因为"上游改格式"而悄悄坏掉的部分，所以每个平台一份回归测试：
+
+```
+tests/fixtures/<provider>/…   合成数据（文本 JSON/JSONL + SQL 种子，无二进制、无真实会话）
+tests/conftest.py             在 tmp_path 里物化 fixture（SQLite / zstd 现场生成），
+                              adapter_of + patch_paths 把适配器的路径全局指过去
+tests/test_<provider>.py      每个适配器：字段 + 事件种类断言（格式漂移即失败）
+tests/test_store.py           幂等/替换/prune 的索引层契约
+tests/test_export.py test_handoff.py test_cli.py test_mcp.py
+```
+
+- 跑全量：`python -m pytest tests/ -q`；只装核心依赖时：`python scripts/run_tests_core_only.py`
+  （block 掉 `mcp`/`zstandard`，相关测试自动 skip——即 `pip install voyager` 的真实形态）。
+- CI（`.github/workflows/test.yml`）：Python 3.10–3.13（Linux）× 3.10/3.13（Windows）
+  + 一个"零可选依赖"任务。
+- 适配器的路径全局（`SESSIONS_DIR`/`PROJECTS_DIR`/`DB_PATH`/`VSCDB`/`CONV_DIR`）必须
+  保持是模块级变量，测试靠它们重定向；`patch_paths` 会对不存在名字直接断言失败。
 
 ## Phase 2 预留
 

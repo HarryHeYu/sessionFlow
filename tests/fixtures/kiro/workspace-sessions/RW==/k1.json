@@ -1,0 +1,30 @@
+{
+  "sessionId": "k1",
+  "title": "kiro demo",
+  "workspaceDirectory": "E:/proj/demo",
+  "selectedModel": "m",
+  "contextUsagePercentage": 10,
+  "history": [
+    {
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "kiro 你好"
+          },
+          {
+            "type": "mention",
+            "text": "a.md"
+          }
+        ]
+      }
+    },
+    {
+      "message": {
+        "role": "assistant",
+        "content": "done"
+      }
+    }
+  ]
+}

@@ -4,17 +4,50 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voyager"
-version = "0.1.0"
+version = "0.2.0"
 description = "Unified local session manager for AI coding agents (Codex, Claude Code, ZCode, DSH, Grok, ...)"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+keywords = [
+    "ai", "ai-agent", "coding-agent", "claude-code", "codex", "cursor",
+    "cli", "mcp", "sqlite", "local-first", "session-search", "developer-tools",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Version Control",
+    "Topic :: Utilities",
+]
 dependencies = []
 
 [project.optional-dependencies]
 dsh = ["zstandard>=0.22"]
+mcp = ["mcp>=1.2"]
+all = ["zstandard>=0.22", "mcp>=1.2"]
+dev = ["pytest>=8", "zstandard>=0.22", "mcp>=1.2"]
+
+[project.urls]
+Homepage = "https://github.com/HarryHeYu/voyager"
+Repository = "https://github.com/HarryHeYu/voyager"
+Issues = "https://github.com/HarryHeYu/voyager/issues"
+Changelog = "https://github.com/HarryHeYu/voyager/blob/main/CHANGELOG.md"
 
 [project.scripts]
 voyager = "voyager.cli:main"
+voyager-mcp = "voyager.mcp_server:main"
 
 [tool.setuptools]
 packages = ["voyager", "voyager.adapters"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

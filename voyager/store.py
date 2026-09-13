@@ -367,13 +367,21 @@ class Store:
         return self.q("SELECT * FROM events WHERE sid=? ORDER BY seq, id", (sid,))
 
     def search(self, query: str, limit: int = 50) -> List[sqlite3.Row]:
+        """Substring search over every event body.
+
+        The user's text is always passed as ONE quoted FTS5 phrase: queries
+        like `pytest -q`, `a:b` or `"unbalanced` are ordinary text to a human
+        but operators/syntax errors to FTS5, and this is a substring search,
+        not a query language.
+        """
+        phrase = '"' + (query or "").replace('"', '""') + '"'
         return self.q(
             """SELECT s.*, f.sid AS _sid, snippet(event_fts, 0, '>>>', '<<<', '…', 12) AS snippet
                FROM event_fts f
                JOIN sessions s ON s.id = f.sid
                WHERE event_fts MATCH ?
                ORDER BY rank LIMIT ?""",
-            (query, limit),
+            (phrase, limit),
         )
 
     def stats(self) -> Dict[str, Any]:

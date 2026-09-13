@@ -1,7 +1,7 @@
 """Voyager MCP server — exposes the unified agent-session index as MCP tools.
 
 Run:  python -m voyager.mcp_server        (stdio transport)
-      or the `voyager-mcp` console script.
+      or the `voyager-mcp` console script (installed with `pip install -e ".[mcp]"`).
 
 Register with an agent, e.g.:
   Codex  (~/.codex/config.toml):
@@ -16,11 +16,45 @@ from __future__ import annotations
 
 import json
 
+_MISSING_MCP = (
+    "voyager: the MCP server needs the optional 'mcp' package.\n"
+    "  pip install -e \".[mcp]\"     (from a checkout)\n"
+    "  pip install \"voyager[mcp]\"   (from PyPI)\n"
+    "Core CLI commands (scan/list/show/search/export/handoff) work without it."
+)
+
+class _UnavailableServer:
+    """Stand-in server used when the optional `mcp` extra is not installed.
+
+    Keeps the module importable (the tool functions below still exist, so
+    tests and introspection work) and refuses to start with the install hint
+    instead of a bare ModuleNotFoundError — both for
+    `python -m voyager.mcp_server` and for the `voyager-mcp` console script.
+    """
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def tool(self, *args, **kwargs):
+        def decorate(fn):
+            return fn
+        return decorate
+
+    def run(self):
+        raise SystemExit(_MISSING_MCP)
+
+
 try:
     # mcp >= 2.x
     from mcp.server.mcpserver import MCPServer as _Server
+    MCP_AVAILABLE = True
 except ImportError:  # pragma: no cover - mcp 1.x fallback
-    from mcp.server.fastmcp import FastMCP as _Server
+    try:
+        from mcp.server.fastmcp import FastMCP as _Server
+        MCP_AVAILABLE = True
+    except ImportError:
+        MCP_AVAILABLE = False
+        _Server = _UnavailableServer      # type: ignore[assignment]
 
 from .store import Store
 
@@ -173,5 +207,11 @@ def voyager_handoff(session_id: str, target: str = "claude") -> str:
             f"the task described inside.")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    if not MCP_AVAILABLE:
+        raise SystemExit(_MISSING_MCP)
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()
