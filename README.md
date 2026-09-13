@@ -9,6 +9,8 @@ Claude Code, ZCode, DSH (DeepSeek Harness), and more — and turns it into a
 single searchable, exportable, resumable index. Pure local, no accounts,
 no cloud, no telemetry.
 
+![Voyager in action](docs/screenshots/usage.png)
+
 ```
 $ voyager list
 ID                                    PROV   UPDATED            MSG TOOL  TITLE

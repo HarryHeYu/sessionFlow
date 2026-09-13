@@ -8,6 +8,8 @@ Voyager 读取各 Agent 已经写在本机的会话数据——Codex、Claude Co
 DSH（DeepSeek Harness）等——整合成一份统一的历史库：可浏览、可搜索、可导出、
 可一键恢复原 Agent 继续对话。纯本地运行，无账号、无云端、无遥测。
 
+![Voyager 使用截图](docs/screenshots/usage.png)
+
 ```
 $ voyager list
 ID                                    PROV   UPDATED            MSG TOOL  TITLE
