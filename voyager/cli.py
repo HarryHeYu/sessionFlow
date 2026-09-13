@@ -176,6 +176,13 @@ def cmd_list(args) -> int:
     return 0
 
 
+def _fmt_ts(ts):
+    from datetime import datetime
+    if not ts:
+        return "?"
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
 def _repo_match(row, pattern: str) -> bool:
     pat = pattern.lower().replace("\\", "/").rstrip("/")
     for field in ("repo_root", "cwd", "git_remote"):
@@ -473,6 +480,36 @@ def cmd_continue(args) -> int:
     return _handoff_from_row(store, row, args)
 
 
+def cmd_brief(args) -> int:
+    """Compact digest of what every agent has been doing recently —
+    designed to be read by an agent in one shot."""
+    import time as _time
+    store = Store(args.db)
+    cutoff = _time.time() - args.hours * 3600
+    rows = [r for r in store.sessions() if (r["updated_at"] or 0) >= cutoff]
+    if args.repo:
+        rows = [r for r in rows if _repo_match(r, args.repo)]
+    if not rows:
+        print(f"no sessions updated in the last {args.hours}h")
+        return 0
+    print(f"agent activity, last {args.hours}h ({len(rows)} sessions, "
+          f"newest first):\n")
+    for r in sorted(rows, key=lambda x: x["updated_at"] or 0, reverse=True)[:args.limit]:
+        # one-line "what is this session doing": last user message beats title
+        last_user = ""
+        for e in reversed(store.events(r["id"])):
+            if e["kind"] == "user" and e["content"]:
+                last_user = " ".join(e["content"].split())[:140]
+                break
+        line = last_user or (r["title"] or "")[:140]
+        print(f"[{_fmt_ts(r['updated_at'])}] {r['provider']:<7} {r['native_id'][:16]}")
+        print(f"    {line}")
+        print(f"    repo: {r['repo_root'] or r['cwd'] or '?'}"
+              + (f"  branch:{r['git_branch']}" if r["git_branch"] else "")
+              + f"  ({r['message_count']} msgs / {r['tool_count']} tools)\n")
+    return 0
+
+
 def cmd_handoff(args) -> int:
     store = Store(args.db)
     row = _resolve(store, args.session)
@@ -589,6 +626,12 @@ def main(argv=None) -> int:
     sp.add_argument("--to", help="force cross-agent handoff to this target")
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
     sp.set_defaults(func=cmd_continue)
+
+    sp = sub.add_parser("brief", help="compact digest of recent agent activity (agent-friendly)")
+    sp.add_argument("--hours", type=float, default=48, help="look-back window (default 48h)")
+    sp.add_argument("--repo", help="filter by repo/cwd substring")
+    sp.add_argument("--limit", type=int, default=15)
+    sp.set_defaults(func=cmd_brief)
 
     sp = sub.add_parser("stats", help="index statistics")
     sp.set_defaults(func=cmd_stats)

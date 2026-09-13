@@ -55,6 +55,10 @@ running (or put it in a scheduled task):
 voyager watch --interval 300    # re-scan every 5 minutes, forever
 ```
 
+Put the command in your OS autostart (or the provided
+`~/.voyager/watch.vbs` in the Windows Startup folder) and the index stays
+current with zero manual steps.
+
 ```sh
 voyager scan                # discover + index every supported agent
 voyager list                # all sessions, newest first
@@ -66,6 +70,7 @@ voyager export <id> --format md   # or --format json (includes raw events)
 voyager resume <id>         # launches the native agent on that session
 voyager handoff <id> --to codex   # context package for another agent
 voyager continue            # one command to pick your latest work back up
+voyager brief               # 48h digest of what every agent is doing
 voyager files <id>          # files the session touched
 voyager diff <id>           # Claude sessions: rebuilt before/after diffs
 voyager stats               # index statistics

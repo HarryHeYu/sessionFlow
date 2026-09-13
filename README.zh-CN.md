@@ -49,6 +49,9 @@ watcher（或挂到计划任务里）：
 voyager watch --interval 300    # 每 5 分钟自动重扫，常驻运行
 ```
 
+把这条命令放进系统自启（Windows 下可直接把 `~/.voyager/watch.vbs` 放进
+启动文件夹），索引就会零人工保持最新。
+
 ```sh
 voyager scan                # 发现并索引所有支持的 Agent 会话
 voyager list                # 全部会话，按更新时间排序
@@ -60,6 +63,7 @@ voyager export <id> --format md   # 或 --format json（含原始事件）
 voyager resume <id>         # 调起原 Agent 恢复该会话
 voyager handoff <id> --to codex   # 生成给另一个 agent 的上下文包
 voyager continue            # 一条命令接着上次干（原生恢复或自动接力）
+voyager brief               # 最近 48h 所有 agent 在忙什么的摘要
 voyager files <id>          # 该会话碰过哪些文件
 voyager diff <id>           # Claude 会话：从版本链重建前后 diff
 voyager stats               # 索引统计
