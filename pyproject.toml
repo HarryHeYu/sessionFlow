@@ -16,5 +16,5 @@ dsh = ["zstandard>=0.22"]
 [project.scripts]
 voyager = "voyager.cli:main"
 
-[tool.setuptools.packages.find]
-include = ["voyager*"]
+[tool.setuptools]
+packages = ["voyager", "voyager.adapters"]
