@@ -101,7 +101,6 @@ class ClaudeAdapter(Adapter):
                                   "cache_read_input_tokens"):
                             if u.get(k):
                                 usage_total[k] = usage_total.get(k, 0) + u[k]
-                    seen_result = False
                     for btype, block in _blocks(msg.get("content")):
                         if btype == "text":
                             text = block.get("text") or ""
@@ -124,15 +123,16 @@ class ClaudeAdapter(Adapter):
                                tool_input=json.dumps(inp, ensure_ascii=False)
                                if inp is not None else None,
                                command=cmd, file_path=fp, model=model)
-                        elif btype == "tool_result" and not seen_result:
-                            seen_result = True
+                        elif btype == "tool_result":
                             tur = row.get("toolUseResult")
                             stdout = stderr = None
                             rc = None
                             if isinstance(tur, dict):
                                 stdout = tur.get("stdout")
                                 stderr = tur.get("stderr")
-                                rc = tur.get("return_code") or tur.get("exit_code")
+                                rc = tur.get("return_code")
+                                if rc is None:
+                                    rc = tur.get("exit_code")
                             ev(kind="tool_result", role="tool",
                                tool_call_id=block.get("tool_use_id"),
                                tool_output=text_of(block.get("content")) or None,

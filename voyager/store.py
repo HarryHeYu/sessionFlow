@@ -291,7 +291,10 @@ class Store:
                     pass
             self.con.execute("COMMIT")
         except Exception:
-            self.con.execute("ROLLBACK")
+            try:
+                self.con.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass  # COMMIT itself failed: sqlite already rolled back
             raise
 
     def prune_missing_sessions(self, provider: str, live_ids: set) -> int:
@@ -325,16 +328,29 @@ class Store:
             )
         return self.q("SELECT * FROM sessions ORDER BY updated_at DESC")
 
-    def session(self, id_or_prefix: str) -> Optional[sqlite3.Row]:
+    def session(self, id_or_prefix: str) -> tuple:
+        """Resolve a session ref. Returns (row, ambiguous_candidates).
+
+        row is None when nothing matched; ambiguous_candidates is non-empty
+        when the ref matched several sessions and the caller should ask the
+        user to disambiguate.
+        """
         rows = self.q("SELECT * FROM sessions WHERE id=? OR native_id=?", (id_or_prefix, id_or_prefix))
-        if rows:
-            return rows[0]
-        # prefix / fuzzy: match voyager id prefix or native id substring
+        if len(rows) == 1:
+            return rows[0], []
+        if len(rows) > 1:
+            return None, rows
+        esc = id_or_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         rows = self.q(
-            "SELECT * FROM sessions WHERE id LIKE ? OR native_id LIKE ? ORDER BY updated_at DESC",
-            (f"{id_or_prefix}%", f"%{id_or_prefix}%"),
+            "SELECT * FROM sessions WHERE id LIKE ? ESCAPE '\\' "
+            "OR native_id LIKE ? ESCAPE '\\' ORDER BY updated_at DESC",
+            (f"{esc}%", f"{esc}%"),
         )
-        return rows[0] if len(rows) >= 1 else None
+        if len(rows) == 1:
+            return rows[0], []
+        if len(rows) > 1:
+            return None, rows
+        return None, []
 
     def events(self, sid: str) -> List[sqlite3.Row]:
         return self.q("SELECT * FROM events WHERE sid=? ORDER BY seq, id", (sid,))

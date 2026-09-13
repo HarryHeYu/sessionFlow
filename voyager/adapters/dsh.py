@@ -90,6 +90,8 @@ class DshAdapter(Adapter):
             data = row.get("data") or {}
             ts = (row.get("time") or 0) / 1000.0 or None
             seq = row.get("seq")
+            if seq is None:
+                seq = len(events) + 1   # keep ORDER BY seq stable
 
             if typ == "session":
                 # fields live at the row top level (older builds nested them

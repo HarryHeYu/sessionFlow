@@ -40,7 +40,7 @@ def cmd_scan(args) -> int:
                 print(f"  {ad.provider}: no sources found")
             continue
 
-        if not multi:
+        if multi:
             for src in sources:
                 try:
                     if store.source_changed(ad.provider, src):
@@ -57,29 +57,39 @@ def cmd_scan(args) -> int:
                 except OSError:
                     continue
 
+        # Sessions whose sources are still on disk survive pruning even when
+        # they were skipped (unchanged) or failed to parse this round; only
+        # sources that vanished from disk release their sessions.
+        disk_paths = {str(p) for p in sources}
+        for r in store.q("SELECT path, sid FROM sources WHERE provider=?", (ad.provider,)):
+            if r["sid"] and r["path"] in disk_paths:
+                live_ids.add(r["sid"])
+
         if not rescan:
             skip = len(sources)
         elif multi:
             # one artifact (SQLite DB) -> many sessions; scan() returns ALL
-            # bundles exactly once — never call it inside a per-source loop
-            bundles = ad.scan(store.source_changed)
-            anchor = sources[0]
-            for bundle in bundles:
-                store.replace_session(
-                    bundle["session"], bundle["events"], ad.provider,
-                    anchor, bundle.get("extra_sources"),
-                )
-                live_ids.add(bundle["session"]["id"])
-                new += 1
-                evt += len(bundle["events"])
-            gone = store.prune_missing_sessions(ad.provider, live_ids)
+            # bundles exactly once — never call it inside a per-source loop.
+            # If the artifact is temporarily unreadable (locked DB) treat the
+            # round as skipped instead of pruning everything it owns.
+            try:
+                bundles = ad.scan(store.source_changed)
+            except Exception as e:
+                print(f"  ! {ad.provider}: scan failed ({e}); keeping existing index",
+                      file=sys.stderr)
+                bundles = None
+                skip = len(sources)
+            if bundles is not None:
+                anchor = sources[0]
+                for bundle in bundles:
+                    store.replace_session(
+                        bundle["session"], bundle["events"], ad.provider,
+                        anchor, bundle.get("extra_sources"),
+                    )
+                    live_ids.add(bundle["session"]["id"])
+                    new += 1
+                    evt += len(bundle["events"])
         else:
-            # preserve sessions whose sources still exist but were skipped
-            # (unchanged or unparseable) — only prune sources gone from disk
-            disk_paths = {str(p) for p in sources}
-            for r in store.q("SELECT path, sid FROM sources WHERE provider=?", (ad.provider,)):
-                if r["sid"] and r["path"] in disk_paths:
-                    live_ids.add(r["sid"])
             for src in sources:
                 try:
                     if not args.force and not store.source_changed(ad.provider, src):
@@ -104,9 +114,10 @@ def cmd_scan(args) -> int:
                 live_ids.add(result["session"]["id"])
                 new += 1
                 evt += len(result["events"])
-            gone = store.prune_missing_sessions(ad.provider, live_ids)
-            if gone:
-                print(f"  {ad.provider}: pruned {gone} vanished session(s)")
+
+        gone = store.prune_missing_sessions(ad.provider, live_ids)
+        if gone:
+            print(f"  {ad.provider}: pruned {gone} vanished session(s)")
 
         stats = store.stats()
         print(f"  {ad.provider}: {stats['by_provider'].get(ad.provider, 0)} sessions indexed "
@@ -174,7 +185,14 @@ def _repo_match(row, pattern: str) -> bool:
 
 
 def _resolve(store: Store, ref: str):
-    row = store.session(ref)
+    row, ambiguous = store.session(ref)
+    if row is None and ambiguous:
+        print(f"error: '{ref}' matches {len(ambiguous)} sessions:", file=sys.stderr)
+        for r in ambiguous[:10]:
+            print(f"  [{r['provider']}] {r['native_id']}  {(r['title'] or '')[:60]}",
+                  file=sys.stderr)
+        print("use a longer prefix", file=sys.stderr)
+        sys.exit(2)
     if row is None:
         print(f"error: session not found: {ref}", file=sys.stderr)
         sys.exit(2)
@@ -222,7 +240,11 @@ def cmd_show(args) -> int:
             rc = f" exit={ev['exit_code']}" if ev["exit_code"] is not None else ""
             body = f"{rc} {body}"
         elif kind == "snapshot":
-            body = ", ".join((ev["files"] or [])[:3]) or ""
+            try:
+                snap_files = json.loads(ev["files_json"] or "[]")
+            except json.JSONDecodeError:
+                snap_files = []
+            body = ", ".join(snap_files[:3])
         if kind in ("user", "assistant", "tool_call"):
             print(f"[{t}] {label:<5} {body}")
         else:
@@ -303,11 +325,17 @@ def cmd_resume(args) -> int:
     if args.print:
         print(cmd)
         return 0
+    # resume_cmd is built by our own adapters from the provider id, but the
+    # id itself came from provider data files — never trust it with a shell.
+    parts = cmd.split()
     print(f"$ {cmd}")
     try:
-        return subprocess.call(cmd, shell=True)
+        return subprocess.call(parts)
     except KeyboardInterrupt:
         return 130
+    except OSError as e:
+        print(f"failed to launch: {e}", file=sys.stderr)
+        return 1
 
 
 def cmd_files(args) -> int:

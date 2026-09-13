@@ -15,6 +15,7 @@ import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from .base import Adapter, finish_session, git_info, register
 from ..model import new_event, new_session, text_of
@@ -27,7 +28,8 @@ def _open_ro(path: Path) -> Optional[sqlite3.Connection]:
     if not path.is_file():
         return None
     try:
-        return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        uri = "file:///" + quote(str(path).replace("\\", "/")) + "?mode=ro"
+        return sqlite3.connect(uri, uri=True)
     except sqlite3.Error:
         return None
 
@@ -153,7 +155,7 @@ class ZCodeAdapter(Adapter):
                                exit_code=tuinfo.get("exit_code"),
                                model=model)
                         elif ptype == "file":
-                            fp = (p.get("mime") and p.get("url")) or p.get("filename")
+                            fp = p.get("url") or p.get("filename")
                             ev(kind="file", role="user", file_path=fp,
                                content=p.get("text") or None)
 
