@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voyager"
+version = "0.1.0"
+description = "Unified local session manager for AI coding agents (Codex, Claude Code, ZCode, DSH, Grok, ...)"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dsh = ["zstandard>=0.22"]
+
+[project.scripts]
+voyager = "voyager.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["voyager*"]
