@@ -91,6 +91,11 @@ and does the right thing — native resume for codex/claude/dsh/grok,
 automatic handoff package for the rest. `voyager continue --repo myproj
 --launch` goes straight back into a specific project.
 
+**Everyday flow** — `brief` to see what's moving, `export` to read one
+session in full (a 2,915-message DSH session → a 20 MB Markdown file),
+`continue` or `handoff` to pick it back up. Full recipes in
+[docs/WORKFLOWS.md](docs/WORKFLOWS.md).
+
 Session ids are matched by prefix; if a prefix is ambiguous Voyager lists
 the candidates and exits. `resume` runs the native agent's own command
 (e.g. `codex resume <id>`); providers without a CLI resume path say so
@@ -140,7 +145,8 @@ whose source files vanish are pruned.
 
 Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/DECISIONS.md](docs/DECISIONS.md), [docs/API.md](docs/API.md) and
-[docs/FAQ.md](docs/FAQ.md).
+[docs/FAQ.md](docs/FAQ.md) and everyday recipes in
+[docs/WORKFLOWS.md](docs/WORKFLOWS.md).
 
 ## Ideas welcome
 

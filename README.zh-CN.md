@@ -80,6 +80,10 @@ agent 的启动命令；加 `--launch` 立即启动。目标 agent 被告知"读
 codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager continue
 --repo myproj --launch` 直接回到某个项目的现场。
 
+**日常套路**——`brief` 看全局动态，`export` 完整细读某个会话（实测把
+2915 条消息的 DSH 会话导成 20MB Markdown），`continue` / `handoff` 接着干。
+完整配方见 [docs/WORKFLOWS.md](docs/WORKFLOWS.md)。
+
 会话 ID 支持前缀匹配；前缀有歧义时会列出候选并退出，不会猜。
 
 ## MCP —— 在你的 Agent 里原生调用

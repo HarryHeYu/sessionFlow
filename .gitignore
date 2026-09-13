@@ -8,3 +8,4 @@ build/
 *.db-journal
 *.db-wal
 *.db-shm
+exports/
