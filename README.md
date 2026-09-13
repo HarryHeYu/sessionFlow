@@ -96,6 +96,20 @@ the candidates and exits. `resume` runs the native agent's own command
 (e.g. `codex resume <id>`); providers without a CLI resume path say so
 explicitly instead of pretending.
 
+## MCP — native tools inside your agents
+
+Voyager ships an MCP server, so agents can query the unified index with
+native tools instead of running commands:
+
+```json
+{ "mcpServers": { "voyager": { "command": "python", "args": ["-m", "voyager.mcp_server"] } } }
+```
+
+Tools: `voyager_brief` (what are all my agents doing?), `voyager_search`,
+`voyager_list`, `voyager_show`, `voyager_handoff` (write a context package
+for another agent). Codex (`config.toml`), Claude Code (`claude mcp add`)
+and Cursor (`mcp.json`) are the tested hosts.
+
 ## Supported platforms
 
 | Platform | Source | Messages | Tool calls | Shell exit | File diffs | Tokens | Resume |

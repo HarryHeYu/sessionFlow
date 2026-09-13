@@ -82,6 +82,19 @@ codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager c
 
 会话 ID 支持前缀匹配；前缀有歧义时会列出候选并退出，不会猜。
 
+## MCP —— 在你的 Agent 里原生调用
+
+Voyager 自带 MCP server，让 agent 用原生工具查询统一索引，而不需要跑命令：
+
+```json
+{ "mcpServers": { "voyager": { "command": "python", "args": ["-m", "voyager.mcp_server"] } } }
+```
+
+提供工具：`voyager_brief`（所有 agent 最近在忙什么）、`voyager_search`、
+`voyager_list`、`voyager_show`、`voyager_handoff`（为另一个 agent 生成上下文包）。
+已测试的宿主：Codex（`config.toml`）、Claude Code（`claude mcp add`）、
+Cursor（`mcp.json`）。
+
 ## 支持的平台
 
 | 平台 | 数据源 | 消息 | 工具调用 | Shell 退出码 | 文件 diff | Token | 恢复 |

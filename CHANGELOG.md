@@ -29,6 +29,11 @@ All notable changes to Voyager are documented here. Format loosely follows
   real-output screenshots (`docs/screenshots/`), and a screenshot
   generator (`scripts/make_screenshot.py`).
 
+- **MCP server** (`voyager-mcp` / `python -m voyager.mcp_server`) — exposes
+  `voyager_brief/search/list/show/handoff` as native MCP tools; tested with
+  Codex (`config.toml`), Claude Code (`claude mcp add`) and Cursor
+  (`mcp.json`), so agents can query other agents' sessions without shell.
+
 ### Fixed
 - Prune could delete sessions of a multi-session artifact (one SQLite DB →
   N sessions) because `sources` was keyed per path; source bookkeeping is
