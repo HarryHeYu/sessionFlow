@@ -122,8 +122,9 @@ back to the source. Everything lands in a local SQLite index with FTS5
 tracked by `(mtime, size)` and re-parsed only when they change; sessions
 whose source files vanish are pruned.
 
-Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
-[docs/DECISIONS.md](docs/DECISIONS.md).
+Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[docs/DECISIONS.md](docs/DECISIONS.md), [docs/API.md](docs/API.md) and
+[docs/FAQ.md](docs/FAQ.md).
 
 ## Ideas welcome
 
