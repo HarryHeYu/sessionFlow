@@ -172,13 +172,32 @@ def test_db_flag_accepted_on_either_side(indexed_store, capsys):
     assert before == after
 
 
-def test_default_db_never_points_at_the_real_index(_never_touch_the_real_index):
-    """Guard test for the safety net itself (see conftest)."""
-    import voyager.store as store_mod
+def test_isolation_guard_redirects_real_paths(_isolated_from_the_real_machine,
+                                              tmp_path):
+    """Guard test for the autouse isolation fixture (see conftest).
 
-    assert store_mod.default_db_path() == _never_touch_the_real_index
-    assert store_mod.Store().db_path == _never_touch_the_real_index
-    assert ".voyager" not in str(_never_touch_the_real_index)
+    A pathless Store, the cwd and every adapter's storage root must all point
+    into the temp tree, so no test can read or write real agent data.
+    """
+    import voyager.store as store_mod
+    from voyager.adapters.base import all_adapters
+    from voyager.adapters import load_all
+    import importlib
+
+    assert not _isolated_from_the_real_machine.exists()   # "no agent storage"
+    default_db = store_mod.default_db_path()
+    assert ".voyager" not in str(default_db)
+    assert store_mod.Store().db_path == default_db
+    assert Path.cwd().parent == tmp_path.parent           # cwd is a temp dir
+
+    load_all()
+    for ad in all_adapters():
+        mod = importlib.import_module(type(ad).__module__)
+        for name in ("SESSIONS_DIR", "PROJECTS_DIR", "DB_PATH", "VSCDB",
+                     "CONV_DIR", "FILE_HISTORY_DIR"):
+            value = getattr(mod, name, None)
+            if value is not None:
+                assert "no-agent-storage" in str(value), f"{ad.provider}.{name}"
 
 
 def test_files_reports_absent_file_history(indexed_store, capsys):

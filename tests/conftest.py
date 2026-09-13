@@ -23,25 +23,58 @@ import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# module-level path globals an adapter may expose for discovery; the isolation
+# fixture below points all of them at a non-existent dir
+PATH_GLOBALS = ("SESSIONS_DIR", "PROJECTS_DIR", "FILE_HISTORY_DIR",
+                "DB_PATH", "VSCDB", "CONV_DIR")
+
+
+def _redirect_adapters(monkeypatch, missing: Path) -> None:
+    """Point every adapter's storage globals at a path that does not exist."""
+    import importlib
+
+    from voyager.adapters import load_all
+    from voyager.adapters.base import all_adapters
+
+    load_all()
+    for ad in all_adapters():
+        mod = importlib.import_module(type(ad).__module__)
+        for name in PATH_GLOBALS:
+            if hasattr(mod, name):
+                monkeypatch.setattr(mod, name, missing / name)
+
 
 @pytest.fixture(autouse=True)
-def _never_touch_the_real_index(tmp_path_factory, monkeypatch):
-    """Safety net: tests must not touch the real index or the real cwd.
+def _isolated_from_the_real_machine(tmp_path_factory, monkeypatch):
+    """No test — passing or failing — may touch real agent data.
 
-    The whole suite is supposed to pass ``--db``/``Store(path)`` everywhere,
-    but a bug in that plumbing once let CLI tests write to (and prune!)
-    ``~/.voyager/index.db``. Any `Store()` without a path now resolves to a
-    throwaway file for the duration of the test, and the working directory is
-    a temp dir — commands that default to a relative output path (e.g.
-    `voyager continue`, whose handoff package lands in the cwd) write there
-    instead of into the checkout.
+    Three redirections, all automatic:
+
+    * ``Store()`` without a path resolves to a throwaway index (a bug in the
+      ``--db`` plumbing once let CLI tests run against and prune the real
+      ``~/.voyager/index.db``);
+    * the working directory is a temp dir (``voyager continue``/``handoff``
+      default to relative output paths and once dropped a package into the
+      checkout);
+    * every adapter's storage globals and the ``HOME``/``APPDATA`` fallbacks
+      point at a non-existent directory, so a test that *forgets* to redirect
+      an adapter discovers **nothing** instead of reading — or overwriting —
+      the user's Codex/Claude/DSH/… sessions. A forgotten redirect shows up as
+      an empty discovery (loud failure), never as silent damage.
+
+    Tests opt back in with the ``patch_paths`` fixture.
     """
     import voyager.store as store_mod
 
-    safe = tmp_path_factory.mktemp("default-index") / "index.db"
-    monkeypatch.setattr(store_mod, "default_db_path", lambda: safe)
+    root = tmp_path_factory.mktemp("isolated")
+    missing = root / "no-agent-storage"
+    monkeypatch.setattr(store_mod, "default_db_path", lambda: root / "index.db")
     monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
-    return safe
+    monkeypatch.setenv("HOME", str(root))
+    monkeypatch.setenv("USERPROFILE", str(root))
+    monkeypatch.setenv("APPDATA", str(missing))
+    _redirect_adapters(monkeypatch, missing)
+    return missing
 
 
 def _copy_tree(name: str, dest: Path) -> Path:

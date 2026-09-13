@@ -53,6 +53,26 @@ def test_discover_returns_empty_when_nothing_installed(monkeypatch, tmp_path):
         assert ad.discover() == [], f"{ad.provider} discovered sources when empty"
 
 
+def test_unpatched_adapters_never_see_real_storage():
+    """Isolation guard: without patch_paths an adapter must find NOTHING.
+
+    A test that forgets to redirect its adapter used to discover — and in one
+    case overwrite — the real session files of whatever agent was installed
+    (a DSH session was destroyed that way; the suite only noticed on CI, where
+    no agent data exists). The autouse isolation fixture in conftest.py makes
+    such a test fail loudly with an empty discovery instead.
+    """
+    from voyager.adapters.base import all_adapters
+
+    for ad in _loaded():
+        sources = ad.discover()
+        assert sources == [], (
+            f"{ad.provider} discovered {len(sources)} real source(s) without "
+            f"patch_paths: {sources[:3]}"
+        )
+    assert {a.provider for a in all_adapters()} >= EXPECTED_PROVIDERS
+
+
 @pytest.mark.parametrize("provider", sorted(EXPECTED_PROVIDERS))
 def test_every_adapter_exposes_a_parser(adapter_of, provider):
     ad = adapter_of(provider)

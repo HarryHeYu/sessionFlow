@@ -6,7 +6,7 @@ All notable changes to Voyager are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
-- **Test suite + CI** — the project went from one test file to 62 tests:
+- **Test suite + CI** — the project went from one test file to 63 tests:
   per-adapter regression tests for all 8 platforms against synthetic
   fixtures (`tests/fixtures/`, no real session data), plus store, export,
   handoff, CLI and MCP tests. `.github/workflows/test.yml` runs them on
@@ -14,6 +14,9 @@ All notable changes to Voyager are documented here. Format loosely follows
   proves the CLI works with no optional dependencies. README badges added.
 - `scripts/run_tests_core_only.py` — runs the suite with `mcp` and
   `zstandard` blocked, i.e. exactly what `pip install voyager` gives you.
+- CI failures are now self-describing: the test steps print the failing tests
+  as GitHub **annotations** (`::error title=pytest::`), which are readable from
+  the checks API and the UI without a token — job logs are not.
 - **Architecture diagram** (`docs/screenshots/architecture.png`, drawn by
   `scripts/make_diagram.py`): 8 agents / 8 formats → one index → the six
   ways to use it. Embedded at the top of both READMEs.
@@ -22,14 +25,33 @@ All notable changes to Voyager are documented here. Format loosely follows
 - `--db` was only accepted *before* the subcommand (`voyager --db X stats`);
   `voyager stats --db X` died with an argparse usage error. It is now
   accepted on either side.
-- **Test-suite safety net**: an argparse default in the `--db` plumbing
-  above could make a CLI test fall back to `~/.voyager/index.db` — the CLI
-  then scanned the fixture paths and pruned the real index's sessions of
-  that provider (it happened once, to this project's own index; the data
-  was restored by re-running `voyager scan`, which is the point of a
-  derived index). `tests/conftest.py` now redirects any pathless `Store()`
-  into `tmp_path` with an autouse fixture, and `test_cli.py` asserts the
-  guard holds. A full test run leaves `~/.voyager/index.db` byte-identical.
+- **Test-suite isolation** — the autouse fixture in `tests/conftest.py`
+  redirects *everything* a test could reach by accident: a pathless `Store()`,
+  the working directory, and **every adapter's storage globals plus the
+  `HOME`/`USERPROFILE`/`APPDATA` fallbacks**, all pointed at a non-existent
+  directory. A test that forgets `patch_paths` now discovers nothing and fails
+  loudly instead of reading — or overwriting — real agent data
+  (`tests/test_adapters.py` asserts that for all 8 adapters,
+  `tests/test_cli.py` asserts the guard itself). Verified: a full run leaves
+  `~/.voyager/index.db` and the agent session files byte-identical, and the
+  suite passes with an empty `HOME`/`APPDATA` (the CI condition).
+- **A test really did destroy real data, and only CI noticed**:
+  `test_dsh_corrupt_zstd_is_reported` never redirected the DSH adapter, so on a
+  machine with DSH sessions it took the first *real*
+  `~/.dsh/sessions/*/session.jsonl.zstd` and wrote `b"NOT-ZSTD"` over it; on CI
+  (no DSH data) it failed with `IndexError` instead — which is how it surfaced,
+  as 6 red matrix jobs. The session (`dsh:session-a459ebf4…`, 111 events /
+  12 messages / 56 tool calls) was rebuilt from the index — intact provider rows
+  reused verbatim, the 32 oversized rows rebuilt from the normalized columns,
+  plus synthetic `session` / `session/title` / `request/context` rows —
+  validated by re-parsing (identical title/model/counts) and re-indexed cleanly.
+  The test now redirects its adapter like every other adapter test.
+- **Test-suite safety net** (earlier, same class): an argparse default in the
+  `--db` plumbing could make a CLI test fall back to `~/.voyager/index.db` —
+  the CLI then scanned the fixture paths and pruned the real index's sessions
+  of that provider (it happened once, to this project's own index; the data was
+  restored by re-running `voyager scan`, which is the point of a derived
+  index).
 - **Packaging**: the MCP dependency was undeclared, so a fresh
   `pip install -e .` + `python -m voyager.mcp_server` died with
   `ModuleNotFoundError: No module named 'mcp'`. Added `[mcp]`, `[all]` and

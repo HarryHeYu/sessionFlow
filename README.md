@@ -73,7 +73,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 62 tests, synthetic fixtures, no provider data
+python -m pytest tests/ -q     # 63 tests, synthetic fixtures, no provider data
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -190,7 +190,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 62 tests: adapters, store, export, handoff, CLI, MCP
+python -m pytest tests/ -q                # 63 tests: adapters, store, export, handoff, CLI, MCP
 python scripts/run_tests_core_only.py     # same suite with no optional deps (skips extras)
 ```
 

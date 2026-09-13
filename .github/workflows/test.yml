@@ -17,6 +17,7 @@ jobs:
   test:
     name: py${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -41,15 +42,39 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all,dev]"
+          python -m pip list
 
       - name: Run test suite
-        run: python -m pytest tests/ -q
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests/ -q --tb=short -rf > pytest.log 2>&1
+          rc=$?
+          tail -80 pytest.log
+          if [ $rc -ne 0 ]; then
+            # make the failures readable from the UI *and* from the checks API
+            # (job logs need a token; annotations do not)
+            python - <<'PY'
+            import pathlib
+            lines = pathlib.Path("pytest.log").read_text(
+                encoding="utf-8", errors="replace").splitlines()
+            fails = [ln.strip() for ln in lines
+                     if ln.startswith(("FAILED", "ERROR"))]
+            for ln in fails[:10]:
+                print(f"::error title=pytest::{ln[:900].replace(chr(10), ' ')}")
+            if not fails:
+                tail = " / ".join(lines[-6:])[:900]
+                print(f"::error title=pytest (no summary line)::{tail}")
+            PY
+          fi
+          exit $rc
 
   core-only:
     # The core install must work with zero optional dependencies: `pip install
     # voyager` gives a working CLI, and only the MCP server needs the [mcp] extra.
     name: core install (no extras) on py${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +97,7 @@ jobs:
         run: |
           voyager --help
           voyager stats --db "$RUNNER_TEMP/ci.db"
+          voyager list --db "$RUNNER_TEMP/ci.db"
 
       - name: MCP server explains the missing extra instead of crashing
         run: |
@@ -81,8 +107,25 @@ jobs:
                              capture_output=True, text=True, timeout=60)
           msg = p.stdout + p.stderr
           assert "pip install" in msg and "mcp" in msg, msg
+          assert "Traceback" not in msg, msg          # a hint, not a crash
           print("ok:", msg.strip().splitlines()[0])
           PY
 
       - name: Test suite (extras-dependent tests skip themselves)
-        run: python -m pytest tests/ -q
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests/ -q --tb=short -rf > pytest.log 2>&1
+          rc=$?
+          tail -40 pytest.log
+          if [ $rc -ne 0 ]; then
+            python - <<'PY'
+            import pathlib
+            lines = pathlib.Path("pytest.log").read_text(
+                encoding="utf-8", errors="replace").splitlines()
+            for ln in [l.strip() for l in lines
+                       if l.startswith(("FAILED", "ERROR"))][:10]:
+                print(f"::error title=pytest (core-only)::{ln[:900]}")
+            PY
+          fi
+          exit $rc

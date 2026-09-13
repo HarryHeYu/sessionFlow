@@ -66,7 +66,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # 
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # 62 个测试，全合成 fixture，不碰你的真实会话
+python -m pytest tests/ -q     # 63 个测试，全合成 fixture，不碰你的真实会话
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -170,7 +170,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 62 个测试：适配器 / 索引 / 导出 / 接力 / CLI / MCP
+python -m pytest tests/ -q                # 63 个测试：适配器 / 索引 / 导出 / 接力 / CLI / MCP
 python scripts/run_tests_core_only.py     # 模拟"只装核心依赖"，可选依赖相关测试自动跳过
 ```
 

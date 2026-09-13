@@ -26,8 +26,9 @@ def test_dsh_parse(adapter_of, patch_paths, dsh_fixture):
     assert kinds.count("reasoning") == 1
 
 
-def test_dsh_corrupt_zstd_is_reported(adapter_of, dsh_fixture):
+def test_dsh_corrupt_zstd_is_reported(adapter_of, patch_paths, dsh_fixture):
     ad = adapter_of("dsh")
+    patch_paths(ad, SESSIONS_DIR=dsh_fixture)
     f = list(ad.discover())[0]
     f.write_bytes(b"NOT-ZSTD")
     r = ad.parse(f)
