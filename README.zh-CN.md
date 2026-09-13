@@ -40,6 +40,10 @@ pip install -e ".[dsh]"     # 加上 DSH（需要 zstandard）
 
 ## 使用
 
+第一次使用：`voyager scan` 会遍历所有支持的 Agent 的本地存储，在
+`~/.voyager/index.db` 建立索引。之后想收录新会话就再跑一次 `scan`——
+它是增量的，只重新读取有变化的部分。
+
 ```sh
 voyager scan                # 发现并索引所有支持的 Agent 会话
 voyager list                # 全部会话，按更新时间排序
@@ -68,6 +72,17 @@ voyager stats               # 索引统计
 Grok、Cursor、Antigravity、Kiro 的适配方案已调研完毕，见
 [docs/RECON.md](docs/RECON.md)（各家工具本地数据存哪、记了什么的完整清单），
 按现有 Adapter 接口扩展即可。
+
+### 更多平台（已调研，适配器待实现）
+
+| 平台 | 本地数据源 | 里面有什么 |
+|---|---|---|
+| Grok CLI | `~/.grok/sessions/<URL编码cwd>/session-<uuid>/` — `chat_history.jsonl`、`events.jsonl`、`summary.json` | 消息、工具调用+结果；`summary.json` 里有 git root/branch/commit；支持 `grok -r <id>` 恢复；reasoning 被服务端加密 |
+| Cursor | `AppData/Roaming/Cursor/User/globalStorage/state.vscdb`（SQLite，表 `cursorDiskKV`） | 会话是 `composerData:*`，消息是 `bubbleId:*`（含 `toolFormerData`），diff/快照数据是所有已调研工具里最全的 |
+| Antigravity | `~/.gemini/antigravity/conversations/<uuid>.db`（SQLite，protobuf blob）+ `code_tracker/` 全文件快照 | 工具调用和输出在 protobuf blob 里，需要先做 protobuf 解码才能索引 |
+| Kiro IDE | `AppData/Roaming/Kiro/User/globalStorage/kiro.kiroagent/workspace-sessions/<base64cwd>/<uuid>.json` | 只有对话 JSON——工具调用、diff、token 都没有持久化 |
+
+它们会遵循同一套 Adapter 接口，见 `voyager/adapters/base.py`。
 
 ## 设计一句话
 

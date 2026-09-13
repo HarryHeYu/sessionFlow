@@ -45,6 +45,11 @@ run it as `python -m voyager.cli`.
 
 ## Usage
 
+First run: `voyager scan` walks every supported agent's local storage and
+builds the index at `~/.voyager/index.db`. After that, re-run `scan`
+whenever you want to pick up new sessions — it is incremental and only
+re-reads what changed.
+
 ```sh
 voyager scan                # discover + index every supported agent
 voyager list                # all sessions, newest first
@@ -60,7 +65,9 @@ voyager stats               # index statistics
 ```
 
 Session ids are matched by prefix; if a prefix is ambiguous Voyager lists
-the candidates and exits.
+the candidates and exits. `resume` runs the native agent's own command
+(e.g. `codex resume <id>`); providers without a CLI resume path say so
+explicitly instead of pretending.
 
 ## Supported platforms
 
@@ -74,6 +81,19 @@ the candidates and exits.
 Adapters for Grok, Cursor, Antigravity and Kiro are designed in
 [docs/RECON.md](docs/RECON.md) (a full survey of where each tool keeps its
 local data, and what it records) and are straightforward to add.
+
+### More platforms ( surveyed, adapters not yet implemented )
+
+| Platform | Local data source | What's in there |
+|---|---|---|
+| Grok CLI | `~/.grok/sessions/<urlencoded-cwd>/session-<uuid>/` — `chat_history.jsonl`, `events.jsonl`, `summary.json` | messages, tool calls+results, git root/branch/commit in `summary.json`; resume via `grok -r <id>`; reasoning is server-encrypted |
+| Cursor | `AppData/Roaming/Cursor/User/globalStorage/state.vscdb` (SQLite, table `cursorDiskKV`) | sessions as `composerData:*`, messages as `bubbleId:*` with `toolFormerData`, the richest diff/checkpoint data of all surveyed tools |
+| Antigravity | `~/.gemini/antigravity/conversations/<uuid>.db` (SQLite, protobuf blobs) + `code_tracker/` full-file snapshots | tool calls and outputs are in protobuf blobs; needs a protobuf decode pass before it can be indexed |
+| Kiro IDE | `AppData/Roaming/Kiro/User/globalStorage/kiro.kiroagent/workspace-sessions/<base64-cwd>/<uuid>.json` | conversation JSON only — no tool calls, diffs or tokens are persisted |
+
+These follow the same adapter interface; see `voyager/adapters/base.py`.
+Surveys (schemas, resume/hook capabilities, per-field availability matrix)
+are in [docs/RECON.md](docs/RECON.md).
 
 ## Design
 
