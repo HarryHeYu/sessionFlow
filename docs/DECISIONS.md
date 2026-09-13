@@ -78,3 +78,19 @@ voyager 会话，事件按文件时间顺序拼接。
 **Reason**: 假装能恢复（比如只打印上下文）会误导用户。等确认了真实的 CLI 入口再开。
 
 **Consequences**: ZCode 恢复目前要去桌面端手动点。
+
+## D8 — Handoff 用"文件引用"注入而非 argv 传全文
+
+**Decision**: `voyager handoff` 把上下文包写成 Markdown 文件，目标 agent 的启动
+prompt 只有一句话："读这个文件接着干"（文件绝对路径附在 prompt 里）。
+
+**Reason**: ① Windows argv 上限 ~32K，超长上下文会炸；② 包含用户消息的全文
+塞进命令行需要处理层层转义/引号注入；③ 目标 agent 本来就会读文件——Codex/
+Claude/Grok 都是 agentic CLI，读文件比解析巨型参数更符合它们的工作方式。
+
+**Alternatives**: stdin 管道传全文（部分 CLI 不支持从 stdin 读初始 prompt）；
+把包写进目标 agent 自己的 session 格式（格式私有且易碎，正是本项目反对的）。
+
+**Consequences**: 目标 agent 必须能读文件系统（三者皆可）；包文件是普通
+Markdown，用户可以先人工审阅/删改再拉起。D7 的原则同样适用：DSH 等没有确认
+"初始 prompt" 入口的平台，只生成包文件并提示手动粘贴。

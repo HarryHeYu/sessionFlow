@@ -409,6 +409,42 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def cmd_handoff(args) -> int:
+    from .handoff import PROMPT_TARGETS, build_context_package, default_package_name, handoff_command
+    store = Store(args.db)
+    row = _resolve(store, args.session)
+
+    out = Path(args.output) if args.output else Path(default_package_name(row))
+    package = build_context_package(store, row)
+    out.write_text(package, encoding="utf-8")
+    print(f"context package: {out.resolve()} ({len(package)} chars)")
+
+    target = args.to
+    if not target:
+        print("next: pick a target agent, e.g. "
+              f"`voyager handoff {args.session} --to claude` "
+              f"(targets with direct launch: {', '.join(sorted(PROMPT_TARGETS))})")
+        return 0
+
+    argv = handoff_command(target, out)
+    if argv is None:
+        print(f"Direct handoff launch is not supported for '{target}'. "
+              f"Launchable targets: {', '.join(sorted(PROMPT_TARGETS))}. "
+              f"You can still paste {out.resolve()} into that agent manually.")
+        return 1
+    print(f"$ {argv[0]} \"<handoff prompt>\"")
+    if args.launch:
+        try:
+            return subprocess.call(argv)
+        except KeyboardInterrupt:
+            return 130
+        except OSError as e:
+            print(f"failed to launch: {e}", file=sys.stderr)
+            return 1
+    print("add --launch to start it now")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 
 def main(argv=None) -> int:
@@ -465,6 +501,13 @@ def main(argv=None) -> int:
     sp.add_argument("session")
     sp.add_argument("--file", help="filter by path substring")
     sp.set_defaults(func=cmd_diff)
+
+    sp = sub.add_parser("handoff", help="export a session as a context package for another agent")
+    sp.add_argument("session")
+    sp.add_argument("--to", help="target agent (claude, codex, grok)")
+    sp.add_argument("--output", "-o", help="package file path (default handoff-<provider>-<id>.md)")
+    sp.add_argument("--launch", action="store_true", help="launch the target agent with the package")
+    sp.set_defaults(func=cmd_handoff)
 
     sp = sub.add_parser("stats", help="index statistics")
     sp.set_defaults(func=cmd_stats)

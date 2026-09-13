@@ -55,8 +55,14 @@ voyager export <id> --format md   # 或 --format json（含原始事件）
 voyager resume <id>         # 调起原 Agent 恢复该会话
 voyager files <id>          # 该会话碰过哪些文件
 voyager diff <id>           # Claude 会话：从版本链重建前后 diff
+voyager handoff <id> --to codex   # 生成给另一个 agent 的上下文包
 voyager stats               # 索引统计
 ```
+
+**跨 Agent 接力**：`voyager handoff <id> --to codex` 会把会话提炼成一份自包含的
+上下文包（目标、指令、碰过的文件、执行过的命令、报错、工作停在哪），并给出目标
+agent 的启动命令；加 `--launch` 立即启动。目标 agent 被告知"读这个文件接着干"——
+`claude`、`codex`、`grok` 支持直接拉起；其他目标会给出生成的包文件手动粘贴。
 
 会话 ID 支持前缀匹配；前缀有歧义时会列出候选并退出，不会猜。
 
@@ -89,9 +95,8 @@ Provider 的文件只读不改。Adapter 把各平台事件翻译成统一的 `S
 
 ## 欢迎共建
 
-自然的下一步：交互式 TUI、更多平台适配器、跨 Agent 接力（`voyager handoff
-<id> --to codex` 生成统一上下文包）、以及一个实时录制层——把 Agent 的每一步
-操作录下来，让任何会话都能回放、或从任意一步换模型重跑。
+自然的下一步：交互式 TUI、更多平台适配器、以及一个实时录制层——把 Agent 的
+每一步操作录下来，让任何会话都能回放、或从任意一步换模型重跑。
 
 ## License
 

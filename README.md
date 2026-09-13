@@ -61,8 +61,17 @@ voyager export <id> --format md   # or --format json (includes raw events)
 voyager resume <id>         # launches the native agent on that session
 voyager files <id>          # files the session touched
 voyager diff <id>           # Claude sessions: rebuilt before/after diffs
+voyager handoff <id> --to codex   # context package for another agent
 voyager stats               # index statistics
 ```
+
+**Cross-agent handoff**: `voyager handoff <id> --to codex` extracts the
+session into a self-contained Context Package (goal, instructions, files
+touched, commands, errors, where the work stopped) and shows the launch
+command for the target agent; add `--launch` to start it immediately. The
+target agent is told to read the package file and continue the task —
+works for `claude`, `codex` and `grok`; other targets get the package file
+to paste manually.
 
 Session ids are matched by prefix; if a prefix is ambiguous Voyager lists
 the candidates and exits. `resume` runs the native agent's own command
@@ -102,9 +111,8 @@ Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 
 ## Ideas welcome
 
-Natural next steps: an interactive TUI, more platform adapters, cross-agent
-handoff (`voyager handoff <id> --to codex` → generated Context Package), and
-a recording layer that captures agent actions as they happen so any session
+Natural next steps: an interactive TUI, more platform adapters, and a
+recording layer that captures agent actions as they happen so any session
 can be replayed or re-run from a chosen step.
 
 ## License
