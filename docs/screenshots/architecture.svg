@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1424" height="880" viewBox="0 0 1424 880" shape-rendering="geometricPrecision">
+<rect width="1424" height="880" fill="#0c0c0c"/>
+<text x="462.0" y="76" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="32" text-anchor="start" fill="#f2f2f2">Voyager</text>
+<text x="606.0" y="86" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#5fd0d6">one index across every AI coding agent</text>
+<text x="712.0" y="109" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">8 platforms · 8 storage formats  →  one normalized local index  →  one query surface</text>
+<text x="242.0" y="155" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">YOUR AGENTS  (read-only adapters)</text>
+<text x="712.0" y="155" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">ONE INDEX</text>
+<text x="1182.0" y="155" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">USE IT FROM</text>
+<rect x="56" y="186" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="209" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Codex</text>
+<text x="76" y="228" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">rollout JSONL</text>
+<rect x="56" y="254" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="277" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Claude Code</text>
+<text x="76" y="296" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">project JSONL + file history</text>
+<rect x="56" y="322" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="345" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">ZCode</text>
+<text x="76" y="364" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">SQLite (session/message/part)</text>
+<rect x="56" y="390" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="413" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">DSH</text>
+<text x="76" y="432" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">zstd JSONL</text>
+<rect x="56" y="458" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="481" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Grok CLI</text>
+<text x="76" y="500" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">chat_history.jsonl + summary</text>
+<rect x="56" y="526" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="549" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Cursor</text>
+<text x="76" y="568" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">state.vscdb (SQLite KV)</text>
+<rect x="56" y="594" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="617" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Kiro</text>
+<text x="76" y="636" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">workspace-session JSON</text>
+<rect x="56" y="662" width="372" height="56" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="685" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Antigravity</text>
+<text x="76" y="704" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">conversation SQLite (protobuf)</text>
+<rect x="516" y="309" width="392" height="286" rx="16" fill="#0e282e" stroke="#5fd0d6" stroke-width="3"/>
+<text x="542" y="358" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="22" text-anchor="start" fill="#f2f2f2">Voyager Index</text>
+<text x="542" y="391" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="start" fill="#5fd0d6">~/.voyager/index.db</text>
+<text x="542" y="433" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="start" fill="#d0d0d0">normalized Session + Event model</text>
+<text x="542" y="463" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="start" fill="#d0d0d0">SQLite + FTS5 (trigram) → CJK search</text>
+<text x="542" y="493" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="start" fill="#d0d0d0">raw provider event kept alongside</text>
+<text x="542" y="523" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="start" fill="#d0d0d0">incremental: sources tracked by mtime+size</text>
+<text x="542" y="553" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="start" fill="#d0d0d0">idempotent; vanishes → pruned</text>
+<rect x="996" y="186" width="372" height="72" rx="12" fill="#10201a" stroke="#1a7856" stroke-width="2"/>
+<text x="1016" y="214" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#16b27c">search</text>
+<text x="1016" y="238" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">substring + CJK across every agent</text>
+<rect x="996" y="278" width="372" height="72" rx="12" fill="#10201a" stroke="#1a7856" stroke-width="2"/>
+<text x="1016" y="306" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#16b27c">repo timeline</text>
+<text x="1016" y="330" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">all agents on one project, in order</text>
+<rect x="996" y="370" width="372" height="72" rx="12" fill="#10201a" stroke="#1a7856" stroke-width="2"/>
+<text x="1016" y="398" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#16b27c">show / export</text>
+<text x="1016" y="422" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">timeline, Markdown, lossless JSON</text>
+<rect x="996" y="462" width="372" height="72" rx="12" fill="#10201a" stroke="#1a7856" stroke-width="2"/>
+<text x="1016" y="490" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#16b27c">resume / continue</text>
+<text x="1016" y="514" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">native CLI, or automatic handoff</text>
+<rect x="996" y="554" width="372" height="72" rx="12" fill="#10201a" stroke="#1a7856" stroke-width="2"/>
+<text x="1016" y="582" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#16b27c">handoff</text>
+<text x="1016" y="606" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">context package for another agent</text>
+<rect x="996" y="646" width="372" height="72" rx="12" fill="#10201a" stroke="#1a7856" stroke-width="2"/>
+<text x="1016" y="674" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#16b27c">MCP server</text>
+<text x="1016" y="698" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">agents query the index themselves</text>
+<line x1="472" y1="214" x2="472" y2="690" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="214" x2="472" y2="214" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="282" x2="472" y2="282" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="350" x2="472" y2="350" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="418" x2="472" y2="418" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="486" x2="472" y2="486" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="554" x2="472" y2="554" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="622" x2="472" y2="622" stroke="#6e747e" stroke-width="2"/>
+<line x1="428" y1="690" x2="472" y2="690" stroke="#6e747e" stroke-width="2"/>
+<line x1="472" y1="452" x2="516" y2="452" stroke="#6e747e" stroke-width="2"/>
+<polygon points="516,452 507,447 507,457" fill="#6e747e"/>
+<line x1="952" y1="222" x2="952" y2="682" stroke="#6e747e" stroke-width="2"/>
+<line x1="908" y1="452" x2="952" y2="452" stroke="#6e747e" stroke-width="2"/>
+<line x1="952" y1="222" x2="996" y2="222" stroke="#6e747e" stroke-width="2"/>
+<polygon points="996,222 987,217 987,227" fill="#6e747e"/>
+<line x1="952" y1="314" x2="996" y2="314" stroke="#6e747e" stroke-width="2"/>
+<polygon points="996,314 987,309 987,319" fill="#6e747e"/>
+<line x1="952" y1="406" x2="996" y2="406" stroke="#6e747e" stroke-width="2"/>
+<polygon points="996,406 987,401 987,411" fill="#6e747e"/>
+<line x1="952" y1="498" x2="996" y2="498" stroke="#6e747e" stroke-width="2"/>
+<polygon points="996,498 987,493 987,503" fill="#6e747e"/>
+<line x1="952" y1="590" x2="996" y2="590" stroke="#6e747e" stroke-width="2"/>
+<polygon points="996,590 987,585 987,595" fill="#6e747e"/>
+<line x1="952" y1="682" x2="996" y2="682" stroke="#6e747e" stroke-width="2"/>
+<polygon points="996,682 987,677 987,687" fill="#6e747e"/>
+<text x="712.0" y="782" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="middle" fill="#808690">Everything stays on your machine — no account, no cloud, no telemetry. Voyager only ever reads agent storage.</text>
+<text x="712.0" y="814" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="15" text-anchor="middle" fill="#f5db6f">pip install voyager  ·  voyager scan  ·  voyager search &quot;…&quot;  ·  voyager continue</text>
+</svg>

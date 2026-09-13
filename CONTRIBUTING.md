@@ -71,7 +71,7 @@ and CLI only know the normalized model (`model.py`). Every event keeps its
 
 ```sh
 pip install -e ".[all,dev]"
-python -m pytest tests/ -q            # the whole suite (66 tests, ~5s)
+python -m pytest tests/ -q            # the whole suite (69 tests, ~5s)
 python -m pytest tests/test_zcode.py  # one adapter
 python scripts/run_tests_core_only.py # simulate `pip install voyager` (no extras)
 ```
@@ -96,6 +96,21 @@ User-facing behavior changes must update **both** `README.md` and
 `README.zh-CN.md`, and `docs/DECISIONS.md` gets an entry whenever you make
 an architectural trade-off (format: Decision / Reason / Alternatives /
 Consequences).
+
+## Regenerating the architecture diagram
+
+The README diagram is generated from one layout definition, in both formats:
+
+```sh
+python scripts/make_diagram.py     # writes docs/screenshots/architecture.{png,svg}
+```
+
+Pillow ships in the `dev` extra. The script asserts its own balance (equal
+column widths and outer margins, equally tall left/right stacks, the index box
+on the canvas centre line, centred header/footer, no label wider than its box),
+and `tests/test_diagram.py` re-checks those invariants plus the committed
+assets — so a layout tweak that unbalances the picture fails the suite instead
+of quietly shipping.
 
 ## License
 

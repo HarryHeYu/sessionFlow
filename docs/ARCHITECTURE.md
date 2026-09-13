@@ -2,7 +2,10 @@
 
 ![架构图](screenshots/architecture.png)
 
-（图的生成脚本：`scripts/make_diagram.py`，改平台清单后重跑即可。）
+矢量版：`screenshots/architecture.svg`（同一份布局代码产出，便于继续微调）。
+生成脚本：`scripts/make_diagram.py` —— 改平台清单或文案后重跑即可；
+布局不变量（左右列等宽、左右堆叠等高、外边距一致、index 框居中、文字不溢出）
+由脚本内的 `_check_layout()` 与 `tests/test_diagram.py` 双重守住。
 
 ## 数据流
 

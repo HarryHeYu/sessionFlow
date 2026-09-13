@@ -1,22 +1,40 @@
-"""Render the Voyager architecture diagram (docs/screenshots/architecture.png).
+"""Render the Voyager architecture diagram.
 
-The README's job in one picture: 8 agents with 8 storage formats feed one
-normalized local index, which is then queryable from the CLI, another agent,
-or an MCP host. Drawn with Pillow so it stays reproducible (re-run after
-adding a platform: `python scripts/make_diagram.py`).
+Outputs (both from ONE layout definition, so they cannot drift apart):
+
+    docs/screenshots/architecture.png    raster, embedded in the READMEs
+    docs/screenshots/architecture.svg    vector, for further tweaking
+
+The picture in one line: 8 agents with 8 storage formats feed one normalized
+local index, which is then queryable from the CLI, another agent, or an MCP
+host. Re-run after adding a platform:
+
+    python scripts/make_diagram.py
+
+Layout rules enforced by `_check_layout()` (see the assertions): the three
+columns have equal outer margins and equal gaps, the left/right card stacks
+have the same width and the same total height, the index box sits exactly on
+the canvas centre line, and the header/footer text is centred.
 """
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-OUT = Path(__file__).resolve().parent.parent / "docs" / "screenshots" / "architecture.png"
+SHOTS = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
+OUT_PNG = SHOTS / "architecture.png"
+OUT_SVG = SHOTS / "architecture.svg"
 
+# --- palette (dark terminal) ------------------------------------------------
 BG = (12, 12, 12)
 PANEL = (22, 24, 28)
 PANEL_EDGE = (58, 64, 74)
+PANEL_GREEN = (16, 32, 26)
+PANEL_GREEN_EDGE = (26, 120, 86)
+PANEL_CYAN = (14, 40, 46)
 FG = (208, 208, 208)
 DIM = (128, 134, 144)
 WHITE = (242, 242, 242)
@@ -31,10 +49,58 @@ FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     "/System/Library/Fonts/Menlo.ttc",
 ]
+# fallback for glyphs the mono font lacks (→ · — …)
+SYMBOL_CANDIDATES = [
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/segoeui.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+]
+SVG_FONTS = ("Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace")
 
-W, H = 1360, 820
+# --- canvas -----------------------------------------------------------------
+# width = 2*MARGIN + COL_W + GAP + MID_W + GAP + COL_W
+W, H = 1424, 880
+MARGIN = 56
 
-# provider column: (name, storage format)
+# --- grid -------------------------------------------------------------------
+COL_W = 372          # left and right column width (identical: equal weight)
+MID_W = 392          # wide enough for the longest line + padding (see fits())
+GAP = 88             # horizontal gap between two neighbouring columns
+CARD_H = 56          # left card height
+CARD_GAP = 12
+RCARD_H = 72         # right cards are taller so both stacks end up equally tall
+RCARD_GAP = 20
+
+CARD_PAD = 20        # text inset inside the side cards
+MID_PAD = 26         # text inset inside the index box
+
+TITLE_Y, TITLE_SIZE = 52, 32
+TAG_SIZE = 19
+SUB_Y, SUB_SIZE = 96, 17
+HEAD_Y, HEAD_SIZE = 142, 17
+COL_TOP = 186
+MID_H = 286
+
+FOOT_SIZE = 15
+FOOT_LINE_H = 22
+
+# --- content (unchanged) ----------------------------------------------------
+TAGLINE = "one index across every AI coding agent"
+SUBTITLE = ("8 platforms · 8 storage formats  →  one normalized local index  →  "
+            "one query surface")
+HEAD_LEFT = "YOUR AGENTS  (read-only adapters)"
+HEAD_MID = "ONE INDEX"
+HEAD_RIGHT = "USE IT FROM"
+MID_TITLE = "Voyager Index"
+MID_PATH = "~/.voyager/index.db"
+MID_LINES = [
+    "normalized Session + Event model",
+    "SQLite + FTS5 (trigram) → CJK search",
+    "raw provider event kept alongside",
+    "incremental: sources tracked by mtime+size",
+    "idempotent; vanishes → pruned",
+]
 PROVIDERS = [
     ("Codex", "rollout JSONL"),
     ("Claude Code", "project JSONL + file history"),
@@ -45,8 +111,6 @@ PROVIDERS = [
     ("Kiro", "workspace-session JSON"),
     ("Antigravity", "conversation SQLite (protobuf)"),
 ]
-
-# right column: (capability, what it gives you)
 OUTPUTS = [
     ("search", "substring + CJK across every agent"),
     ("repo timeline", "all agents on one project, in order"),
@@ -55,136 +119,394 @@ OUTPUTS = [
     ("handoff", "context package for another agent"),
     ("MCP server", "agents query the index themselves"),
 ]
+FOOTER_1 = ("Everything stays on your machine — no account, no cloud, "
+            "no telemetry. Voyager only ever reads agent storage.")
+FOOTER_2 = ("pip install voyager  ·  voyager scan  ·  voyager search \"…\"  ·  "
+            "voyager continue")
 
 
-def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    for path in FONT_CANDIDATES:
+def _layout() -> dict:
+    """Every coordinate of the picture, derived from the grid constants."""
+    lx = MARGIN
+    l_right = lx + COL_W
+    mx = l_right + GAP
+    m_right = mx + MID_W
+    rx = m_right + GAP
+    r_right = rx + COL_W
+    assert r_right == W - MARGIN, "columns do not fill the canvas symmetrically"
+
+    left_span = len(PROVIDERS) * CARD_H + (len(PROVIDERS) - 1) * CARD_GAP
+    right_span = len(OUTPUTS) * RCARD_H + (len(OUTPUTS) - 1) * RCARD_GAP
+    col_bottom = COL_TOP + max(left_span, right_span)
+    col_centre = (COL_TOP + col_bottom) / 2
+
+    mid_top = int(col_centre - MID_H / 2)
+    foot2_y = H - MARGIN - FOOT_LINE_H
+    foot1_y = foot2_y - 32
+
+    def left_card(i):
+        y = COL_TOP + i * (CARD_H + CARD_GAP)
+        return y, y + CARD_H
+
+    def right_card(i):
+        y = COL_TOP + i * (RCARD_H + RCARD_GAP)
+        return y, y + RCARD_H
+
+    return {
+        "lx": lx, "l_right": l_right, "mx": mx, "m_right": m_right,
+        "rx": rx, "r_right": r_right,
+        "bus_left": (l_right + mx) // 2, "bus_right": (m_right + rx) // 2,
+        "col_centre_x": (lx + r_right) / 2,
+        "left_span": left_span, "right_span": right_span,
+        "col_bottom": col_bottom, "col_centre_y": col_centre,
+        "mid_top": mid_top, "mid_bottom": mid_top + MID_H,
+        "mid_centre_x": (mx + m_right) / 2,
+        "head_left_cx": (lx + l_right) / 2,
+        "head_mid_cx": (mx + m_right) / 2,
+        "head_right_cx": (rx + r_right) / 2,
+        "left_card": left_card, "right_card": right_card,
+        "foot1_y": foot1_y, "foot2_y": foot2_y,
+        "mid_y": int(col_centre),
+    }
+
+
+def _check_layout(L: dict) -> None:
+    """Fail loudly if an edit breaks the balance of the picture."""
+    assert L["left_span"] == L["right_span"], (
+        f"left/right stacks differ in height: {L['left_span']} vs {L['right_span']}"
+    )
+    assert L["mx"] - L["l_right"] == L["rx"] - L["m_right"] == GAP, "gaps differ"
+    assert L["lx"] == W - L["r_right"] == MARGIN, "outer margins differ"
+    assert L["mid_centre_x"] == L["col_centre_x"] == W / 2, "index box off-centre"
+    assert L["bus_left"] - L["l_right"] == L["rx"] - L["bus_right"], "buses uneven"
+    assert L["mid_top"] > HEAD_Y + 24, "index box collides with the column headings"
+    assert L["mid_bottom"] < L["foot1_y"] - 24, "index box runs into the footer"
+    assert abs((L["mid_top"] + L["mid_bottom"]) / 2 - L["col_centre_y"]) < 1, (
+        "index box is not vertically centred on the columns"
+    )
+    assert abs(L["col_centre_y"] - H / 2) <= 16, (
+        f"the card stacks are not optically centred: their centre {L['col_centre_y']} "
+        f"is {L['col_centre_y'] - H / 2:+.0f}px off the canvas centre"
+    )
+    assert L["col_bottom"] < L["foot1_y"] - 24, "columns run into the footer"
+    assert L["foot2_y"] + FOOT_LINE_H == H - MARGIN, "bottom margin is off"
+    assert TITLE_Y == MARGIN - 4, "top margin is off"
+    _check_text_fits()
+
+
+def _check_text_fits() -> None:
+    """No label may overflow the box it sits in (the old middle box did)."""
+    side = COL_W - 2 * CARD_PAD
+    middle = MID_W - 2 * MID_PAD
+    full = W - 2 * MARGIN
+    for name, fmt in PROVIDERS:
+        assert text_width(name, 19) <= side, f"provider name too wide: {name}"
+        assert text_width(fmt, 14) <= side, f"provider format too wide: {fmt}"
+    for name, what in OUTPUTS:
+        assert text_width(name, 19) <= side, f"use-case name too wide: {name}"
+        assert text_width(what, 14) <= side, f"use-case text too wide: {what}"
+    for line in MID_LINES:
+        assert text_width(line, 15) <= middle, f"index line too wide: {line}"
+    for label in (HEAD_LEFT,):
+        assert text_width(label, HEAD_SIZE) <= COL_W, f"heading too wide: {label}"
+    for label in (HEAD_MID,):
+        assert text_width(label, HEAD_SIZE) <= MID_W, f"heading too wide: {label}"
+    for line, size in ((SUBTITLE, SUB_SIZE), (FOOTER_1, FOOT_SIZE),
+                       (FOOTER_2, FOOT_SIZE)):
+        assert text_width(line, size) <= full, f"centred line too wide: {line[:30]}"
+    header = (text_width("Voyager", TITLE_SIZE) + 18
+              + text_width(TAGLINE, TAG_SIZE))
+    assert header <= full, "header is wider than the content area"
+
+
+# ---------------------------------------------------------------------------
+# fonts (Pillow) — per-glyph fallback so → · — never turn into blanks
+# ---------------------------------------------------------------------------
+
+_FONT_CACHE: dict = {}
+_GLYPH_CACHE: dict = {}
+
+
+def _truetype(candidates, size):
+    for path in candidates:
         p = Path(path)
         if p.is_file():
             try:
-                return ImageFont.truetype(str(p), size, index=1 if bold else 0)
+                return ImageFont.truetype(str(p), size)
             except OSError:
                 continue
-    return ImageFont.load_default()
+    return None
 
 
-def box(d: ImageDraw.ImageDraw, xy, fill, edge, radius=10, width=2):
-    d.rounded_rectangle(xy, radius=radius, fill=fill, outline=edge, width=width)
+def font(size: int):
+    if size not in _FONT_CACHE:
+        f = _truetype(FONT_CANDIDATES, size) or ImageFont.load_default()
+        _FONT_CACHE[size] = f
+    return _FONT_CACHE[size]
 
 
-def arrow(d: ImageDraw.ImageDraw, points, head_at_end=True):
-    d.line(points, fill=ARROW, width=2, joint="curve")
-    if not head_at_end:
+def symbol_font(size: int):
+    return _truetype(SYMBOL_CANDIDATES, size)
+
+
+def has_glyph(f, ch: str) -> bool:
+    """True when the font actually has a glyph (missing glyphs render empty)."""
+    key = (id(f), ch)
+    if key not in _GLYPH_CACHE:
+        try:
+            _GLYPH_CACHE[key] = f.getmask(ch).getbbox() is not None
+        except Exception:
+            _GLYPH_CACHE[key] = True
+    return _GLYPH_CACHE[key]
+
+
+def text_width(s: str, size: int) -> float:
+    f = font(size)
+    total = 0.0
+    for ch in s:
+        total += f.getlength(ch) if has_glyph(f, ch) else _fallback_len(ch, size)
+    return total
+
+
+def _fallback_len(ch: str, size: int) -> float:
+    sym = symbol_font(size)
+    return sym.getlength(ch) if sym else font(size).getlength("M")
+
+
+def draw_text(d, x, y, s, size, fill):
+    """Left-anchored text at (x, y) with per-glyph font fallback."""
+    f, sym = font(size), symbol_font(size)
+    cx = x
+    for ch in s:
+        use = f if (has_glyph(f, ch) or sym is None) else sym
+        d.text((cx, y), ch, font=use, fill=fill)
+        cx += use.getlength(ch)
+
+
+def draw_text_center(d, cx, y, s, size, fill):
+    draw_text(d, cx - text_width(s, size) / 2, y, s, size, fill)
+
+
+def draw_text_pair_center(d, cx, y, left, left_size, left_fill,
+                          right, right_size, right_fill, gap=18):
+    """Two styled runs on one centred line, e.g. `Voyager` + tagline."""
+    total = text_width(left, left_size) + gap + text_width(right, right_size)
+    x = cx - total / 2
+    draw_text(d, x, y, left, left_size, left_fill)
+    draw_text(d, x + text_width(left, left_size) + gap, y + (left_size - right_size)
+              + 6, right, right_size, right_fill)
+
+
+# ---------------------------------------------------------------------------
+# raster renderer
+# ---------------------------------------------------------------------------
+
+def _arrow(d, p0, p1, head=True):
+    d.line([p0, p1], fill=ARROW, width=2)
+    if not head:
         return
-    (x1, y1), (x2, y2) = points[-2], points[-1]
-    if x2 == x1:                       # vertical
-        d.polygon([(x2, y2), (x2 - 5, y2 - 9 if y2 > y1 else y2 + 9),
-                   (x2 + 5, y2 - 9 if y2 > y1 else y2 + 9)], fill=ARROW)
-    else:                              # horizontal
-        d.polygon([(x2, y2), (x2 - 9 if x2 > x1 else x2 + 9, y2 - 5),
-                   (x2 - 9 if x2 > x1 else x2 + 9, y2 + 5)], fill=ARROW)
+    (x0, y0), (x1, y1) = p0, p1
+    if y0 == y1:                                   # horizontal
+        s = 9 if x1 > x0 else -9
+        d.polygon([(x1, y1), (x1 - s, y1 - 5), (x1 - s, y1 + 5)], fill=ARROW)
+    else:                                          # vertical
+        s = 9 if y1 > y0 else -9
+        d.polygon([(x1, y1), (x1 - 5, y1 - s), (x1 + 5, y1 - s)], fill=ARROW)
 
 
-def render() -> Path:
+def _box(d, x0, y0, x1, y1, fill, edge, radius=12, width=2):
+    d.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=fill,
+                        outline=edge, width=width)
+
+
+def render_png(L: dict) -> Path:
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
+    cx = W / 2
 
-    f_title = load_font(32)
-    f_sub = load_font(19)
-    f_col = load_font(18)
-    f_name = load_font(20)
-    f_small = load_font(16)
-    f_diag = load_font(22)
+    # ---- header (centred) --------------------------------------------------
+    draw_text_pair_center(d, cx, TITLE_Y, "Voyager", TITLE_SIZE, WHITE,
+                          TAGLINE, TAG_SIZE, CYAN)
+    draw_text_center(d, cx, SUB_Y, SUBTITLE, SUB_SIZE, DIM)
 
-    d.text((44, 34), "Voyager", font=f_title, fill=WHITE)
-    d.text((160, 42), "one index across every AI coding agent", font=f_sub, fill=CYAN)
-    d.text((44, 84),
-           "8 platforms · 8 storage formats  →  one normalized local index  →  "
-           "one query surface",
-           font=f_sub, fill=DIM)
+    # ---- column headings (one row, centred over each column) ---------------
+    draw_text_center(d, L["head_left_cx"], HEAD_Y, HEAD_LEFT, HEAD_SIZE, DIM)
+    draw_text_center(d, L["head_mid_cx"], HEAD_Y, HEAD_MID, HEAD_SIZE, DIM)
+    draw_text_center(d, L["head_right_cx"], HEAD_Y, HEAD_RIGHT, HEAD_SIZE, DIM)
 
-    # ---- left: providers ---------------------------------------------------
-    lx, lw, lh, gap = 44, 430, 56, 14
-    ly0 = 160
-    d.text((lx, 132), "YOUR AGENTS  (read-only adapters)", font=f_col, fill=DIM)
+    # ---- left: agents ------------------------------------------------------
     for i, (name, fmt) in enumerate(PROVIDERS):
-        y = ly0 + i * (lh + gap)
-        box(d, [lx, y, lx + lw, y + lh], PANEL, PANEL_EDGE)
-        d.text((lx + 18, y + 8), name, font=f_name, fill=FG)
-        d.text((lx + 18, y + 33), fmt, font=f_small, fill=DIM)
+        y0, y1 = L["left_card"](i)
+        _box(d, L["lx"], y0, L["l_right"], y1, PANEL, PANEL_EDGE)
+        draw_text(d, L["lx"] + CARD_PAD, y0 + 8, name, 19, FG)
+        draw_text(d, L["lx"] + CARD_PAD, y0 + 31, fmt, 14, DIM)
 
     # ---- middle: the index -------------------------------------------------
-    mx, mw = 560, 330
-    my, mh = 330, 210
-    d.text((mx, 132), "ONE INDEX", font=f_col, fill=DIM)
-    box(d, [mx, my, mx + mw, my + mh], (14, 40, 46), CYAN, radius=14, width=3)
-    d.text((mx + 24, my + 20), "Voyager Index", font=f_diag, fill=WHITE)
-    d.text((mx + 24, my + 54), "~/.voyager/index.db", font=f_small, fill=CYAN)
-    for j, line in enumerate([
-        "normalized Session + Event model",
-        "SQLite + FTS5 (trigram) → CJK search",
-        "raw provider event kept alongside",
-        "incremental: sources tracked by mtime+size",
-        "idempotent; vanishes → pruned",
-    ]):
-        d.text((mx + 24, my + 88 + j * 24), line, font=f_small, fill=FG)
+    _box(d, L["mx"], L["mid_top"], L["m_right"], L["mid_bottom"],
+         PANEL_CYAN, CYAN, radius=16, width=3)
+    draw_text(d, L["mx"] + MID_PAD, L["mid_top"] + 32, MID_TITLE, 22, WHITE)
+    draw_text(d, L["mx"] + MID_PAD, L["mid_top"] + 70, MID_PATH, 15, CYAN)
+    for j, line in enumerate(MID_LINES):
+        draw_text(d, L["mx"] + MID_PAD, L["mid_top"] + 112 + j * 30, line, 15, FG)
 
     # ---- right: how you use it --------------------------------------------
-    rx, rw, rh, rgap = 960, 356, 56, 24
-    ry0 = 200
-    d.text((rx, 132), "USE IT FROM", font=f_col, fill=DIM)
     for i, (name, what) in enumerate(OUTPUTS):
-        y = ry0 + i * (rh + rgap)
-        box(d, [rx, y, rx + rw, y + rh], (16, 32, 26), (26, 120, 86))
-        d.text((rx + 18, y + 8), name, font=f_name, fill=GREEN)
-        d.text((rx + 18, y + 33), what, font=f_small, fill=DIM)
+        y0, y1 = L["right_card"](i)
+        _box(d, L["rx"], y0, L["r_right"], y1, PANEL_GREEN, PANEL_GREEN_EDGE)
+        draw_text(d, L["rx"] + CARD_PAD, y0 + 13, name, 19, GREEN)
+        draw_text(d, L["rx"] + CARD_PAD, y0 + 41, what, 14, DIM)
 
-    # ---- connectors: providers -> bus -> index -----------------------------
-    bus_x = 508
-    mid_y = my + mh // 2
-    arrow(d, [(bus_x, ly0 + 20), (bus_x, ly0 + 7 * (lh + gap) + lh - 20)])
+    # ---- connectors: agents -> bus -> index -> bus -> use cases ------------
+    mid_y = L["mid_y"]
+    first_l, last_l = L["left_card"](0), L["left_card"](len(PROVIDERS) - 1)
+    d.line([(L["bus_left"], (first_l[0] + first_l[1]) // 2),
+            (L["bus_left"], (last_l[0] + last_l[1]) // 2)], fill=ARROW, width=2)
     for i in range(len(PROVIDERS)):
-        y = ly0 + i * (lh + gap) + lh // 2
-        arrow(d, [(lx + lw, y), (bus_x, y)], head_at_end=False)
-    arrow(d, [(bus_x, mid_y), (mx, mid_y)])
+        y0, y1 = L["left_card"](i)
+        _arrow(d, (L["l_right"], (y0 + y1) // 2), (L["bus_left"], (y0 + y1) // 2),
+               head=False)
+    _arrow(d, (L["bus_left"], mid_y), (L["mx"], mid_y))
 
-    # ---- connectors: index -> bus -> outputs -------------------------------
-    bus2_x = 916
-    arrow(d, [(bus2_x, ry0 + 20), (bus2_x, ry0 + 7 * (rh + rgap) + rh - 20)])
-    arrow(d, [(mx + mw, mid_y), (bus2_x, mid_y)], head_at_end=False)
+    first_r, last_r = L["right_card"](0), L["right_card"](len(OUTPUTS) - 1)
+    d.line([(L["bus_right"], (first_r[0] + first_r[1]) // 2),
+            (L["bus_right"], (last_r[0] + last_r[1]) // 2)], fill=ARROW, width=2)
+    _arrow(d, (L["m_right"], mid_y), (L["bus_right"], mid_y), head=False)
     for i in range(len(OUTPUTS)):
-        y = ry0 + i * (rh + rgap) + rh // 2
-        arrow(d, [(bus2_x, y), (rx, y)])
+        y0, y1 = L["right_card"](i)
+        _arrow(d, (L["bus_right"], (y0 + y1) // 2), (L["rx"], (y0 + y1) // 2))
 
-    # ---- footnote ----------------------------------------------------------
-    d.text((44, H - 58),
-           "Everything stays on your machine — no account, no cloud, no telemetry. "
-           "Voyager only ever reads agent storage.",
-           font=f_small, fill=DIM)
-    d.text((44, H - 34),
-           "pip install voyager  ·  voyager scan  ·  voyager search \"…\"  ·  "
-           "voyager continue",
-           font=f_small, fill=YELLOW)
+    # ---- footer (centred) --------------------------------------------------
+    draw_text_center(d, cx, L["foot1_y"], FOOTER_1, FOOT_SIZE, DIM)
+    draw_text_center(d, cx, L["foot2_y"], FOOTER_2, FOOT_SIZE, YELLOW)
 
-    _check_layout(ly0, lh, gap, ry0, rh, rgap, my, mh, ly0 + 7 * (lh + gap) + lh,
-                  ry0 + 5 * (rh + rgap) + rh)
-
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    img.save(OUT, optimize=True)
-    print(f"saved {OUT} ({img.width}x{img.height}, {OUT.stat().st_size // 1024} KB)")
-    return OUT
+    OUT_PNG.parent.mkdir(parents=True, exist_ok=True)
+    img.save(OUT_PNG, optimize=True)
+    print(f"saved {OUT_PNG} ({img.width}x{img.height}, "
+          f"{OUT_PNG.stat().st_size // 1024} KB)")
+    return OUT_PNG
 
 
-def _check_layout(ly0, lh, gap, ry0, rh, rgap, my, mh, left_bottom, right_bottom):
-    """Fail loudly if a later edit makes the columns collide or overflow."""
-    assert left_bottom < H - 70, f"provider column overlaps the footer: {left_bottom}"
-    assert right_bottom < H - 70, f"output column overlaps the footer: {right_bottom}"
-    assert ly0 + lh + gap > ly0 + lh, "provider boxes overlap"
-    assert ry0 + rh + rgap > ry0 + rh, "output boxes overlap"
-    assert my > 132 and my + mh < H - 70, "index box out of bounds"
-    assert abs((ly0 + left_bottom) / 2 - (my + mh / 2)) < 40, "index box not centred"
-    assert abs((ry0 + right_bottom) / 2 - (my + mh / 2)) < 40, "outputs not centred"
+# ---------------------------------------------------------------------------
+# vector renderer (same layout, same coordinates)
+# ---------------------------------------------------------------------------
+
+def _hex(rgb) -> str:
+    return "#%02x%02x%02x" % rgb
+
+
+class _Svg:
+    def __init__(self):
+        self.parts: list[str] = []
+
+    def rect(self, x0, y0, x1, y1, fill, stroke, radius=12, width=2):
+        self.parts.append(
+            f'<rect x="{x0}" y="{y0}" width="{x1 - x0}" height="{y1 - y0}" '
+            f'rx="{radius}" fill="{_hex(fill)}" stroke="{_hex(stroke)}" '
+            f'stroke-width="{width}"/>'
+        )
+
+    def line(self, x0, y0, x1, y1, colour=ARROW, width=2):
+        self.parts.append(
+            f'<line x1="{x0}" y1="{y0}" x2="{x1}" y2="{y1}" '
+            f'stroke="{_hex(colour)}" stroke-width="{width}"/>'
+        )
+
+    def polygon(self, points, fill=ARROW):
+        pts = " ".join(f"{x},{y}" for x, y in points)
+        self.parts.append(f'<polygon points="{pts}" fill="{_hex(fill)}"/>')
+
+    def text(self, x, y_top, s, size, fill, anchor="start"):
+        """`y_top` matches the raster renderer; SVG wants the baseline."""
+        ascent = font(size).getmetrics()[0]
+        self.parts.append(
+            f'<text x="{round(x, 1)}" y="{round(y_top + ascent, 1)}" '
+            f'font-family="{SVG_FONTS}" font-size="{size}" '
+            f'text-anchor="{anchor}" fill="{_hex(fill)}">'
+            f'{html.escape(s)}</text>'
+        )
+
+    def text_center(self, cx, y_top, s, size, fill):
+        self.text(cx, y_top, s, size, fill, anchor="middle")
+
+    def render(self) -> str:
+        head = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" '
+                f'height="{H}" viewBox="0 0 {W} {H}" '
+                f'shape-rendering="geometricPrecision">\n'
+                f'<rect width="{W}" height="{H}" fill="{_hex(BG)}"/>\n')
+        return head + "\n".join(self.parts) + "\n</svg>\n"
+
+
+def render_svg(L: dict) -> Path:
+    s = _Svg()
+    cx = W / 2
+
+    total = text_width("Voyager", TITLE_SIZE) + 18 + text_width(TAGLINE, TAG_SIZE)
+    x = cx - total / 2
+    s.text(x, TITLE_Y, "Voyager", TITLE_SIZE, WHITE)
+    s.text(x + text_width("Voyager", TITLE_SIZE) + 18,
+           TITLE_Y + (TITLE_SIZE - TAG_SIZE) + 6, TAGLINE, TAG_SIZE, CYAN)
+    s.text_center(cx, SUB_Y, SUBTITLE, SUB_SIZE, DIM)
+
+    s.text_center(L["head_left_cx"], HEAD_Y, HEAD_LEFT, HEAD_SIZE, DIM)
+    s.text_center(L["head_mid_cx"], HEAD_Y, HEAD_MID, HEAD_SIZE, DIM)
+    s.text_center(L["head_right_cx"], HEAD_Y, HEAD_RIGHT, HEAD_SIZE, DIM)
+
+    for i, (name, fmt) in enumerate(PROVIDERS):
+        y0, y1 = L["left_card"](i)
+        s.rect(L["lx"], y0, L["l_right"], y1, PANEL, PANEL_EDGE)
+        s.text(L["lx"] + CARD_PAD, y0 + 8, name, 19, FG)
+        s.text(L["lx"] + CARD_PAD, y0 + 31, fmt, 14, DIM)
+
+    s.rect(L["mx"], L["mid_top"], L["m_right"], L["mid_bottom"],
+           PANEL_CYAN, CYAN, radius=16, width=3)
+    s.text(L["mx"] + MID_PAD, L["mid_top"] + 32, MID_TITLE, 22, WHITE)
+    s.text(L["mx"] + MID_PAD, L["mid_top"] + 70, MID_PATH, 15, CYAN)
+    for j, line in enumerate(MID_LINES):
+        s.text(L["mx"] + MID_PAD, L["mid_top"] + 112 + j * 30, line, 15, FG)
+
+    for i, (name, what) in enumerate(OUTPUTS):
+        y0, y1 = L["right_card"](i)
+        s.rect(L["rx"], y0, L["r_right"], y1, PANEL_GREEN, PANEL_GREEN_EDGE)
+        s.text(L["rx"] + CARD_PAD, y0 + 13, name, 19, GREEN)
+        s.text(L["rx"] + CARD_PAD, y0 + 41, what, 14, DIM)
+
+    mid_y = L["mid_y"]
+    first_l, last_l = L["left_card"](0), L["left_card"](len(PROVIDERS) - 1)
+    s.line(L["bus_left"], (first_l[0] + first_l[1]) // 2,
+           L["bus_left"], (last_l[0] + last_l[1]) // 2)
+    for i in range(len(PROVIDERS)):
+        y0, y1 = L["left_card"](i)
+        s.line(L["l_right"], (y0 + y1) // 2, L["bus_left"], (y0 + y1) // 2)
+    s.line(L["bus_left"], mid_y, L["mx"], mid_y)
+    s.polygon([(L["mx"], mid_y), (L["mx"] - 9, mid_y - 5), (L["mx"] - 9, mid_y + 5)])
+
+    first_r, last_r = L["right_card"](0), L["right_card"](len(OUTPUTS) - 1)
+    s.line(L["bus_right"], (first_r[0] + first_r[1]) // 2,
+           L["bus_right"], (last_r[0] + last_r[1]) // 2)
+    s.line(L["m_right"], mid_y, L["bus_right"], mid_y)
+    for i in range(len(OUTPUTS)):
+        y0, y1 = L["right_card"](i)
+        s.line(L["bus_right"], (y0 + y1) // 2, L["rx"], (y0 + y1) // 2)
+        s.polygon([(L["rx"], (y0 + y1) // 2), (L["rx"] - 9, (y0 + y1) // 2 - 5),
+                   (L["rx"] - 9, (y0 + y1) // 2 + 5)])
+
+    s.text_center(cx, L["foot1_y"], FOOTER_1, FOOT_SIZE, DIM)
+    s.text_center(cx, L["foot2_y"], FOOTER_2, FOOT_SIZE, YELLOW)
+
+    OUT_SVG.write_text(s.render(), encoding="utf-8")
+    print(f"saved {OUT_SVG} ({OUT_SVG.stat().st_size // 1024} KB)")
+    return OUT_SVG
+
+
+def main() -> None:
+    L = _layout()
+    _check_layout(L)
+    print(f"canvas {W}x{H} · margins {MARGIN}px · columns "
+          f"{COL_W}/{MID_W}/{COL_W} · gaps {GAP}px · stacks "
+          f"{L['left_span']}px each")
+    render_png(L)
+    render_svg(L)
 
 
 if __name__ == "__main__":
-    render()
+    main()

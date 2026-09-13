@@ -6,7 +6,7 @@ All notable changes to Voyager are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
-- **Test suite + CI** — the project went from one test file to 66 tests:
+- **Test suite + CI** — the project went from one test file to 69 tests:
   per-adapter regression tests for all 8 platforms against synthetic
   fixtures (`tests/fixtures/`, no real session data), plus store, export,
   handoff, CLI and MCP tests. `.github/workflows/test.yml` runs them on
@@ -77,6 +77,19 @@ All notable changes to Voyager are documented here. Format loosely follows
   `git@host:org/repo.git` URLs in the init payload are now recognized too.
 
 ### Changed
+- **Architecture diagram re-laid out** (`scripts/make_diagram.py`): the three
+  columns are now a real grid — left/right card stacks have the same width
+  (372px) and the same height (532px), both outer margins are 56px, the two
+  column gaps are equal (88px), and the `Voyager Index` box sits exactly on the
+  canvas centre line, vertically centred on the stacks. Title, subtitle and
+  footer lines are centred instead of left-aligned, the column headings share
+  one row, and the vertical bus lines are plain lines again (the old version
+  drew arrowheads on them, which read as a stray downward arrow). Canvas is
+  1424×880 (≈ golden ratio) and the middle box is wide enough for its longest
+  line — the old one overflowed its box by 32px. A vector version,
+  `docs/screenshots/architecture.svg`, comes out of the same layout, and
+  `tests/test_diagram.py` guards the invariants (`pillow` moved into the `dev`
+  extra so CI checks it too).
 - Install docs lead with an isolated CLI install (`pipx install
   "voyager[all] @ git+…"`) instead of the developer-only `pip install -e .`.
 - `CONTRIBUTING.md` documents the fixture-based test workflow and the rule
