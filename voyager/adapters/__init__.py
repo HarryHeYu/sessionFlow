@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import importlib
 
-_MODULES = ["codex", "claude", "zcode", "dsh"]
+_MODULES = ["codex", "claude", "zcode", "dsh", "grok", "cursor", "kiro",
+            "antigravity"]
 
 _loaded = False
 

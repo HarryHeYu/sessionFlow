@@ -77,23 +77,15 @@ explicitly instead of pretending.
 | Claude Code | project JSONL + file-history | ✅ | ✅ | ✅ | ✅ version chain | ✅ | ✅ `claude --resume` |
 | ZCode | SQLite (`~/.zcode/cli/db`) | ✅ | ✅ | ✅ | ⚠️ file events (edits stay in raw) | ✅ usage tables | ❌ desktop only |
 | DSH | zstd JSONL (`~/.dsh/sessions`) | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ `dsh --resume` |
+| Grok CLI | `chat_history.jsonl` + `summary.json` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ `grok -r` |
+| Cursor | `state.vscdb` (SQLite) | ✅ | ✅ | ❌ | ⚠️ in raw | ⚠️ | ❌ IDE only |
+| Kiro IDE | workspace-session JSON | ✅ | ❌ not persisted | ❌ | ❌ | ❌ | ❌ IDE only |
+| Antigravity | conversation SQLite (protobuf) | ⚠️ heuristic | ⚠️ heuristic | ⚠️ text | ⚠️ snapshots on disk | ❌ | ❌ IDE only |
 
-Adapters for Grok, Cursor, Antigravity and Kiro are designed in
-[docs/RECON.md](docs/RECON.md) (a full survey of where each tool keeps its
-local data, and what it records) and are straightforward to add.
-
-### More platforms ( surveyed, adapters not yet implemented )
-
-| Platform | Local data source | What's in there |
-|---|---|---|
-| Grok CLI | `~/.grok/sessions/<urlencoded-cwd>/session-<uuid>/` — `chat_history.jsonl`, `events.jsonl`, `summary.json` | messages, tool calls+results, git root/branch/commit in `summary.json`; resume via `grok -r <id>`; reasoning is server-encrypted |
-| Cursor | `AppData/Roaming/Cursor/User/globalStorage/state.vscdb` (SQLite, table `cursorDiskKV`) | sessions as `composerData:*`, messages as `bubbleId:*` with `toolFormerData`, the richest diff/checkpoint data of all surveyed tools |
-| Antigravity | `~/.gemini/antigravity/conversations/<uuid>.db` (SQLite, protobuf blobs) + `code_tracker/` full-file snapshots | tool calls and outputs are in protobuf blobs; needs a protobuf decode pass before it can be indexed |
-| Kiro IDE | `AppData/Roaming/Kiro/User/globalStorage/kiro.kiroagent/workspace-sessions/<base64-cwd>/<uuid>.json` | conversation JSON only — no tool calls, diffs or tokens are persisted |
-
-These follow the same adapter interface; see `voyager/adapters/base.py`.
-Surveys (schemas, resume/hook capabilities, per-field availability matrix)
-are in [docs/RECON.md](docs/RECON.md).
+Cursor and Antigravity adapters are marked experimental: Cursor reads its
+key-value store read-only and Antigravity decodes protobuf blobs
+heuristically (no public schema). Full per-field availability matrix and
+data-source paths for every tool are in [docs/RECON.md](docs/RECON.md).
 
 ## Design
 

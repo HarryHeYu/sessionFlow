@@ -68,21 +68,14 @@ voyager stats               # 索引统计
 | Claude Code | project JSONL + file-history | ✅ | ✅ | ✅ | ✅ 版本链 | ✅ | ✅ `claude --resume` |
 | ZCode | SQLite（`~/.zcode/cli/db`） | ✅ | ✅ | ✅ | ⚠️ 文件事件（编辑内容在 raw 里） | ✅ 用量表 | ❌ 仅桌面端 |
 | DSH | zstd JSONL（`~/.dsh/sessions`） | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ `dsh --resume` |
+| Grok CLI | `chat_history.jsonl` + `summary.json` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ `grok -r` |
+| Cursor | `state.vscdb`（SQLite） | ✅ | ✅ | ❌ | ⚠️ 在 raw 里 | ⚠️ | ❌ 仅 IDE |
+| Kiro IDE | workspace-session JSON | ✅ | ❌ 未持久化 | ❌ | ❌ | ❌ | ❌ 仅 IDE |
+| Antigravity | 会话 SQLite（protobuf） | ⚠️ 启发式 | ⚠️ 启发式 | ⚠️ 文本 | ⚠️ 快照在磁盘 | ❌ | ❌ 仅 IDE |
 
-Grok、Cursor、Antigravity、Kiro 的适配方案已调研完毕，见
-[docs/RECON.md](docs/RECON.md)（各家工具本地数据存哪、记了什么的完整清单），
-按现有 Adapter 接口扩展即可。
-
-### 更多平台（已调研，适配器待实现）
-
-| 平台 | 本地数据源 | 里面有什么 |
-|---|---|---|
-| Grok CLI | `~/.grok/sessions/<URL编码cwd>/session-<uuid>/` — `chat_history.jsonl`、`events.jsonl`、`summary.json` | 消息、工具调用+结果；`summary.json` 里有 git root/branch/commit；支持 `grok -r <id>` 恢复；reasoning 被服务端加密 |
-| Cursor | `AppData/Roaming/Cursor/User/globalStorage/state.vscdb`（SQLite，表 `cursorDiskKV`） | 会话是 `composerData:*`，消息是 `bubbleId:*`（含 `toolFormerData`），diff/快照数据是所有已调研工具里最全的 |
-| Antigravity | `~/.gemini/antigravity/conversations/<uuid>.db`（SQLite，protobuf blob）+ `code_tracker/` 全文件快照 | 工具调用和输出在 protobuf blob 里，需要先做 protobuf 解码才能索引 |
-| Kiro IDE | `AppData/Roaming/Kiro/User/globalStorage/kiro.kiroagent/workspace-sessions/<base64cwd>/<uuid>.json` | 只有对话 JSON——工具调用、diff、token 都没有持久化 |
-
-它们会遵循同一套 Adapter 接口，见 `voyager/adapters/base.py`。
+Cursor 与 Antigravity 适配器标记为实验性：Cursor 只读解析它的 KV 存储，
+Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。
+每个工具的逐字段可得性矩阵和数据源路径见 [docs/RECON.md](docs/RECON.md)。
 
 ## 设计一句话
 
