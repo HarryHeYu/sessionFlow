@@ -1,0 +1,74 @@
+# TEMPORARY diagnostic workflow (deleted once the matrix is green).
+# Publishes the full pytest log to the `ci-probe` branch, because Actions job
+# logs need an authenticated token that this session does not have.
+name: ci-probe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    name: probe ${{ matrix.os }} py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install (same as the tests workflow)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+
+      - name: Probe env
+        shell: bash
+        run: |
+          {
+            echo "== python =="; python -V
+            echo "== pip list =="; python -m pip list
+            echo "== env (HOME/APPDATA/cwd) =="
+            python -c "import os,pathlib;print('HOME',os.environ.get('HOME'));print('USERPROFILE',os.environ.get('USERPROFILE'));print('APPDATA',os.environ.get('APPDATA'));print('cwd',os.getcwd());print('home()',pathlib.Path.home())"
+            echo "== git status =="; git status --short
+            echo "== tracked test files =="; git ls-files tests | sort
+          } > /tmp/env.log 2>&1
+
+      - name: Run suite (full tracebacks)
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests/ -q --tb=long -rf -p no:cacheprovider > /tmp/pytest.log 2>&1
+          echo "$?" > /tmp/rc.log
+          python -m pytest tests/ --collect-only -q >> /tmp/pytest.log 2>&1
+          exit 0
+
+      - name: Publish logs to ci-probe branch
+        shell: bash
+        run: |
+          set -e
+          git config user.name "ci-probe"
+          git config user.email "ci-probe@users.noreply.github.com"
+          git checkout -B ci-probe
+          mkdir -p .ci-probe
+          cp /tmp/pytest.log .ci-probe/pytest-${{ matrix.os }}-${{ matrix.python-version }}.log
+          cp /tmp/env.log .ci-probe/env-${{ matrix.os }}-${{ matrix.python-version }}.log
+          cp /tmp/rc.log .ci-probe/rc-${{ matrix.os }}-${{ matrix.python-version }}.log
+          git add -f .ci-probe
+          git commit -m "ci probe logs: ${{ matrix.os }} py${{ matrix.python-version }} [skip ci]"
+          git push -f origin ci-probe
