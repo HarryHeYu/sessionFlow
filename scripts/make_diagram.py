@@ -60,12 +60,12 @@ SVG_FONTS = ("Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace")
 
 # --- canvas -----------------------------------------------------------------
 # width = 2*MARGIN + COL_W + GAP + MID_W + GAP + COL_W
-W, H = 1424, 880
+W, H = 1440, 880
 MARGIN = 56
 
 # --- grid -------------------------------------------------------------------
-COL_W = 372          # left and right column width (identical: equal weight)
-MID_W = 392          # wide enough for the longest line + padding (see fits())
+COL_W = 368          # left and right column width (identical: equal weight)
+MID_W = 416          # sized for the worst-case font, see FIT_ADVANCE
 GAP = 88             # horizontal gap between two neighbouring columns
 CARD_H = 56          # left card height
 CARD_GAP = 12
@@ -73,7 +73,12 @@ RCARD_H = 72         # right cards are taller so both stacks end up equally tall
 RCARD_GAP = 20
 
 CARD_PAD = 20        # text inset inside the side cards
-MID_PAD = 26         # text inset inside the index box
+MID_PAD = 24         # text inset inside the index box (its lines are centred)
+
+# Worst-case advance of a monospace glyph, in em. Consolas is 0.55, DejaVu Sans
+# Mono 0.60 and Menlo 0.60 — boxes are sized against this upper bound so the
+# picture (and the fit assertions) hold with whichever font the platform has.
+FIT_ADVANCE = 0.62
 
 TITLE_Y, TITLE_SIZE = 52, 32
 TAG_SIZE = 19
@@ -84,6 +89,11 @@ MID_H = 286
 
 FOOT_SIZE = 15
 FOOT_LINE_H = 22
+MID_LINE_SIZE = 14
+MID_TITLE_SIZE = 22
+MID_PATH_SIZE = 14
+CARD_NAME_SIZE = 19
+CARD_TEXT_SIZE = 14
 
 # --- content (unchanged) ----------------------------------------------------
 TAGLINE = "one index across every AI coding agent"
@@ -195,27 +205,32 @@ def _check_layout(L: dict) -> None:
 
 
 def _check_text_fits() -> None:
-    """No label may overflow the box it sits in (the old middle box did)."""
+    """No label may overflow its box — measured against the *worst* font.
+
+    Using the locally installed font would make this pass on Windows/Mac and
+    fail on a Linux runner (DejaVu Sans Mono is ~9% wider than Consolas), so
+    boxes are checked against `FIT_ADVANCE` instead.
+    """
     side = COL_W - 2 * CARD_PAD
     middle = MID_W - 2 * MID_PAD
     full = W - 2 * MARGIN
     for name, fmt in PROVIDERS:
-        assert text_width(name, 19) <= side, f"provider name too wide: {name}"
-        assert text_width(fmt, 14) <= side, f"provider format too wide: {fmt}"
+        assert worst_width(name, CARD_NAME_SIZE) <= side, f"name too wide: {name}"
+        assert worst_width(fmt, CARD_TEXT_SIZE) <= side, f"format too wide: {fmt}"
     for name, what in OUTPUTS:
-        assert text_width(name, 19) <= side, f"use-case name too wide: {name}"
-        assert text_width(what, 14) <= side, f"use-case text too wide: {what}"
+        assert worst_width(name, CARD_NAME_SIZE) <= side, f"name too wide: {name}"
+        assert worst_width(what, CARD_TEXT_SIZE) <= side, f"text too wide: {what}"
     for line in MID_LINES:
-        assert text_width(line, 15) <= middle, f"index line too wide: {line}"
-    for label in (HEAD_LEFT,):
-        assert text_width(label, HEAD_SIZE) <= COL_W, f"heading too wide: {label}"
-    for label in (HEAD_MID,):
-        assert text_width(label, HEAD_SIZE) <= MID_W, f"heading too wide: {label}"
+        assert worst_width(line, MID_LINE_SIZE) <= middle, f"index line too wide: {line}"
+    assert worst_width(MID_TITLE, MID_TITLE_SIZE) <= middle, "index title too wide"
+    assert worst_width(MID_PATH, MID_PATH_SIZE) <= middle, "index path too wide"
+    for label, limit in ((HEAD_LEFT, COL_W), (HEAD_MID, MID_W), (HEAD_RIGHT, COL_W)):
+        assert worst_width(label, HEAD_SIZE) <= limit, f"heading too wide: {label}"
     for line, size in ((SUBTITLE, SUB_SIZE), (FOOTER_1, FOOT_SIZE),
                        (FOOTER_2, FOOT_SIZE)):
-        assert text_width(line, size) <= full, f"centred line too wide: {line[:30]}"
-    header = (text_width("Voyager", TITLE_SIZE) + 18
-              + text_width(TAGLINE, TAG_SIZE))
+        assert worst_width(line, size) <= full, f"centred line too wide: {line[:30]}"
+    header = (worst_width("Voyager", TITLE_SIZE) + 18
+              + worst_width(TAGLINE, TAG_SIZE))
     assert header <= full, "header is wider than the content area"
 
 
@@ -266,6 +281,11 @@ def text_width(s: str, size: int) -> float:
     for ch in s:
         total += f.getlength(ch) if has_glyph(f, ch) else _fallback_len(ch, size)
     return total
+
+
+def worst_width(s: str, size: int) -> float:
+    """Upper bound on the rendered width, independent of the installed font."""
+    return len(s) * FIT_ADVANCE * size
 
 
 def _fallback_len(ch: str, size: int) -> float:
@@ -341,13 +361,16 @@ def render_png(L: dict) -> Path:
         draw_text(d, L["lx"] + CARD_PAD, y0 + 8, name, 19, FG)
         draw_text(d, L["lx"] + CARD_PAD, y0 + 31, fmt, 14, DIM)
 
-    # ---- middle: the index -------------------------------------------------
+    # ---- middle: the index (its lines are centred in the box) --------------
     _box(d, L["mx"], L["mid_top"], L["m_right"], L["mid_bottom"],
          PANEL_CYAN, CYAN, radius=16, width=3)
-    draw_text(d, L["mx"] + MID_PAD, L["mid_top"] + 32, MID_TITLE, 22, WHITE)
-    draw_text(d, L["mx"] + MID_PAD, L["mid_top"] + 70, MID_PATH, 15, CYAN)
+    draw_text_center(d, L["mid_centre_x"], L["mid_top"] + 32, MID_TITLE,
+                     MID_TITLE_SIZE, WHITE)
+    draw_text_center(d, L["mid_centre_x"], L["mid_top"] + 70, MID_PATH,
+                     MID_PATH_SIZE, CYAN)
     for j, line in enumerate(MID_LINES):
-        draw_text(d, L["mx"] + MID_PAD, L["mid_top"] + 112 + j * 30, line, 15, FG)
+        draw_text_center(d, L["mid_centre_x"], L["mid_top"] + 112 + j * 30,
+                         line, MID_LINE_SIZE, FG)
 
     # ---- right: how you use it --------------------------------------------
     for i, (name, what) in enumerate(OUTPUTS):
@@ -459,10 +482,13 @@ def render_svg(L: dict) -> Path:
 
     s.rect(L["mx"], L["mid_top"], L["m_right"], L["mid_bottom"],
            PANEL_CYAN, CYAN, radius=16, width=3)
-    s.text(L["mx"] + MID_PAD, L["mid_top"] + 32, MID_TITLE, 22, WHITE)
-    s.text(L["mx"] + MID_PAD, L["mid_top"] + 70, MID_PATH, 15, CYAN)
+    s.text_center(L["mid_centre_x"], L["mid_top"] + 32, MID_TITLE,
+                  MID_TITLE_SIZE, WHITE)
+    s.text_center(L["mid_centre_x"], L["mid_top"] + 70, MID_PATH,
+                  MID_PATH_SIZE, CYAN)
     for j, line in enumerate(MID_LINES):
-        s.text(L["mx"] + MID_PAD, L["mid_top"] + 112 + j * 30, line, 15, FG)
+        s.text_center(L["mid_centre_x"], L["mid_top"] + 112 + j * 30,
+                      line, MID_LINE_SIZE, FG)
 
     for i, (name, what) in enumerate(OUTPUTS):
         y0, y1 = L["right_card"](i)
