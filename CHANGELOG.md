@@ -6,7 +6,7 @@ All notable changes to Voyager are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
-- **Test suite + CI** — the project went from one test file to 63 tests:
+- **Test suite + CI** — the project went from one test file to 66 tests:
   per-adapter regression tests for all 8 platforms against synthetic
   fixtures (`tests/fixtures/`, no real session data), plus store, export,
   handoff, CLI and MCP tests. `.github/workflows/test.yml` runs them on
@@ -14,9 +14,16 @@ All notable changes to Voyager are documented here. Format loosely follows
   proves the CLI works with no optional dependencies. README badges added.
 - `scripts/run_tests_core_only.py` — runs the suite with `mcp` and
   `zstandard` blocked, i.e. exactly what `pip install voyager` gives you.
-- CI failures are now self-describing: the test steps print the failing tests
-  as GitHub **annotations** (`::error title=pytest::`), which are readable from
-  the checks API and the UI without a token — job logs are not.
+- CI failures are now self-describing: the test steps write `pytest.log` and,
+  on failure, `scripts/ci_report_failures.py` emits the failing tests as GitHub
+  **annotations** (`::error title=pytest::`) — readable from the checks API and
+  the UI without a token, unlike job logs.
+- `tests/test_workflows.py` — dependency-free guards for the CI plumbing
+  itself: every `python - <<'PY'` heredoc must terminate at column 0 of the
+  step script, the matrix must still cover Python 3.10–3.13 plus Windows, and
+  the failure-annotation reporter must stay wired up. (The heredoc guard exists
+  because an indented terminator made bash swallow a whole step: exit code 2,
+  pytest never ran, nothing to see.)
 - **Architecture diagram** (`docs/screenshots/architecture.png`, drawn by
   `scripts/make_diagram.py`): 8 agents / 8 formats → one index → the six
   ways to use it. Embedded at the top of both READMEs.

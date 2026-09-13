@@ -54,18 +54,7 @@ jobs:
           if [ $rc -ne 0 ]; then
             # make the failures readable from the UI *and* from the checks API
             # (job logs need a token; annotations do not)
-            python - <<'PY'
-            import pathlib
-            lines = pathlib.Path("pytest.log").read_text(
-                encoding="utf-8", errors="replace").splitlines()
-            fails = [ln.strip() for ln in lines
-                     if ln.startswith(("FAILED", "ERROR"))]
-            for ln in fails[:10]:
-                print(f"::error title=pytest::{ln[:900].replace(chr(10), ' ')}")
-            if not fails:
-                tail = " / ".join(lines[-6:])[:900]
-                print(f"::error title=pytest (no summary line)::{tail}")
-            PY
+            python scripts/ci_report_failures.py pytest.log
           fi
           exit $rc
 
@@ -119,13 +108,6 @@ jobs:
           rc=$?
           tail -40 pytest.log
           if [ $rc -ne 0 ]; then
-            python - <<'PY'
-            import pathlib
-            lines = pathlib.Path("pytest.log").read_text(
-                encoding="utf-8", errors="replace").splitlines()
-            for ln in [l.strip() for l in lines
-                       if l.startswith(("FAILED", "ERROR"))][:10]:
-                print(f"::error title=pytest (core-only)::{ln[:900]}")
-            PY
+            python scripts/ci_report_failures.py pytest.log
           fi
           exit $rc
