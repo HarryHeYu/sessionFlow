@@ -42,7 +42,12 @@ pip install -e ".[dsh]"     # 加上 DSH（需要 zstandard）
 
 第一次使用：`voyager scan` 会遍历所有支持的 Agent 的本地存储，在
 `~/.voyager/index.db` 建立索引。之后想收录新会话就再跑一次 `scan`——
-它是增量的，只重新读取有变化的部分。
+它是增量的，只重新读取有变化的部分。想让同步完全自动，可以常驻一个
+watcher（或挂到计划任务里）：
+
+```sh
+voyager watch --interval 300    # 每 5 分钟自动重扫，常驻运行
+```
 
 ```sh
 voyager scan                # 发现并索引所有支持的 Agent 会话
@@ -53,9 +58,10 @@ voyager search "tensorboard"
 voyager repo E:/code/myproj # 一个 repo 的跨 Agent 时间线
 voyager export <id> --format md   # 或 --format json（含原始事件）
 voyager resume <id>         # 调起原 Agent 恢复该会话
+voyager handoff <id> --to codex   # 生成给另一个 agent 的上下文包
+voyager continue            # 一条命令接着上次干（原生恢复或自动接力）
 voyager files <id>          # 该会话碰过哪些文件
 voyager diff <id>           # Claude 会话：从版本链重建前后 diff
-voyager handoff <id> --to codex   # 生成给另一个 agent 的上下文包
 voyager stats               # 索引统计
 ```
 
@@ -63,6 +69,10 @@ voyager stats               # 索引统计
 上下文包（目标、指令、碰过的文件、执行过的命令、报错、工作停在哪），并给出目标
 agent 的启动命令；加 `--launch` 立即启动。目标 agent 被告知"读这个文件接着干"——
 `claude`、`codex`、`grok` 支持直接拉起；其他目标会给出生成的包文件手动粘贴。
+
+**一条命令继续**：`voyager continue` 自动挑你最新的会话并做对的事——
+codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager continue
+--repo myproj --launch` 直接回到某个项目的现场。
 
 会话 ID 支持前缀匹配；前缀有歧义时会列出候选并退出，不会猜。
 

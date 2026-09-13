@@ -48,7 +48,12 @@ run it as `python -m voyager.cli`.
 First run: `voyager scan` walks every supported agent's local storage and
 builds the index at `~/.voyager/index.db`. After that, re-run `scan`
 whenever you want to pick up new sessions — it is incremental and only
-re-reads what changed.
+re-reads what changed. To make syncing fully automatic, keep a watcher
+running (or put it in a scheduled task):
+
+```sh
+voyager watch --interval 300    # re-scan every 5 minutes, forever
+```
 
 ```sh
 voyager scan                # discover + index every supported agent
@@ -59,9 +64,10 @@ voyager search "tensorboard"
 voyager repo E:/code/myproj # cross-agent timeline for a repository
 voyager export <id> --format md   # or --format json (includes raw events)
 voyager resume <id>         # launches the native agent on that session
+voyager handoff <id> --to codex   # context package for another agent
+voyager continue            # one command to pick your latest work back up
 voyager files <id>          # files the session touched
 voyager diff <id>           # Claude sessions: rebuilt before/after diffs
-voyager handoff <id> --to codex   # context package for another agent
 voyager stats               # index statistics
 ```
 
@@ -72,6 +78,11 @@ command for the target agent; add `--launch` to start it immediately. The
 target agent is told to read the package file and continue the task —
 works for `claude`, `codex` and `grok`; other targets get the package file
 to paste manually.
+
+**One command to continue**: `voyager continue` picks your newest session
+and does the right thing — native resume for codex/claude/dsh/grok,
+automatic handoff package for the rest. `voyager continue --repo myproj
+--launch` goes straight back into a specific project.
 
 Session ids are matched by prefix; if a prefix is ambiguous Voyager lists
 the candidates and exits. `resume` runs the native agent's own command

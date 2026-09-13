@@ -122,7 +122,7 @@ def cmd_scan(args) -> int:
 
         stats = store.stats()
         print(f"  {ad.provider}: {stats['by_provider'].get(ad.provider, 0)} sessions indexed "
-              f"({new} new/refreshed, {skip} unchanged)")
+              f"({new} new/refreshed, {skip} unchanged)", flush=True)
         grand_new += new; grand_skip += skip; grand_evt += evt
 
     stats = store.stats()
@@ -409,20 +409,87 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def cmd_watch(args) -> int:
+    """Keep the index in sync automatically: scan on a fixed interval."""
+    import time as _time
+    store = Store(args.db)
+    interval = max(10, args.interval)
+    print(f"watching for agent session changes every {interval}s "
+          f"(Ctrl+C to stop)", flush=True)
+    while True:
+        try:
+            args.force = False
+            before = store.stats()
+            cmd_scan(args)
+            after = store.stats()
+            if after["sessions"] != before["sessions"]:
+                print(f"  ↳ {after['sessions'] - before['sessions']:+d} sessions")
+            _time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\nwatch stopped")
+            return 0
+        except Exception as e:
+            print(f"  ! scan error: {e}; retrying in {interval}s", file=sys.stderr)
+            _time.sleep(interval)
+
+
+def cmd_continue(args) -> int:
+    """One command to pick work back up: native resume when possible,
+    automatic cross-agent handoff otherwise."""
+    store = Store(args.db)
+    if args.session:
+        row = _resolve(store, args.session)
+    else:
+        rows = store.sessions()
+        if args.repo:
+            rows = [r for r in rows if _repo_match(r, args.repo)]
+        if args.platform:
+            rows = [r for r in rows if r["provider"] == args.platform]
+        rows = [r for r in rows if r["updated_at"]]
+        if not rows:
+            print("no sessions to continue (run `voyager scan` first)")
+            return 1
+        row = rows[0]
+        print(f"latest session: [{row['provider']}] {(row['title'] or '')[:70]} "
+              f"({_short_ts(row['updated_at'])})")
+
+    if getattr(args, "to", None):
+        # explicit cross-agent handoff wins
+        return _handoff_from_row(store, row, args)
+    if row["can_resume"] and row["resume_cmd"]:
+        argv = row["resume_cmd"].split()
+        print(f"$ {' '.join(argv)}")
+        if not args.launch:
+            print("add --launch to start it now")
+            return 0
+        try:
+            return subprocess.call(argv)
+        except KeyboardInterrupt:
+            return 130
+    # native resume unsupported (e.g. ZCode): fall back to a handoff package
+    print(f"native resume unsupported for '{row['provider']}' — "
+          f"falling back to cross-agent handoff")
+    args.to = args.to or "claude"
+    return _handoff_from_row(store, row, args)
+
+
 def cmd_handoff(args) -> int:
-    from .handoff import PROMPT_TARGETS, build_context_package, default_package_name, handoff_command
     store = Store(args.db)
     row = _resolve(store, args.session)
+    return _handoff_from_row(store, row, args)
 
-    out = Path(args.output) if args.output else Path(default_package_name(row))
+
+def _handoff_from_row(store: Store, row, args) -> int:
+    from .handoff import PROMPT_TARGETS, build_context_package, default_package_name, handoff_command
+    out = Path(args.output) if getattr(args, "output", None) else Path(default_package_name(row))
     package = build_context_package(store, row)
     out.write_text(package, encoding="utf-8")
     print(f"context package: {out.resolve()} ({len(package)} chars)")
 
-    target = args.to
+    target = getattr(args, "to", None)
     if not target:
         print("next: pick a target agent, e.g. "
-              f"`voyager handoff {args.session} --to claude` "
+              f"`voyager handoff {row['native_id'][:16]} --to claude` "
               f"(targets with direct launch: {', '.join(sorted(PROMPT_TARGETS))})")
         return 0
 
@@ -433,7 +500,7 @@ def cmd_handoff(args) -> int:
               f"You can still paste {out.resolve()} into that agent manually.")
         return 1
     print(f"$ {argv[0]} \"<handoff prompt>\"")
-    if args.launch:
+    if getattr(args, "launch", False):
         try:
             return subprocess.call(argv)
         except KeyboardInterrupt:
@@ -508,6 +575,20 @@ def main(argv=None) -> int:
     sp.add_argument("--output", "-o", help="package file path (default handoff-<provider>-<id>.md)")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the package")
     sp.set_defaults(func=cmd_handoff)
+
+    sp = sub.add_parser("watch", help="keep the index in sync automatically")
+    sp.add_argument("--interval", type=int, default=300, help="seconds between scans (default 300)")
+    sp.add_argument("--platform", help="limit to these providers (comma list)")
+    sp.add_argument("--force", action="store_true")
+    sp.set_defaults(func=cmd_watch)
+
+    sp = sub.add_parser("continue", help="pick work back up in one command (native resume, or auto-handoff)")
+    sp.add_argument("session", nargs="?", help="session id/prefix (default: newest session)")
+    sp.add_argument("--repo", help="pick the newest session of this repo")
+    sp.add_argument("--platform", help="pick the newest session of this provider")
+    sp.add_argument("--to", help="force cross-agent handoff to this target")
+    sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
+    sp.set_defaults(func=cmd_continue)
 
     sp = sub.add_parser("stats", help="index statistics")
     sp.set_defaults(func=cmd_stats)
