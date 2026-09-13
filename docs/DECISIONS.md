@@ -5,24 +5,26 @@
 **Decision**: 用 Python 3.10+ 标准库 + 可选 `zstandard` 实现全部适配器。
 
 **Reason**: 六家平台的格式全是 JSON/JSONL/SQLite 解析，瓶颈在格式适配速度而非运行速度；
-Python 的 json/sqlite3/difflib 全部内置，迭代最快。dirwhale 那种"纯 C 练手"目标
-在这里不成立——正确性和数据完整性优先。
+Python 的 json/sqlite3/difflib 全部内置，迭代最快。这个项目的目标是正确性和数据完整性，
+不是练手语言特性。
 
 **Alternatives**: Go（单二进制分发好，但适配迭代慢一档）；Rust（同上）。
 
 **Consequences**: 用户需有 Python；`pip install -e .` 安装。TUI（Textual）天然适配。
 
-## D2 — raw_event 截断存储而非全量
+## D2 — raw_event 分层截断存储而非全量
 
-**Decision**: `raw_json` 超 200KB 截断，正文超 2MB 截断，带 "[truncated N chars]" 标记。
+**Decision**: `raw_json` 截 8KB、正文截 600KB、FTS body 截 600B，超限带
+"[truncated N chars]" 标记。
 
-**Reason**: Codex 单 rollout 可达 15.9MB、ZCode 会话 54 万字符输出；normalized+raw 双写
-会让索引膨胀到 GB 级，而完整原文永远在 provider 源文件里（sources 表记录了精确路径）。
+**Reason**: 实测本机语料（13.5 万事件）：raw 全量要 645MB、FTS body 2KB 就让索引到
+1.3GB。raw 的独特价值是归一化没覆盖的 provider 字段，它们集中在 payload 头部；
+完整原文永远在 provider 源文件里（sources 表记录精确路径 + seq）。
 
 **Alternatives**: 全量保存（磁盘换安心）；外部 raw 存储（复杂度不值）。
 
 **Consequences**: `voyager export --format json` 的 raw_event 对超大事件是截断版；
-`show` 永远显示归一化字段，不受影响。
+`show` 显示的归一化字段不受影响。若需要更大 raw，调 store.py 的三个常量重建索引。
 
 ## D3 — FTS5 用 trigram 而非 unicode61
 

@@ -113,13 +113,22 @@ class CodexAdapter(Adapter):
         return sid
 
     def scan(self, source_changed) -> List[dict]:
-        """Group continuation rollouts by session id and merge each group."""
+        """Group continuation rollouts by session id and merge each group.
+
+        Groups whose files all match their registered fingerprints are
+        skipped (their index rows are still alive, so prune keeps them).
+        """
         groups: Dict[str, List[Path]] = {}
         for f in self.discover():
             groups.setdefault(self._session_id_of(f), []).append(f)
         out: List[dict] = []
         for native, files in sorted(groups.items()):
             files.sort(key=lambda p: p.name)  # rollouts are named by start time
+            try:
+                if all(not source_changed(self.provider, f) for f in files):
+                    continue
+            except OSError:
+                pass
             sid = f"codex:{native}"
             merged: Optional[dict] = None
             for f in files:
@@ -148,6 +157,7 @@ class CodexAdapter(Adapter):
                     merged["extra_sources"].append(f)
             if merged:
                 s = merged["session"]
+                merged["source_path"] = files[0]   # this group's own anchor file
                 for e in merged["events"]:
                     e["sid"] = sid
                 s["message_count"] = sum(1 for e in merged["events"]

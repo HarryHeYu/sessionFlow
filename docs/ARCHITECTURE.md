@@ -25,10 +25,13 @@ Export                          voyager/export.py (md / json)
 ## 关键机制
 
 ### 幂等扫描
-- 每个 source 以 `(provider, path)` 为主键记录 `(mtime, size)`；不变则跳过。
+- `sources` 表以 `(provider, path, sid)` 为主键记录 `(mtime, size)` —— 多会话源
+  （一个 SQLite DB 对应 N 个 session）每个 session 一行，prune 永不误伤同库其他会话。
 - 变更的 source 原子重写：`DELETE events WHERE sid=?` + `DELETE event_fts WHERE rowid IN (...)` + 重新 INSERT，包在事务里。
-- 文件型 adapter（codex/claude/dsh）：prune 保留「磁盘上仍存在」的 source 对应的 session —— 未变更/解析失败的文件不会误删既有会话；只有从磁盘消失的文件才触发 prune。
+- prune 只删「磁盘上已无任何 source 行」的 session；未变更/解析失败的文件不触发 prune。
+  multi-adapter 的 scan 抛异常（如 DB 被锁）时本轮保留现有索引，不视为空。
 - 多会话源（zcode SQLite）：mtime 变化才全量重扫 + 按 live_ids prune；不变则整库跳过。
+  Codex 按"分组内所有文件未变更则跳过该分组"做文件级增量。
 
 ### Repo 归属
 优先级 `provider 提供的 git 元数据`（如 Codex session_meta.git、Grok summary.json）
@@ -44,8 +47,8 @@ session 行存 `resume_cmd`（如 `codex resume <id>`）。`voyager resume <id>`
 tokenize=trigram：CJK 子串可搜（≥3 字符）；rowid=events.id，按会话重建即删即插。
 
 ### 截断策略
-`content/tool_input/tool_output/stdout` 截 2MB，`raw_json` 截 200KB——完整数据
-始终在 provider 原始文件里，事件里保留 source 指针（sources.path + seq）。
+`content/tool_input/tool_output/stdout` 截 600KB，`raw_json` 截 8KB，FTS body 截
+600B——完整数据始终在 provider 原始文件里，事件里保留 source 指针（sources.path + seq）。
 
 ## Phase 2 预留
 

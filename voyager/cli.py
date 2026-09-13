@@ -84,7 +84,8 @@ def cmd_scan(args) -> int:
                 for bundle in bundles:
                     store.replace_session(
                         bundle["session"], bundle["events"], ad.provider,
-                        anchor, bundle.get("extra_sources"),
+                        Path(bundle.get("source_path") or anchor),
+                        bundle.get("extra_sources"),
                     )
                     live_ids.add(bundle["session"]["id"])
                     new += 1

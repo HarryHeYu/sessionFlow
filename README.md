@@ -10,9 +10,9 @@ no cloud, no telemetry.
 ```
 $ voyager list
 ID                                    PROV   UPDATED            MSG TOOL  TITLE
-sess_f331595d-...                     zcode  2026-09-13 01:13   162  206  探索仓库并检索玩具项目创意
-019f3691-...                          codex  2026-07-06 22:52    76  168  帮我修改一下open-unlearnning里的文件...
-5b3652f9-...                          claude 2026-07-17 12:46    89   70  根据attack.md以及dataset/里的数据集...
+a1b2c3d4-...                          zcode  2026-09-13 01:13   162  206  重构存储引擎的写入路径
+9f8e7d6c-...                          codex  2026-07-06 22:52    76  168  修复多线程下载器的竞态条件
+5e4d3c2b-...                          claude 2026-07-17 12:46    89   70  分析数据集结构并设计评测脚本
 ```
 
 ## Why
@@ -55,15 +55,16 @@ voyager files <id>          # files the session touched
 voyager diff <id>           # Claude sessions: rebuilt before/after diffs
 ```
 
-Session ids are matched by prefix, so `voyager show 019f` works.
+Session ids are matched by prefix; if a prefix is ambiguous Voyager lists
+the candidates and exits.
 
 ## Supported platforms (Phase 1)
 
 | Platform | Source | Messages | Tool calls | Shell exit | File diffs | Tokens | Resume |
 |---|---|---|---|---|---|---|---|
 | Codex (CLI/VSCode/Desktop) | rollout JSONL | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ `codex resume` |
-| Claude Code | project JSONL + file-history | ✅ | ✅ | ✅ | ✅ version chain | ✅ | ✅ `claude -r` |
-| ZCode | SQLite (`~/.zcode/cli/db`) | ✅ | ✅ | ✅ | ✅ old/new | ✅ usage tables | ❌ desktop only |
+| Claude Code | project JSONL + file-history | ✅ | ✅ | ✅ | ✅ version chain | ✅ | ✅ `claude --resume` |
+| ZCode | SQLite (`~/.zcode/cli/db`) | ✅ | ✅ | ✅ | ⚠️ file events (edits stay in raw) | ✅ usage tables | ❌ desktop only |
 | DSH | zstd JSONL (`~/.dsh/sessions`) | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ `dsh --resume` |
 
 Grok / Cursor / Antigravity / Kiro adapters are designed for but land after

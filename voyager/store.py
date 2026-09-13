@@ -97,10 +97,10 @@ CREATE INDEX IF NOT EXISTS idx_files_sid ON files(sid);
 CREATE TABLE IF NOT EXISTS sources (
     provider TEXT NOT NULL,
     path     TEXT NOT NULL,
+    sid      TEXT NOT NULL,
     mtime    REAL,
     size     INTEGER,
-    sid      TEXT,
-    PRIMARY KEY (provider, path)
+    PRIMARY KEY (provider, path, sid)
 );
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -160,6 +160,12 @@ class Store:
         self.con.execute("PRAGMA journal_mode=WAL")
         self.con.execute("PRAGMA synchronous=NORMAL")
         self.con.execute("PRAGMA cache_size=-64000")   # 64MB page cache
+        # migration: pre-0.1.1 sources had PK (provider, path) only, which
+        # collapsed multi-session artifacts (one SQLite DB -> N sessions)
+        # into a single row and let prune wipe sessions on unchanged scans.
+        pk_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sources)") if r[5]]
+        if pk_cols and "sid" not in pk_cols:
+            self.con.execute("DROP TABLE sources")
         self.con.executescript(SCHEMA)
         if not _fts_has_sid(self.con):
             _rebuild_fts(self.con)
@@ -174,12 +180,17 @@ class Store:
         return st.st_mtime, st.st_size
 
     def source_changed(self, provider: str, path: Path) -> bool:
+        """A path is unchanged if ANY row for it carries the current fingerprint.
+
+        Multi-session artifacts have one row per (path, sid); single-session
+        artifacts have exactly one.
+        """
         mtime, size = self.source_fingerprint(path)
         row = self.con.execute(
-            "SELECT mtime, size FROM sources WHERE provider=? AND path=?",
-            (provider, str(path)),
+            "SELECT 1 FROM sources WHERE provider=? AND path=? AND mtime=? AND size=? LIMIT 1",
+            (provider, str(path), mtime, size),
         ).fetchone()
-        return row is None or row["mtime"] != mtime or row["size"] != size
+        return row is None
 
     # -- writing -----------------------------------------------------------
 
@@ -277,15 +288,15 @@ class Store:
                 )
             mtime, size = self.source_fingerprint(source_path)
             self.con.execute(
-                "INSERT OR REPLACE INTO sources(provider, path, mtime, size, sid) VALUES (?,?,?,?,?)",
-                (provider, str(source_path), mtime, size, sid),
+                "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size) VALUES (?,?,?,?,?)",
+                (provider, str(source_path), sid, mtime, size),
             )
             for p in extra_sources or []:
                 try:
                     m2, s2 = self.source_fingerprint(p)
                     self.con.execute(
-                        "INSERT OR REPLACE INTO sources(provider, path, mtime, size, sid) VALUES (?,?,?,?,?)",
-                        (provider, str(p), m2, s2, sid),
+                        "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size) VALUES (?,?,?,?,?)",
+                        (provider, str(p), sid, m2, s2),
                     )
                 except OSError:
                     pass
@@ -374,6 +385,15 @@ class Store:
             out["sessions"] += r["n"]
         out["events"] = self.q("SELECT COUNT(*) n FROM events")[0]["n"]
         return out
+
+    def close(self) -> None:
+        self.con.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
 
 def sha256_of(path: Path, limit: int = 4 * 1024 * 1024) -> str:
