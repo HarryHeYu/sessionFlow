@@ -7,7 +7,9 @@
 No. Voyager only reads files that already exist on your machine and writes
 one local SQLite index at `~/.voyager/index.db`. There is no network code
 in the project at all. `voyager handoff` writes a Markdown file locally —
-you choose what to do with it.
+you choose what to do with it. The planned multi-session compiler
+([ROADMAP.md](ROADMAP.md)) stays the same: deterministic extraction from
+the index, no LLM in core.
 
 **Who can see my index?**
 
@@ -36,6 +38,16 @@ Cursor's data lives in an undocumented key-value schema, and Antigravity
 stores events as protobuf blobs without a public schema. Both adapters
 work against real data observed on disk, but vendor updates may break them
 without notice.
+
+## Handoff & continue
+
+**Does `voyager handoff --to codex` move the Claude session into Codex?**
+
+No. Hidden tool state, system prompts and cached reasoning stay in the
+original agent. Voyager writes a Context Package and starts a *new*
+session that is told to read it and continue the work. Same-provider
+pickup still uses native resume (`codex resume`, `claude --resume`, …).
+See [ROADMAP.md](ROADMAP.md).
 
 ## Usage problems
 

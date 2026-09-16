@@ -94,3 +94,42 @@ Claude/Grok 都是 agentic CLI，读文件比解析巨型参数更符合它们�
 **Consequences**: 目标 agent 必须能读文件系统（三者皆可）；包文件是普通
 Markdown，用户可以先人工审阅/删改再拉起。D7 的原则同样适用：DSH 等没有确认
 "初始 prompt" 入口的平台，只生成包文件并提示手动粘贴。
+
+## D9 — 下一阶段做 Continuity Engine，而不是 TUI / 更多 Adapter
+
+**Decision**: 在索引层已经可用之后，战略投入转向跨 Agent 的 **工作接续 /
+上下文编译**（WorkThread、多会话合成、goal-conditioned bundle、Context
+Budget），而不是先做 TUI、完整 Web App、或按厂商各写一份插件。
+Adapter 仍然维护（上游改格式会坏），但不是产品跳跃。路线图见
+`docs/ROADMAP.md`。
+
+**Reason**: Voyager 的独特资产是已经归一化的多 Provider Session/Event、
+repo、文件、命令、错误和时间线。把这些编译成「下一个 Agent 真正需要的
+上下文」是别的 history manager 和单 Session handoff-skill 做不到的。
+UI 只是同一套编译器的前端；先做 UI 等于在核心 pipeline 还没有时画外壳。
+
+**Alternatives**: 继续加 Adapter 覆盖面；先做 VS Code / Web 查看器；
+把 V1 handoff 再打磨成更好的单会话摘要。
+
+**Consequences**: README 的 "What's next" 指向 Continuity Engine。
+`voyager continue` / `handoff` 的演进按 ROADMAP Phase 1–6 走；
+VS Code Sidebar / Context Composer 明确排在编译器之后（Phase 7）。
+
+## D10 — Continuity 编译器在 core 里必须确定性、离线
+
+**Decision**: 多会话合成、冲突 overlay、goal ranking、budget packing
+第一版全部是对已索引字段 + 现场 `git` 的确定性抽取。core 不调用 LLM、
+不联网、不加 tokenizer 依赖。token 预算用 `chars/4` 估算。
+目标 Agent 是读 bundle 的推理者。可选的 LLM 精炼若出现，只能是 opt-in extra，
+不能成为默认路径。
+
+**Reason**: FAQ 和 CONTRIBUTING 已经承诺「项目里没有网络代码」。
+把摘要外包给云模型会破坏 local-first，也让测试变成「模型今天怎么说」。
+索引里已经有足够硬事实（文件、命令、exit code、错误、时间戳、git）
+做 V1 overlay：新会话的结论为当前，旧结论标 superseded 并保留出处。
+
+**Alternatives**: 默认走 LLM 做 narrative summary；嵌入本地小模型。
+
+**Consequences**: bundle 里每条断言带 provenance
+（`extracted` / `inferred` / `unverified`）。编译器撑不住的叙事宁可省略，
+也不编。Phase 1 的验收测试是合成夹具，不调任何模型。

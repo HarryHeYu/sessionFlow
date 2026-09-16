@@ -7,6 +7,8 @@
 
 **把你机器上所有 AI 编码 Agent 的会话历史，变成一份可查询的索引。**
 
+下一步：接续层——跨会话合并上下文，在任意 Agent 里接着干。见 [路线图](docs/ROADMAP.zh-CN.md)。
+
 [English](README.md)
 
 Voyager 读取各 Agent 已经写在本机的会话数据——Codex、Claude Code、ZCode、
@@ -103,14 +105,17 @@ voyager diff <id>           # Claude 会话：从版本链重建前后 diff
 voyager stats               # 索引统计
 ```
 
-**跨 Agent 接力**：`voyager handoff <id> --to codex` 会把会话提炼成一份自包含的
-上下文包（目标、指令、碰过的文件、执行过的命令、报错、工作停在哪），并给出目标
-agent 的启动命令；加 `--launch` 立即启动。目标 agent 被告知"读这个文件接着干"——
-`claude`、`codex`、`grok` 支持直接拉起；其他目标会给出生成的包文件手动粘贴。
+**跨 Agent 接力**是**工作接续**，不是 Session 搬迁（对方拿不到隐藏的
+tool state 或 cached reasoning）。`voyager handoff <id> --to codex` 会把
+会话提炼成上下文包（目标、指令、碰过的文件、命令、报错、工作停在哪）并给出
+启动命令；加 `--launch` 立即启动。目标 agent 被要求读这个文件接着干——
+`claude`、`codex`、`grok` 可直接拉起；其他目标给出文件手动粘贴。
+同一平台的续聊仍然走原生 resume（`codex resume` 等）。
 
 **一条命令继续**：`voyager continue` 自动挑你最新的会话并做对的事——
 codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager continue
---repo myproj --launch` 直接回到某个项目的现场。
+--repo myproj --launch` 直接回到某个项目的现场。多会话合并和 WorkThread
+是下一步，见 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)。
 
 **日常套路**——`brief` 看全局动态，`export` 完整细读某个会话（实测把
 2915 条消息的 DSH 会话导成 20MB Markdown），`continue` / `handoff` 接着干。
@@ -190,10 +195,14 @@ Provider 的文件只读不改。Adapter 把各平台事件翻译成统一的 `S
 细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和
 [docs/DECISIONS.md](docs/DECISIONS.md)。
 
-## 欢迎共建
+## 下一步
 
-自然的下一步：交互式 TUI、更多平台适配器、以及一个实时录制层——把 Agent 的
-每一步操作录下来，让任何会话都能回放、或从任意一步换模型重跑。
+索引是地基。真正的跳跃是 **Continuity Engine**：把多个 Agent、多个会话
+编译成*下一个* Agent 真正需要的上下文，然后接着干。UI（VS Code 侧边栏 /
+Context Composer）排在这条 pipeline 之后。
+
+分阶段计划、CLI 草稿和 issue 列表：
+[docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md) · [English](docs/ROADMAP.md)。
 
 ## License
 

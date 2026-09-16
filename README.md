@@ -7,6 +7,8 @@
 
 **One index across every AI coding agent on your machine.**
 
+Next: a continuity layer — merge context across sessions and continue in any agent. See [the roadmap](docs/ROADMAP.md).
+
 [中文说明](README.zh-CN.md)
 
 Voyager reads the local session data your agents already write — Codex,
@@ -112,18 +114,20 @@ voyager diff <id>           # Claude sessions: rebuilt before/after diffs
 voyager stats               # index statistics
 ```
 
-**Cross-agent handoff**: `voyager handoff <id> --to codex` extracts the
-session into a self-contained Context Package (goal, instructions, files
-touched, commands, errors, where the work stopped) and shows the launch
-command for the target agent; add `--launch` to start it immediately. The
-target agent is told to read the package file and continue the task —
-works for `claude`, `codex` and `grok`; other targets get the package file
-to paste manually.
+**Cross-agent handoff** is **work continuation**, not session migration
+(the other agent cannot inherit hidden tool state or cached reasoning).
+`voyager handoff <id> --to codex` extracts the session into a Context
+Package (goal, instructions, files touched, commands, errors, where the
+work stopped) and shows the launch command; add `--launch` to start it.
+The target is told to read the package file and continue — works for
+`claude`, `codex` and `grok`; other targets get the file to paste.
+Same-provider pickup still uses native resume (`codex resume`, …).
 
 **One command to continue**: `voyager continue` picks your newest session
 and does the right thing — native resume for codex/claude/dsh/grok,
 automatic handoff package for the rest. `voyager continue --repo myproj
---launch` goes straight back into a specific project.
+--launch` goes straight back into a specific project. Multi-session merge
+and WorkThread are the next step — [docs/ROADMAP.md](docs/ROADMAP.md).
 
 **Everyday flow** — `brief` to see what's moving, `export` to read one
 session in full (a 2,915-message DSH session → a 20 MB Markdown file),
@@ -216,11 +220,15 @@ Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/FAQ.md](docs/FAQ.md) and everyday recipes in
 [docs/WORKFLOWS.md](docs/WORKFLOWS.md).
 
-## Ideas welcome
+## What's next
 
-Natural next steps: an interactive TUI, more platform adapters, and a
-recording layer that captures agent actions as they happen so any session
-can be replayed or re-run from a chosen step.
+The index is the foundation. The jump is a **continuity engine**: compile
+many sessions, across agents, into the context the *next* agent actually
+needs — then continue. UI (VS Code sidebar / Context Composer) comes
+after that pipeline exists.
+
+Phased plan, CLI sketches, and the issue list:
+[docs/ROADMAP.md](docs/ROADMAP.md) · [中文](docs/ROADMAP.zh-CN.md).
 
 ## License
 

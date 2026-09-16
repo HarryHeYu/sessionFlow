@@ -62,6 +62,10 @@ voyager continue                    # newest session: native resume when the
 voyager continue --repo black_box --launch
 ```
 
+This is work continuation, not session teleportation. Same-provider
+pickup uses the native CLI (`codex resume`, `claude --resume`, …).
+Multi-session merge / WorkThread: [ROADMAP.md](ROADMAP.md).
+
 ## 6. Hand a task to a different agent
 
 ```sh
@@ -72,7 +76,9 @@ voyager handoff session-8f08216f --to claude --launch # package + start
 The Context Package contains the goal, every follow-up instruction, the
 last assistant message, files touched, commands with exit codes, errors
 and a condensed timeline. Launchable targets: `claude`, `codex`, `grok`;
-other targets get the package file to paste manually.
+other targets get the package file to paste manually. The new session
+does not inherit the previous agent's hidden tool state — it reads the
+package and continues the *work*.
 
 ## 7. From inside an agent (MCP)
 

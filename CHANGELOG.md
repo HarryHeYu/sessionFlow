@@ -6,6 +6,11 @@ All notable changes to Voyager are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Continuity Engine roadmap** (`docs/ROADMAP.md`, `docs/ROADMAP.zh-CN.md`):
+  the next product jump is compiling many sessions across agents into the
+  context the next agent needs — not a TUI-first viewer. Phases: multi-session
+  merge → WorkThread → `--goal` → Context Budget → Skill → `switch` →
+  VS Code sidebar last. Decision records D9 / D10 in `docs/DECISIONS.md`.
 - **Test suite + CI** — the project went from one test file to 69 tests:
   per-adapter regression tests for all 8 platforms against synthetic
   fixtures (`tests/fixtures/`, no real session data), plus store, export,

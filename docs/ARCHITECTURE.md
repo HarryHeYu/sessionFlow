@@ -79,6 +79,12 @@ tests/test_export.py test_handoff.py test_cli.py test_mcp.py
 
 ## Phase 2 预留
 
+战略下一阶段是 **Continuity Engine**（多会话合成 → WorkThread →
+goal-conditioned bundle → Context Budget → Skill / `switch`），
+而不是先做 TUI。完整计划见 [ROADMAP.md](ROADMAP.md)。
+
+索引层已为后续特性留了钩子，但不挡 Continuity：
+
 - `files` 表已建：`voyager diff/files` 走 Claude file-history 版本链（`<hash>@vN`）。
 - 录制层（Flight Recorder）：Claude 原生 hooks（PreToolUse/PostToolUse）+ Codex/ZCode
   rollout 文件 tail（零侵入）。统一事件模型可直接承载录制事件（kind/actor/tool/...）。
