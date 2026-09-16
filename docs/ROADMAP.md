@@ -60,10 +60,18 @@ claim it can. The user-visible seam is one command (`voyager switch
 codex`); underneath it is always **compile from a canonical index**,
 never "move this file into the other agent".
 
-A 2026-09-16 probe wrote synthetic text-only Claude and Codex session
-files and tried native resume. Claude `-p --resume <synthetic-id>`
-hung (orphaned `node` process); Codex was not verified. Live
-transcript transplant is **unproven** and must not be promised.
+A 2026-09-16 headless probe planted a secret only in a **new**
+text-only session file, then native-resumed it:
+
+| Target | Result |
+|---|---|
+| Grok `grok --resume --single` | **HIT** |
+| Codex `codex exec resume` | **HIT** (needed `--ignore-user-config` on this machine) |
+| Claude `claude -p --resume` | **TIMEOUT** at 60s |
+
+So JSONL *writers* for Grok and Codex are real; Claude is not proven.
+They still only run under a **single-writer lease** (below). They are
+not a licence for two agents to share one native file.
 
 ---
 
@@ -73,9 +81,9 @@ Eight agents, eight on-disk formats. They are not interchangeable.
 
 | Provider | On-disk shape | Resume CLI | Safe to *write*? |
 |---|---|---|---|
-| Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | later, opt-in, new id only |
-| Claude Code | project JSONL + `uuid`/`parentUuid` chain + file-history | `claude --resume` | later, opt-in, new id only |
-| Grok | `chat_history.jsonl` (OpenAI-style) + `summary.json` | `grok -r` | later, opt-in, new id only |
+| Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | **yes**, new id, lease required (probe HIT) |
+| Claude Code | project JSONL + `uuid`/`parentUuid` chain + file-history | `claude --resume` | not proven (headless resume timed out) |
+| Grok | `chat_history.jsonl` (OpenAI-style) + `summary.json` | `grok -r` | **yes**, new id, lease required (probe HIT) |
 | DSH | zstd JSONL | `dsh --resume` | later, opt-in, new id only |
 | ZCode | SQLite `message`/`part` | none confirmed | **no** |
 | Cursor | `state.vscdb` KV | none | **no** |
@@ -156,6 +164,99 @@ This is Phase 1b / issue #9. It unblocks an honest `voyager switch`.
 
 ---
 
+## Single-writer canonical log (lock + sync-on-open)
+
+Yes: unify every agent's history into **one Voyager format**, sync it
+into the agent you are about to open, then keep writing — **as long
+as only one agent holds the pen**.
+
+What must not happen: Claude and Codex both appending to the same
+chat. Native files are not shareable; even the canonical log would
+interleave two "current states" and the next compile would be
+garbage.
+
+```
+                    ┌─ lease: grok (pid, heartbeat) ─┐
+canonical log       │                                │
+~/.voyager/         │   on open: materialize         │  while running:
+threads/<id>/       │   canonical → grok JSONL       │  grok JSONL ──ingest──▶ canonical
+                    │   (NEW session id)             │  (do NOT rewrite grok's file)
+                    └────────────────────────────────┘
+switch away → final ingest → release lease → next agent may acquire
+```
+
+### Lock
+
+A WorkThread has at most one **lease**:
+
+```sql
+CREATE TABLE thread_leases (
+    thread_id         TEXT PRIMARY KEY,
+    holder            TEXT NOT NULL,   -- provider
+    native_session_id TEXT,
+    pid               INTEGER,
+    acquired_at       REAL,
+    heartbeat_at      REAL,
+    lease_token       TEXT NOT NULL
+);
+```
+
+- `voyager switch codex` **acquires** the lease or exits: "held by
+  grok pid=1234, heartbeat 8s ago".
+- `voyager watch` **heartbeats** the lease while it tails the holder.
+- Stale if `heartbeat_at` is older than 120s **or** the pid is gone.
+- `voyager thread unlock` / `--steal` for a stuck lease (logged).
+- Same-provider native resume of the *leased* session is allowed;
+  a second provider is not.
+
+SQLite `BEGIN IMMEDIATE` on `index.db` is the atomic acquire. No
+second process can take the same thread in the same transaction.
+
+### Sync-on-open (not live rewrite)
+
+When the lease moves to agent X:
+
+1. Incremental scan of the **previous** holder (flush last turns).
+2. Append those events onto the canonical thread log.
+3. If X has a proven writer (Grok, Codex today): flatten
+   user/assistant text → write a **new** native session → `resume`.
+4. Else: Continuation Bundle + new session (D8). Claude stays here
+   until headless resume of a synthetic JSONL is a HIT.
+5. Attach the new native session to the thread; record it on the lease.
+
+Voyager does **not** rewrite X's native file while X is alive.
+That is the race the lock exists to prevent.
+
+### Continuous write = ingest from the holder only
+
+"Keep writing" means:
+
+- The agent writes its own format (it already does).
+- Voyager tails **that one session** and appends canonical Events
+  (watch can poll that file every few seconds while a lease is held).
+- Other providers' leftover files for this thread are ignored until
+  they become the holder again (and then they get a **new** id).
+
+It does **not** mean: push every new turn into Claude, Codex, and
+Grok at once. That is multi-writer mirroring and is a non-goal.
+
+### Why this is operable
+
+| Piece | Status |
+|---|---|
+| Canonical Event / SQLite | shipped |
+| Scan / watch ingest | shipped; freshness before compile is #9 |
+| WorkThread identity | Phase 2 / #3 |
+| Lease table + acquire/heartbeat/release | Phase 2 / **#11** (this) |
+| Writer Grok / Codex | probe HIT; implement under the lease, new ids only (#10) |
+| Writer Claude | blocked on a HIT |
+| Live rewrite of an open native file | never |
+
+User-visible still one command: `voyager switch grok`. Internally:
+flush → acquire lease → materialize or bundle → launch → tail.
+
+---
+
 ## What already shipped (the foundation)
 
 Do not rebuild this. The continuity layer sits on top.
@@ -225,6 +326,10 @@ WorkThread**.
 10. **Sync the index, not the session files.** Auto-sync means
     scan-before-compile + `watch`. It does not mean two-way
     mirroring of live provider stores.
+11. **One writer per WorkThread.** A thread is leased to at most one
+    live agent. Canonical history is append-only in Voyager.
+    Provider files are a *projection* of that log, materialized
+    only at open, ingested only from the lock holder.
 
 ---
 
@@ -547,8 +652,14 @@ voyager thread attach <sid>
   the latest member can resume **and** `--to` is absent; otherwise
   compile + handoff.
 - MCP `voyager_thread` once the CLI is stable.
+- **Single-writer lease** (issue #11, D13): `thread_leases` table;
+  `switch` acquires or refuses; `watch` heartbeats; stale pid/heartbeat
+  releases; `--steal` is explicit and logged.
+- While a lease is held, ingest **only** the holder's session into
+  the canonical log. Do not rewrite that native file.
 
-**Out of scope:** fancy topic modelling, renaming UX polish, UI.
+**Out of scope:** fancy topic modelling, renaming UX polish, UI,
+writers (those are #10, and they *require* this lease).
 
 ### Phase 3 — Goal-directed handoff
 
@@ -649,15 +760,16 @@ Treat the checkboxes as the implementation contract.
 | [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — *(shipped `ff13096`)* |
 | [#9](https://github.com/HarryHeYu/voyager/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — |
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 |
+| [#11](https://github.com/HarryHeYu/voyager/issues/11) | Single-writer lease on a WorkThread | 2 | #3 |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9** |
-| [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, proven resume of synthetic JSONL |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |
+| [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11**, proven resume of synthetic JSONL |
 | [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 |
 
-#1 is the umbrella. Close it when #2–#7 and #9 are done; #8 and #10
-are explicitly post-moat (#10 may never ship).
+#1 is the umbrella. Close it when #2–#7, #9 and #11 are done; #8 and
+#10 are post-moat (#10 is now Grok/Codex-shaped, still lease-gated).
 
 ---
 
@@ -667,6 +779,8 @@ are explicitly post-moat (#10 may never ship).
   reasoning cannot move).
 - Pairwise format converters (Claude JSONL → Codex JSONL, etc.).
 - Two-way live mirroring of provider session stores.
+- Two agents holding the same WorkThread at once.
+- Rewriting a native session file while that agent is still running.
 - Per-agent plugins as the first UI.
 - Concatenating transcripts and calling it merge.
 - LLM-in-core summarization, cloud APIs, new core dependencies.
@@ -709,9 +823,9 @@ That is the product.
    path. Not in Phases 1–6.
 4. **Daemon.** Watcher already exists (`voyager watch`). A local API
    daemon is only justified when the VS Code client needs it (Phase 7).
-5. **Transcript transplant.** Parked until a synthetic JSONL session
-   can be native-resumed in Claude, Codex, **and** Grok in a
-   headless probe that returns the planted secret. Until then, #10
-   stays open and unscheduled.
+5. **Transcript transplant.** Grok and Codex headless resume of a
+   synthetic text-only JSONL is a HIT; Claude timed out. Writers
+   stay behind the lease (#11) and new-id-only. Claude remains
+   bundle-only until it HITs.
 
 When these need a product call, record it in `docs/DECISIONS.md`.

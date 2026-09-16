@@ -69,25 +69,14 @@ polls on an interval. Continuity commands (`handoff` / `merge` /
 sees that turn. Sync is one-way (provider files → `~/.voyager/index.db`).
 Voyager does not mirror a live Claude JSONL into a Codex rollout.
 
-**Can I finish a chat in Claude and keep the same history visible in Codex?**
+**What if Claude and Codex both keep writing the same chat?**
 
-Not as the same native session. The eight agents store history in eight
-formats (JSONL, zstd JSONL, SQLite, protobuf, VS Code KV); tool names
-do not map; hidden tool state and cached reasoning stay behind.
-Voyager's path is: refresh the index, compile a Continuation Bundle
-from the canonical events, start a *new* Codex session that reads it.
-Same-provider continue still uses native resume. Writing a synthetic
-transcript into another agent's session directory is not the default
-and is not promised ([ROADMAP.md](ROADMAP.md) Phase 1b / #10).
-
-**Does Voyager keep histories in sync automatically?**
-
-It syncs the **index**, not the session files. `voyager watch` already
-polls on an interval. Continuity commands (`handoff` / `merge` /
-`continue` / `switch`) are planned to run an incremental scan
-*before* they compile, so a switch right after a Claude turn still
-sees that turn. Sync is one-way (provider files → `~/.voyager/index.db`).
-Voyager does not mirror a live Claude JSONL into a Codex rollout.
+They must not. A WorkThread is leased to one live agent at a time
+(planned, D13 / issue #11). `voyager switch` acquires the lease or
+refuses. While Grok holds it, Voyager only *ingests* Grok's file into
+the canonical log; it does not rewrite that file, and it will not
+open a Codex writer for the same thread. Sync-on-open happens at
+switch time, not as a live fan-out to every agent.
 
 ## Usage problems
 

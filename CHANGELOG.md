@@ -5,6 +5,12 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Continuity plan: single-writer lease.** Canonical history lives in
+  Voyager; a WorkThread is leased to one live agent (D13 / #11).
+  Sync-on-open materializes into that agent; continuous write is
+  ingest from the holder only — never two agents on the same chat,
+  never rewrite a native file while it is open. Grok/Codex JSONL
+  resume of a synthetic text-only session is a HIT; Claude timed out.
 - **Continuity plan: format translation + auto-sync.** Cross-agent
   "same chat" is not a native session move. Default switch path stays
   scan → canonical Event → Continuation Bundle → new session (D11).

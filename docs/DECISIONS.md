@@ -146,15 +146,17 @@ VS Code Sidebar / Context Composer 明确排在编译器之后（Phase 7）。
 
 **Reason**: 八家落盘格式不能互换；工具名对不上；不成对的 tool_use/result
 会让下一次 API 调用失败；Grok/Codex reasoning 加密；往活 Session 目录写
-会和正在跑的 Agent 抢文件。2026-09-16 的合成 Session resume 探测未通过
-（Claude `-p --resume` 挂死）。D8 已经拒绝「写成目标格式再假装 resume」。
+会和正在跑的 Agent 抢文件。2026-09-16 无头探测：Grok / Codex 对合成纯文本
+JSONL resume 是 HIT；Claude 超时。即便 writer 落地，也必须套在单写者租约
+（D13）里：只写给当前持锁方、只写新 id、活着的时候不回写。D8 已经拒绝
+「写成目标格式再假装 resume」。
 
 **Alternatives**: 默认就写目标 Session 文件，TUI 里能翻到旧回合（更「像无缝」，
 但格式脆弱、未证实）；两两 converter 矩阵（8×7，不可维护）。
 
 **Consequences**: 用户在目标 Agent 里看到的是一份 Bundle 开场的**新**对话，
 不是原来那条聊天记录。同平台续聊仍然走原生 resume（D7）。路线图 Phase 1b / #9
-先做同步；#10 停在「合成 resume 被证实」之后。
+先做同步；#10 的 Grok/Codex writer 必须等 #11 租约；Claude 仍走 bundle。
 
 ## D12 — Continuity 命令在编译前必须刷新索引
 
@@ -174,3 +176,31 @@ bundle 文案。格式翻译已经发生在 adapter 的 parse()；缺的是 pars
 **Consequences**: 编译路径会多一次（通常很快的）增量 scan。测试必须覆盖
 「mtime 变了的 source 出现在下一份 bundle」和「没变的 source 不重解析」。
 这是路线图 Phase 1b / issue #9，并且挡住 `voyager switch`（#7）。
+
+## D13 — 一个 WorkThread 同时只有一个写者
+
+**Decision**: 跨 Agent 接续的规范历史住在 Voyager 里（归一化 Event / 以后的
+thread 日志），**追加写入**。每个 WorkThread 有一份租约：`holder` provider、
+`native_session_id`、`pid`、`heartbeat_at`、`lease_token`。
+`voyager switch <agent>` 必须先抢到租约；抢不到就失败并打印持有者，
+绝不默默开第二份写入。`voyager watch` 在跟踪持锁 Session 时刷新心跳。
+心跳超过 120s 或 pid 消失视为过期。`--steal` / `thread unlock` 必须显式。
+
+同步时机：
+
+1. **打开时**：冲刷上一任 → 物化规范日志到新持锁方（有 writer 则新 session id；
+   否则 bundle）。
+2. **运行中**：只从持锁方的原生文件 **吸入** 规范日志。不回写这份正在用的文件。
+3. **切走时**：最后一次吸入，释放租约。
+
+**Reason**: 用户要的是「统一格式 + 打开就同步 + 不断写入」，这在**单写者**下
+做得到。两家 Agent 同时写同一份聊天（无论是原生文件还是规范日志）会把
+「当前状态」交织掉。探测已证明 Grok/Codex 可以在打开时物化一份新 JSONL；
+活着回写仍会和 Agent 自己的 append 抢文件。
+
+**Alternatives**: 无锁、靠用户别同时开两家（会忘）；两家都实时镜像规范日志
+（多写者）；持锁期间也回写原生文件（和 D11 同一场竞赛）。
+
+**Consequences**: Phase 2 的 WorkThread 必须带 `thread_leases`（issue #11）。
+`switch`（#7）和 writer（#10）都挡住在这把锁后面。测试要覆盖：第二家
+switch 失败、过期租约可抢、持锁期间只吸入持锁方。

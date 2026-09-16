@@ -57,9 +57,16 @@ voyager switch codex
 Voyager 不会声称能做 session migration。用户侧的缝是一条命令（`voyager switch codex`）；
 底下永远是 **从归一化索引编译**，不是「把这个文件塞进另一家」。
 
-2026-09-16 做过一次探测：往 Claude / Codex 的会话目录写入纯文本合成 Session，再走原生 resume。
-Claude `-p --resume <合成 id>` 挂死（留下孤儿 `node` 进程）；Codex 未验证完。
-**现场 transcript transplant 未证实，不能写进承诺。**
+2026-09-16 无头探测：密语只写在**新的**纯文本 Session 文件里，再走原生 resume：
+
+| 目标 | 结果 |
+|---|---|
+| Grok `grok --resume --single` | **HIT** |
+| Codex `codex exec resume` | **HIT**（本机要 `--ignore-user-config`） |
+| Claude `claude -p --resume` | **TIMEOUT**（60s） |
+
+所以 Grok / Codex 的 JSONL writer 是真能用的；Claude 还没打通。
+即便如此，也必须套在下面的 **单写者租约** 里，不是两家 Agent 共用一个原生文件。
 
 ---
 
@@ -69,9 +76,9 @@ Claude `-p --resume <合成 id>` 挂死（留下孤儿 `node` 进程）；Codex 
 
 | Provider | 落盘形态 | Resume CLI | 能不能*写回去* |
 |---|---|---|---|
-| Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | 以后、opt-in、只写新 id |
-| Claude Code | project JSONL + `uuid`/`parentUuid` 链 + file-history | `claude --resume` | 以后、opt-in、只写新 id |
-| Grok | `chat_history.jsonl`（OpenAI 风格）+ `summary.json` | `grok -r` | 以后、opt-in、只写新 id |
+| Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | **可以**，新 id，必须持锁（探测 HIT） |
+| Claude Code | project JSONL + `uuid`/`parentUuid` 链 + file-history | `claude --resume` | 未证实（无头 resume 超时） |
+| Grok | `chat_history.jsonl`（OpenAI 风格）+ `summary.json` | `grok -r` | **可以**，新 id，必须持锁（探测 HIT） |
 | DSH | zstd JSONL | `dsh --resume` | 以后、opt-in、只写新 id |
 | ZCode | SQLite `message`/`part` | 未确认 | **不能** |
 | Cursor | `state.vscdb` KV | 无 | **不能** |
@@ -142,6 +149,88 @@ SQLite 这几家（ZCode / Cursor）本来就是 DB mtime 变了才重扫。
 
 ---
 
+## 单写者规范日志（上锁 + 打开时同步）
+
+可以：把各家历史收成 **Voyager 自己的一份格式**，打开某个 Agent 时同步进去，
+然后持续写入——**前提是同一时刻只有一个 Agent 握笔**。
+
+不能发生的事：Claude 和 Codex 同时往同一份聊天里追加。原生文件没法共享；
+就算写进规范日志，两份「当前状态」交织在一起，下一次编译就是垃圾。
+
+```
+                    ┌─ 租约: grok (pid, heartbeat) ─┐
+规范日志            │                                │
+~/.voyager/         │   打开时: 物化                 │  运行中:
+threads/<id>/       │   规范日志 → grok JSONL        │  grok JSONL ──吸入──▶ 规范日志
+                    │   （新 session id）            │  （不要回写 grok 正在用的文件）
+                    └────────────────────────────────┘
+切走 → 最后一次吸入 → 释放租约 → 下一家才能拿到锁
+```
+
+### 锁
+
+一个 WorkThread 最多一份 **租约**：
+
+```sql
+CREATE TABLE thread_leases (
+    thread_id         TEXT PRIMARY KEY,
+    holder            TEXT NOT NULL,   -- provider
+    native_session_id TEXT,
+    pid               INTEGER,
+    acquired_at       REAL,
+    heartbeat_at      REAL,
+    lease_token       TEXT NOT NULL
+);
+```
+
+- `voyager switch codex` **抢锁**，抢不到就退出：`held by grok pid=1234, heartbeat 8s ago`。
+- `voyager watch` 在跟踪持锁方时 **心跳**。
+- `heartbeat_at` 超过 120s **或** pid 已经没了 → 租约过期。
+- 卡住了用 `voyager thread unlock` / `--steal`（要记日志）。
+- 持锁那一家可以原生 resume；第二家不行。
+
+用 SQLite `BEGIN IMMEDIATE` 在 `index.db` 上原子抢锁，同一事务里不会有第二个进程拿到同一 thread。
+
+### 打开时同步（不是活着回写）
+
+租约转到 Agent X 时：
+
+1. 增量扫描**上一任**持锁方（把最后几轮冲进索引）。
+2. 追加到规范 thread 日志。
+3. 若 X 有已证实的 writer（今天是 Grok、Codex）：把 user/assistant 文本压扁 →
+   写一份**新**原生 Session → `resume`。
+4. 否则：Continuation Bundle + 新 Session（D8）。Claude 在无头 resume 打成 HIT 之前走这条。
+5. 把新原生 Session 挂到 thread，写进租约。
+
+X 还活着的时候，Voyager **不回写**它的原生文件。锁就是为了挡住这场竞赛。
+
+### 「不断写入」= 只从持锁方吸入
+
+意思是：
+
+- Agent 继续写自己的格式（它本来就会）。
+- Voyager 只 tail **那一个** Session，追加成规范 Event
+  （持锁期间 watch 可以对这个文件几秒扫一次）。
+- 这个 thread 上其他家留下的文件先忽略；等它们再当持锁方时拿**新** id。
+
+不是：每一回合同时推进 Claude、Codex、Grok 三份文件。那是多写者镜像，明确不做。
+
+### 为什么这套能落地
+
+| 零件 | 状态 |
+|---|---|
+| 归一化 Event / SQLite | 已有 |
+| scan / watch 吸入 | 已有；编译前刷新是 #9 |
+| WorkThread 身份 | Phase 2 / #3 |
+| 租约表 + 抢锁/心跳/释放 | Phase 2 / **#11** |
+| Writer Grok / Codex | 探测 HIT；必须在租约下、只写新 id（#10） |
+| Writer Claude | 等 HIT |
+| 回写正在跑的原生文件 | 永不 |
+
+用户侧还是一条命令：`voyager switch grok`。内部：冲刷 → 抢锁 → 物化或 bundle → 拉起 → tail。
+
+---
+
 ## 已经有的地基（不要推倒重来）
 
 | 层 | 现状 |
@@ -199,6 +288,9 @@ Voyager 现在看到四条 Session。下一版应该开始看到**一个 WorkThr
    Adapter 负责读；编译器产出 bundle；以后若有 writer，也只读归一化 Event。
 10. **同步的是索引，不是 Session 文件。** 自动同步 = 先扫再编译 + `watch`。
     不是两家活 Session 的双向镜像。
+11. **一个 WorkThread 只有一个写者。** Thread 同时最多租给一个活着的 Agent。
+    规范历史在 Voyager 里只追加。Provider 文件是这份日志的*投影*：
+    只在打开时物化，只从持锁方吸入。
 
 ---
 
@@ -499,8 +591,12 @@ voyager thread attach <sid>
 - 无参数 `continue`：cwd 的 repo → 活动 thread → 若最新成员能原生 resume
   且没给 `--to`，走 resume；否则编译 + handoff。
 - CLI 稳定后再加 MCP `voyager_thread`。
+- **单写者租约**（issue #11，D13）：`thread_leases` 表；
+  `switch` 抢不到就拒绝；`watch` 心跳；pid/心跳过期即释放；`--steal` 必须显式且记日志。
+- 持锁期间只把持锁方的 Session 吸入规范日志。不回写那份原生文件。
 
-**本阶段不做：** 花哨的主题模型、重命名体验打磨、UI。
+**本阶段不做：** 花哨的主题模型、重命名体验打磨、UI、
+writer（那是 #10，而且**必须**先有这把锁）。
 
 ### Phase 3 — 面向目标的 handoff
 
@@ -595,14 +691,15 @@ voyager switch codex
 | [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — *（已落地 `ff13096`）* |
 | [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — |
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 |
+| [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9** |
-| [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9，且合成 JSONL 的原生 resume 已证实 |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |
+| [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11**，合成 JSONL 的原生 resume 已证实 |
 | [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 |
 
-#1 是伞。#2–#7 和 #9 完成就关；#8 和 #10 明确是壁垒形成之后的事（#10 可能永远不落地）。
+#1 是伞。#2–#7、#9 和 #11 完成就关；#8 和 #10 是壁垒之后的事（#10 现在是 Grok/Codex 形状，仍然要套租约）。
 
 ---
 
@@ -611,6 +708,8 @@ voyager switch codex
 - 无缝 **Session** 迁移（system prompt / tool state / cached reasoning 搬不过去）。
 - 两两格式转换（Claude JSONL → Codex JSONL 之类）。
 - 两家活 Session 文件的双向实时镜像。
+- 两个 Agent 同时持有同一个 WorkThread。
+- Agent 还在跑的时候回写它的原生 Session 文件。
 - 把各家插件当第一 UI。
 - 把 transcript concat 起来叫做 merge。
 - 在 core 里用 LLM 做摘要、接云端 API、给 core 加新依赖。
@@ -648,8 +747,8 @@ Codex 在**新** Session 里启动，读到的 bundle 已经知道目标、活�
    必须 opt-in，不走 core 路径。不进 Phase 1–6。
 4. **Daemon。** `voyager watch` 已经存在。本地 API daemon 只在 VS Code
    客户端需要时才做（Phase 7）。
-5. **Transcript transplant。** 停在这里：要先有一个 headless 探测，能让
-   Claude、Codex **和** Grok 对合成 JSONL 做原生 resume，并答出埋进去的密语。
-   在那之前 #10 开着、不排期。
+5. **Transcript transplant。** Grok 和 Codex 对合成纯文本 JSONL 的无头 resume
+   是 HIT；Claude 超时。Writer 必须套在租约（#11）后面，且只写新 id。
+   Claude 在打成 HIT 之前继续走 bundle。
 
 需要拍板时写入 `docs/DECISIONS.md`。
