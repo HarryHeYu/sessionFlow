@@ -444,6 +444,15 @@ def cmd_continue(args) -> int:
     """One command to pick work back up: native resume when possible,
     automatic cross-agent handoff otherwise."""
     store = Store(args.db)
+    from_sessions = getattr(args, "from_sessions", None)
+    if from_sessions:
+        refs = [s.strip() for s in from_sessions.split(",") if s.strip()]
+        if not refs:
+            print("error: --from requires at least one session id", file=sys.stderr)
+            return 2
+        rows = [_resolve(store, ref) for ref in refs]
+        return _merge_and_handoff(store, rows, args)
+
     if args.session:
         row = _resolve(store, args.session)
     else:
@@ -514,6 +523,62 @@ def cmd_handoff(args) -> int:
     store = Store(args.db)
     row = _resolve(store, args.session)
     return _handoff_from_row(store, row, args)
+
+
+def cmd_merge(args) -> int:
+    """Synthesize multiple sessions into one Continuation Bundle."""
+    store = Store(args.db)
+    session_refs = args.sessions
+    if not session_refs:
+        print("error: at least one session id required", file=sys.stderr)
+        return 2
+    rows = [_resolve(store, ref) for ref in session_refs]
+    return _merge_and_handoff(store, rows, args)
+
+
+def _merge_and_handoff(store: Store, rows: list, args) -> int:
+    from .continuity import (
+        PROMPT_TARGETS,
+        build_continuation_bundle,
+        bundle_command,
+        default_bundle_name,
+        get_bundles_dir,
+    )
+    out_dir = get_bundles_dir()
+    out = Path(args.output) if getattr(args, "output", None) else (out_dir / default_bundle_name(rows))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    bundle = build_continuation_bundle(store, rows, goal=getattr(args, "goal", None))
+    out.write_text(bundle, encoding="utf-8")
+    print(f"continuation bundle: {out.resolve()} ({len(bundle)} chars)")
+
+    target = getattr(args, "to", None)
+    if not target:
+        if getattr(args, "cmd", "") == "continue":
+            target = "claude"
+            print("defaulting continuation target to 'claude' (override with --to)")
+        else:
+            print(f"next: pick a target agent, e.g. "
+                  f"`voyager merge {' '.join(r['native_id'][:8] for r in rows)} --to claude` "
+                  f"(targets with direct launch: {', '.join(sorted(PROMPT_TARGETS))})")
+            return 0
+
+    argv = bundle_command(target, out)
+    if argv is None:
+        print(f"Direct continuation launch is not supported for '{target}'. "
+              f"Launchable targets: {', '.join(sorted(PROMPT_TARGETS))}. "
+              f"You can still paste {out.resolve()} into that agent manually.")
+        return 1
+    print(f"$ {argv[0]} \"<continuation prompt>\"")
+    if getattr(args, "launch", False):
+        try:
+            return subprocess.call(argv)
+        except KeyboardInterrupt:
+            return 130
+        except OSError as e:
+            print(f"failed to launch: {e}", file=sys.stderr)
+            return 1
+    print("add --launch to start it now")
+    return 0
 
 
 def _handoff_from_row(store: Store, row, args) -> int:
@@ -623,9 +688,18 @@ def main(argv=None) -> int:
                         help="export a session as a context package for another agent")
     sp.add_argument("session")
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
-    sp.add_argument("--output", "-o", help="package file path (default handoff-<provider>-<id>.md)")
+    sp.add_argument("--output", "-o", help="package file path (default ~/.voyager/bundles/...)")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the package")
     sp.set_defaults(func=cmd_handoff)
+
+    sp = sub.add_parser("merge", parents=[common],
+                        help="synthesize multiple sessions into a continuation bundle")
+    sp.add_argument("sessions", nargs="+", help="session ids/prefixes to merge")
+    sp.add_argument("--goal", help="explicit primary goal for the next agent")
+    sp.add_argument("--to", help="target agent (claude, codex, grok)")
+    sp.add_argument("--output", "-o", help="bundle file path (default ~/.voyager/bundles/...)")
+    sp.add_argument("--launch", action="store_true", help="launch the target agent with the bundle")
+    sp.set_defaults(func=cmd_merge)
 
     sp = sub.add_parser("watch", help="keep the index in sync automatically",
                         parents=[common])
@@ -637,9 +711,13 @@ def main(argv=None) -> int:
     sp = sub.add_parser("continue", parents=[common],
                         help="pick work back up in one command (native resume, or auto-handoff)")
     sp.add_argument("session", nargs="?", help="session id/prefix (default: newest session)")
+    sp.add_argument("--from", dest="from_sessions",
+                    help="comma-separated session ids to synthesize and continue from")
+    sp.add_argument("--goal", help="explicit primary goal for the continuation bundle")
     sp.add_argument("--repo", help="pick the newest session of this repo")
     sp.add_argument("--platform", help="pick the newest session of this provider")
     sp.add_argument("--to", help="force cross-agent handoff to this target")
+    sp.add_argument("--output", "-o", help="bundle file path (when continuing via handoff/merge)")
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
     sp.set_defaults(func=cmd_continue)
 

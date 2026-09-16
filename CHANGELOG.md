@@ -5,7 +5,15 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
-### Added
+- **Continuity Engine Phase 1: `voyager merge` & multi-session context synthesis** (`voyager/continuity.py`):
+  - Synthesize $N$ sessions across agents into a coherent Continuation Bundle (`voyager merge <s1> <s2> ...`).
+  - Chronological overlay: newest session's "where work stopped" is active state; older proposals are cataloged under **Prior assistant conclusions (may be superseded)** with source IDs and timestamps.
+  - Automatic deduplication of touched files, executed commands, and non-zero exit errors.
+  - Live git snapshot at bundle time (branch, HEAD commit, dirty file status).
+  - `voyager continue --from <s1,s2,...>` to pick up work across multiple sessions.
+  - Global bundle storage in `~/.voyager/bundles/` by default, avoiding working tree leftovers.
+  - Added `voyager_merge` tool to the MCP server (`voyager/mcp_server.py`).
+  - Direct `pytest` runner support via `pythonpath = ["."]` in `pyproject.toml`.
 - **Continuity Engine roadmap** (`docs/ROADMAP.md`, `docs/ROADMAP.zh-CN.md`):
   the next product jump is compiling many sessions across agents into the
   context the next agent needs — not a TUI-first viewer. Phases: multi-session

@@ -187,8 +187,9 @@ def voyager_handoff(session_id: str, target: str = "claude") -> str:
     errors, where work stopped) from a session, for handing the task to a
     DIFFERENT agent. Returns the package file path — the target agent
     should read that file and continue the task."""
-    from .handoff import build_context_package, default_package_name
     from pathlib import Path
+    from .continuity import get_bundles_dir
+    from .handoff import build_context_package, default_package_name
     store = Store()
     row, ambiguous = store.session(session_id)
     if row is None and ambiguous:
@@ -199,12 +200,43 @@ def voyager_handoff(session_id: str, target: str = "claude") -> str:
     if row is None:
         store.close()
         return f"session not found: {session_id}"
-    out = Path(default_package_name(row))
+    out = get_bundles_dir() / default_package_name(row)
     out.write_text(build_context_package(store, row), encoding="utf-8")
     store.close()
     return (f"Context package written to {out.resolve()}. "
             f"Target agent ({target}) should read this file and continue "
             f"the task described inside.")
+
+
+@mcp.tool()
+def voyager_merge(session_ids: list[str], target: str = "claude", goal: str = "") -> str:
+    """Synthesize multiple sessions (from any agents) into a single Continuation
+    Bundle, resolving chronological conflicts, deduplicating files/commands/errors,
+    and capturing live git state. Returns the bundle file path — the target agent
+    should read that file and continue work."""
+    from pathlib import Path
+    from .continuity import build_continuation_bundle, default_bundle_name, get_bundles_dir
+    store = Store()
+    rows = []
+    for sid in session_ids:
+        row, ambiguous = store.session(sid)
+        if row is None and ambiguous:
+            store.close()
+            return f"ambiguous id '{sid}', candidates: " + ", ".join(r['native_id'] for r in ambiguous[:5])
+        if row is None:
+            store.close()
+            return f"session not found: {sid}"
+        rows.append(row)
+    if not rows:
+        store.close()
+        return "error: no valid sessions provided"
+    out_dir = get_bundles_dir()
+    out = out_dir / default_bundle_name(rows)
+    bundle = build_continuation_bundle(store, rows, goal=goal or None)
+    out.write_text(bundle, encoding="utf-8")
+    store.close()
+    return (f"Continuation bundle written to {out.resolve()} ({len(bundle)} chars). "
+            f"Target agent ({target}) should read this file and continue the task.")
 
 
 def main() -> None:

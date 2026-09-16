@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 TOOL_NAMES = ["voyager_brief", "voyager_search", "voyager_list", "voyager_show",
-              "voyager_handoff"]
+              "voyager_handoff", "voyager_merge"]
 
 
 def test_module_imports_and_exposes_tools():
@@ -63,6 +63,10 @@ def test_tools_are_bound_to_the_store_fixture(indexed_store, monkeypatch):
     brief = mcp_server.voyager_brief(hours=1_000_000)
     assert "sessions active in the last 1000000h" in brief
     assert "last user: fix the parser" in brief
+
+    merged = mcp_server.voyager_merge(["11111111-2222", "sess_z9"], target="claude")
+    assert "Continuation bundle written to" in merged
+    assert "Target agent (claude) should read this file" in merged
 
 
 class StoreProxy:
