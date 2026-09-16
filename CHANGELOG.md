@@ -5,6 +5,15 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Continuity plan: format translation + auto-sync.** Cross-agent
+  "same chat" is not a native session move. Default switch path stays
+  scan → canonical Event → Continuation Bundle → new session (D11).
+  Next implementation cut is Phase 1b: incremental scan *before*
+  `handoff` / `merge` / `continue` / `switch` (D12), because a stale
+  index is the actual seam. Pairwise converters and two-way session
+  mirroring are explicit non-goals. Optional transcript writers are
+  parked until synthetic JSONL resume is proven (#10). See
+  [docs/ROADMAP.md](docs/ROADMAP.md).
 - **Continuity Engine Phase 1: `voyager merge` & multi-session context synthesis** (`voyager/continuity.py`):
   - Synthesize $N$ sessions across agents into a coherent Continuation Bundle (`voyager merge <s1> <s2> ...`).
   - Chronological overlay: newest session's "where work stopped" is active state; older proposals are cataloged under **Prior assistant conclusions (may be superseded)** with source IDs and timestamps.

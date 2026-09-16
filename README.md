@@ -127,7 +127,9 @@ Same-provider pickup still uses native resume (`codex resume`, …).
 and does the right thing — native resume for codex/claude/dsh/grok,
 automatic handoff package for the rest. `voyager continue --repo myproj
 --launch` goes straight back into a specific project. Multi-session merge
-and WorkThread are the next step — [docs/ROADMAP.md](docs/ROADMAP.md).
+is already there (`voyager merge` / `continue --from`); next is
+auto-sync (scan before switch) then WorkThread —
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 **Everyday flow** — `brief` to see what's moving, `export` to read one
 session in full (a 2,915-message DSH session → a 20 MB Markdown file),

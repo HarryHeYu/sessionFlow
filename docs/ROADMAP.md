@@ -2,7 +2,8 @@
 
 > Voyager compiles scattered agent histories into the context the next agent actually needs.
 
-**Status:** planning (no implementation in this document).
+**Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
+Phase 1b (auto-sync) is the next implementation cut; Phases 2–7 remain planning.
 **Companion:** [中文版](ROADMAP.zh-CN.md)
 
 Voyager today is a unified **index** of every AI coding agent on the machine.
@@ -36,8 +37,122 @@ reasoning, or provider runtime. Voyager will never claim it can. What it
 voyager switch codex
 ```
 
-find the active thread, extract state, check git, write a Continuation
-Bundle, launch Codex, and have Codex read the bundle and keep working.
+find the active thread, **refresh the index**, extract state, check git,
+write a Continuation Bundle, launch Codex, and have Codex read the
+bundle and keep working.
+
+---
+
+## Can we switch chat history across agents?
+
+This is the question that looks like session teleportation. It is three
+different products, and only two of them are real:
+
+| What people mean | Possible? | What the user actually gets |
+|---|---|---|
+| Same-provider native resume | **Yes, shipped** (`voyager resume` / `continue`) | The original chat, original tool state, original CLI. |
+| Cross-agent *work* continuation | **Yes, Phase 1 shipped** (`merge` / `continue --from` / `handoff`) | A **new** session in the target agent that reads a Continuation Bundle and keeps working. |
+| Cross-agent *chat transcript* in the other TUI | **Not the default.** Maybe later, JSONL CLIs only, opt-in | A synthetic text-only history under a **new** session id. Not the original session. |
+
+Cross-agent resume cannot copy system prompts, hidden tool state, cached
+reasoning, MCP connections, or provider runtime. Voyager will never
+claim it can. The user-visible seam is one command (`voyager switch
+codex`); underneath it is always **compile from a canonical index**,
+never "move this file into the other agent".
+
+A 2026-09-16 probe wrote synthetic text-only Claude and Codex session
+files and tried native resume. Claude `-p --resume <synthetic-id>`
+hung (orphaned `node` process); Codex was not verified. Live
+transcript transplant is **unproven** and must not be promised.
+
+---
+
+## Format translation (why pairwise copy fails)
+
+Eight agents, eight on-disk formats. They are not interchangeable.
+
+| Provider | On-disk shape | Resume CLI | Safe to *write*? |
+|---|---|---|---|
+| Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | later, opt-in, new id only |
+| Claude Code | project JSONL + `uuid`/`parentUuid` chain + file-history | `claude --resume` | later, opt-in, new id only |
+| Grok | `chat_history.jsonl` (OpenAI-style) + `summary.json` | `grok -r` | later, opt-in, new id only |
+| DSH | zstd JSONL | `dsh --resume` | later, opt-in, new id only |
+| ZCode | SQLite `message`/`part` | none confirmed | **no** |
+| Cursor | `state.vscdb` KV | none | **no** |
+| Antigravity | SQLite + protobuf | none | **no** |
+| Kiro | JSON `history[]`, no tools | none | **no** |
+
+Tool names do not map (`Read` ≠ `shell_command` ≠ `read_file`).
+Unmatched `tool_use` / `tool_result` pairs break the next API call.
+Grok/Codex reasoning is encrypted. A pairwise converter matrix
+(Claude→Codex, Codex→Grok, …) is 8×7 writers that rot whenever a
+vendor bumps a JSONL schema.
+
+So the hub is the index Voyager already has:
+
+```
+8 provider formats
+      ↓  adapters (read-only)          shipped
+canonical Session / Event
+      ↓  continuity compiler           Phase 1 shipped
+Continuation Bundle (Markdown, D8)
+      ↓  launch target
+new session in the other agent
+```
+
+An optional later branch — **transcript transplant** — also starts
+from the canonical Event, never from a sibling provider file:
+
+```
+canonical Event
+      ↓  flatten to user/assistant text (drop tool calls)
+      ↓  per-adapter WRITER, JSONL CLIs only, NEW session id
+target session file
+      ↓  native resume
+```
+
+Writers are a new, test-covered adapter surface. They are not the
+default switch path (D8, D11). Default stays: compile a bundle.
+
+---
+
+## Auto-sync (the actual seam)
+
+"Switch chat history" fails in practice when the bundle is built from
+a **stale index**, not when the Markdown is imperfect.
+
+Today:
+
+- `voyager scan` is manual.
+- `voyager watch` polls every 300s (mtime + size, idempotent).
+- `continue` / `handoff` / `merge` compile from whatever is already
+  in `~/.voyager/index.db`.
+
+If you just finished a Claude turn and immediately `voyager switch
+codex`, the last turn may not be in the index yet. That is the
+seam-breaker.
+
+Required rules (D12):
+
+1. **Scan-before-compile.** `handoff` / `merge` / `continue` /
+   `switch` run an incremental scan (not `--force`) before they
+   read the store. Targeted to the relevant provider/repo when
+   possible.
+2. **`voyager watch` stays the background daemon.** Switch must
+   not depend on it having ticked recently.
+3. **One-way only.** Provider files → index. Never two-way live
+   mirroring: that is a format-translation problem *and* a race
+   against the agent that owns the file.
+4. **After switch.** The next scan/watch indexes the *new* target
+   session and (Phase 2) attaches it to the WorkThread.
+5. **Optional later.** OS filesystem events instead of a 300s
+   poll. Correctness does not depend on this if (1) exists.
+
+JSONL agents (Claude / Codex / Grok / DSH) bump mtime every turn,
+so an incremental scan sees them. SQLite agents (ZCode / Cursor)
+already rescan when the DB mtime changes.
+
+This is Phase 1b / issue #9. It unblocks an honest `voyager switch`.
 
 ---
 
@@ -51,7 +166,9 @@ Do not rebuild this. The continuity layer sits on top.
 | Index | SQLite + FTS5 trigram (`voyager/store.py`), idempotent scan |
 | Per-session handoff V1 | `voyager/handoff.py`: one session → Markdown Context Package → launch `claude` / `codex` / `grok` |
 | Continue V1 | newest session; native resume when `can_resume`, else handoff |
-| MCP | `brief` / `search` / `list` / `show` / `handoff` |
+| Merge / Continuity V1 | `voyager/continuity.py`: N sessions → Continuation Bundle; `voyager merge`; `continue --from`; MCP `voyager_merge` |
+| Watch V1 | interval poll (`voyager watch`, default 300s). Does **not** yet run before handoff/switch. |
+| MCP | `brief` / `search` / `list` / `show` / `handoff` / `merge` |
 | Constraints | provider files read-only; no network; no telemetry; core has zero deps |
 
 Handoff V1 already extracts original request, follow-ups, last assistant
@@ -101,6 +218,13 @@ WorkThread**.
    compiler. Do not grow a Claude plugin, a Codex plugin, and a Cursor
    plugin that each reimplement merge.
 8. **UI last.** A sidebar is a viewer. The moat is the pipeline below.
+9. **Canonical IR, never pairwise converters.** Claude JSONL is never
+   rewritten as Codex JSONL. Adapters read; the compiler emits a
+   bundle; optional writers (if they ever exist) also read the
+   canonical Event.
+10. **Sync the index, not the session files.** Auto-sync means
+    scan-before-compile + `watch`. It does not mean two-way
+    mirroring of live provider stores.
 
 ---
 
@@ -108,6 +232,7 @@ WorkThread**.
 
 ```
 Raw history (many sessions, many providers)
+      ↓  0. sync       incremental scan (mtime+size) so the index is not stale
       ↓  1. select     repo / time / files / branch / goal
       ↓  2. extract    facts with pointers (not essays)
       ↓  3. dedup      same file, same command, same error
@@ -332,7 +457,7 @@ shippable and reviewable.
 
 **Done when:** wording cannot be mistaken for session teleportation.
 
-### Phase 1 — Multi-session Context Synthesis  **(do this first)**
+### Phase 1 — Multi-session Context Synthesis  **(shipped, `ff13096`)**
 
 **Why.** More important than single-session handoff. Unblocks everything.
 
@@ -363,6 +488,42 @@ voyager continue --from A,B,C --to claude
 `voyager/mcp_server.py`, `tests/test_handoff.py` / `tests/test_continuity.py`.
 
 **Out of scope:** thread table, `--goal` ranking, token budget, UI.
+
+### Phase 1b — Index freshness / auto-sync  **(do this next)**
+
+**Why.** Cross-agent switch is only as fresh as the index. Format
+translation already happens at scan time; the missing piece is
+*when* scan runs.
+
+```
+voyager switch codex          # must scan first, then compile
+voyager merge A B C --launch  # same
+voyager watch                 # background; not a substitute
+```
+
+**Implement**
+
+- `handoff` / `merge` / `continue` / `switch` call an incremental
+  `scan` (respect mtime+size, never `--force`) before they read
+  sessions. Prefer a provider/repo-scoped scan when the command
+  already knows one.
+- Print a one-line freshness note (`scanned 0.8s, 2 sources changed`)
+  so a stale-feeling bundle is diagnosable.
+- Keep `voyager watch` as the background path (default 300s). Do
+  not require a daemon for switch to be correct.
+- After a launched handoff/switch, the new target session is picked
+  up by the next scan/watch. Phase 2 attaches it to the WorkThread.
+- Tests: a fixture source whose mtime is bumped between two
+  `merge` calls must appear in the second bundle; a source that did
+  not change must not be re-parsed (idempotency).
+- Still one-way: tests must assert we do not write into provider
+  session directories.
+
+**Files:** `voyager/cli.py`, `voyager/store.py` (if a scoped scan
+helper is needed), `tests/test_cli.py` / `tests/test_continuity.py`.
+
+**Out of scope:** OS filesystem events, two-way session mirroring,
+transcript writers, WorkThread.
 
 ### Phase 2 — WorkThread
 
@@ -453,12 +614,16 @@ voyager switch codex
 
 **Implement**
 
+0. Incremental scan (Phase 1b / D12). Refuse to compile from a
+   store that has not been refreshed in this process.
 1. Resolve active thread (cwd / `--repo` / explicit `--thread`).
-2. Same provider + `can_resume` → native resume (D7).
+2. Same provider + `can_resume` **and no `--to`** → native resume (D7).
 3. Else compile bundle (goal + budget defaults) → launch target (D8).
 4. Re-check git working tree; warn if dirty in a surprising way.
+5. Do **not** write a synthetic session into the target agent's
+   store (D11). Bundle file + "read this path" is the injection.
 
-User-visible: one command. Internally: select → compile → launch.
+User-visible: one command. Internally: scan → select → compile → launch.
 
 ### Phase 7 — VS Code sidebar / Context Composer  *(last)*
 
@@ -481,16 +646,18 @@ Treat the checkboxes as the implementation contract.
 | Issue | Title | Phase | Blocked by |
 |---|---|---|---|
 | [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine: tracking issue | 0 | — |
-| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — |
+| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — *(shipped `ff13096`)* |
+| [#9](https://github.com/HarryHeYu/voyager/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — |
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5 |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9** |
+| [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, proven resume of synthetic JSONL |
 | [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 |
 
-#1 is the umbrella. Close it when #2–#7 are done; #8 is explicitly
-post-moat.
+#1 is the umbrella. Close it when #2–#7 and #9 are done; #8 and #10
+are explicitly post-moat (#10 may never ship).
 
 ---
 
@@ -498,11 +665,16 @@ post-moat.
 
 - Seamless **session** migration (system prompt / tool state / cached
   reasoning cannot move).
+- Pairwise format converters (Claude JSONL → Codex JSONL, etc.).
+- Two-way live mirroring of provider session stores.
 - Per-agent plugins as the first UI.
 - Concatenating transcripts and calling it merge.
 - LLM-in-core summarization, cloud APIs, new core dependencies.
 - Replacing native resume for same-provider continue (D7).
-- Writing into provider session directories.
+- Writing into provider session directories **as the default switch
+  path** (D8, D11). An opt-in writer is #10, after synthetic resume
+  is proven per CLI, and even then: new ids only, text-only flatten,
+  JSONL CLIs only.
 - A standalone web app.
 - Treating TUI / more adapters as the *strategic* next step. Adapters
   still matter when a format breaks; they are not the product jump.
@@ -525,11 +697,10 @@ That is the product.
 
 ---
 
-## Open questions (do not block Phase 1)
+## Open questions (do not block Phase 1b)
 
-1. **Bundle location.** Default `~/.voyager/bundles/` vs repo-local
-   `.voyager/` (gitignored). Leaning global so provider cwd mess and
-   accidental commits stay unlikely; `-o` always available.
+1. **Bundle location.** *Decided in Phase 1:* default
+   `~/.voyager/bundles/`; `-o` always available.
 2. **Thread identity.** Auto-cluster only, vs requiring `merge` to
    create a thread. Leaning: auto-cluster for `continue --repo`,
    persist when the user merges or switches.
@@ -538,5 +709,9 @@ That is the product.
    path. Not in Phases 1–6.
 4. **Daemon.** Watcher already exists (`voyager watch`). A local API
    daemon is only justified when the VS Code client needs it (Phase 7).
+5. **Transcript transplant.** Parked until a synthetic JSONL session
+   can be native-resumed in Claude, Codex, **and** Grok in a
+   headless probe that returns the planted secret. Until then, #10
+   stays open and unscheduled.
 
 When these need a product call, record it in `docs/DECISIONS.md`.

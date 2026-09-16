@@ -4,7 +4,8 @@
 >
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
-**状态：** 规划（本文不包含实现）。
+**状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
+下一步实现是 Phase 1b（自动同步）；Phase 2–7 仍是规划。
 **英文版：** [ROADMAP.md](ROADMAP.md)
 
 Voyager 现在是机器上所有 AI 编码 Agent 的统一**索引**。
@@ -37,8 +38,107 @@ provider 运行时状态。Voyager 不会声称能做到 session migration。
 voyager switch codex
 ```
 
-找到当前 thread，抽取状态，检查 git，写出 Continuation Bundle，
+找到当前 thread，**刷新索引**，抽取状态，检查 git，写出 Continuation Bundle，
 启动 Codex，让它读 bundle 接着干。
+
+---
+
+## 能不能跨 Agent 切换聊天历史？
+
+看起来像「把同一个 Session 搬过去」。其实是三件不同的事，只有两件做得到：
+
+| 人们以为的 | 做不做得到 | 用户实际拿到的 |
+|---|---|---|
+| 同一家的原生 resume | **可以，已有**（`voyager resume` / `continue`） | 原来的聊天、原来的 tool state、原来的 CLI。 |
+| 跨 Agent 的**工作接续** | **可以，Phase 1 已有**（`merge` / `continue --from` / `handoff`） | 目标 Agent 里开一个**新** Session，读 Continuation Bundle，接着干。 |
+| 跨 Agent 让另一家 TUI **显示旧回合** | **不是默认路径。** 以后也许可以，仅限 JSONL CLI，opt-in | 一份纯文本合成历史、**新** session id。不是原来那个 Session。 |
+
+跨 Agent 搬不走 system prompt、隐藏 tool state、cached reasoning、MCP 连接、provider 运行时。
+Voyager 不会声称能做 session migration。用户侧的缝是一条命令（`voyager switch codex`）；
+底下永远是 **从归一化索引编译**，不是「把这个文件塞进另一家」。
+
+2026-09-16 做过一次探测：往 Claude / Codex 的会话目录写入纯文本合成 Session，再走原生 resume。
+Claude `-p --resume <合成 id>` 挂死（留下孤儿 `node` 进程）；Codex 未验证完。
+**现场 transcript transplant 未证实，不能写进承诺。**
+
+---
+
+## 格式翻译（为什么不能两两拷贝）
+
+八家 Agent，八种落盘格式，不能互换。
+
+| Provider | 落盘形态 | Resume CLI | 能不能*写回去* |
+|---|---|---|---|
+| Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | 以后、opt-in、只写新 id |
+| Claude Code | project JSONL + `uuid`/`parentUuid` 链 + file-history | `claude --resume` | 以后、opt-in、只写新 id |
+| Grok | `chat_history.jsonl`（OpenAI 风格）+ `summary.json` | `grok -r` | 以后、opt-in、只写新 id |
+| DSH | zstd JSONL | `dsh --resume` | 以后、opt-in、只写新 id |
+| ZCode | SQLite `message`/`part` | 未确认 | **不能** |
+| Cursor | `state.vscdb` KV | 无 | **不能** |
+| Antigravity | SQLite + protobuf | 无 | **不能** |
+| Kiro | JSON `history[]`，无 tool | 无 | **不能** |
+
+工具名对不上（`Read` ≠ `shell_command` ≠ `read_file`）。
+不成对的 `tool_use` / `tool_result` 会让下一次 API 调用直接失败。
+Grok / Codex 的 reasoning 是加密的。
+两两转换（Claude→Codex、Codex→Grok、…）是 8×7 个 writer，上游改一行 schema 就全烂。
+
+所以枢纽是 Voyager 已经有的索引：
+
+```
+8 种 provider 格式
+      ↓  adapter（只读）               已有
+归一化 Session / Event
+      ↓  continuity 编译器            Phase 1 已有
+Continuation Bundle（Markdown，D8）
+      ↓  拉起目标
+另一家 Agent 的新 Session
+```
+
+以后若做 **transcript transplant**，也从归一化 Event 出发，绝不从另一家的文件直转：
+
+```
+归一化 Event
+      ↓  压成 user/assistant 文本（丢掉 tool call）
+      ↓  每家一个 WRITER，仅 JSONL CLI，只写新 session id
+目标 Session 文件
+      ↓  原生 resume
+```
+
+Writer 是新的、要有测试覆盖的 adapter 面。不是默认 switch 路径（D8、D11）。
+默认永远是：编译一份 bundle。
+
+---
+
+## 自动同步（真正的接缝）
+
+「切换聊天历史」在实践里先死在 **索引是旧的**，而不是 Markdown 写得不够好。
+
+现在：
+
+- `voyager scan` 要人手跑。
+- `voyager watch` 每 300s 轮询（mtime + size，幂等）。
+- `continue` / `handoff` / `merge` 直接读 `~/.voyager/index.db` 里现成的东西。
+
+刚在 Claude 里聊完一轮立刻 `voyager switch codex`，最后一轮可能还没进索引。
+这才是接缝处会断的地方。
+
+必须遵守的规则（D12）：
+
+1. **先扫再编译。** `handoff` / `merge` / `continue` / `switch` 读 store 之前
+   先做一次增量 scan（尊重 mtime+size，绝不 `--force`）。命令已经知道
+   provider / repo 时，尽量只扫那一块。
+2. **`voyager watch` 继续当后台 daemon。** switch 的正确性不能依赖它刚好刚跑过。
+3. **只单向。** provider 文件 → 索引。绝不做两家 Session 文件的双向实时镜像：
+   那既是格式翻译问题，也是和正在写文件的 Agent 抢锁。
+4. **switch 之后。** 下一次 scan/watch 把目标 Agent 的**新** Session 收进索引，
+   Phase 2 再挂到 WorkThread 上。
+5. **更晚可选。** 用操作系统文件事件替代 300s 轮询。有了（1），正确性不靠这个。
+
+JSONL 这几家（Claude / Codex / Grok / DSH）每回合都会改 mtime，增量 scan 能看见。
+SQLite 这几家（ZCode / Cursor）本来就是 DB mtime 变了才重扫。
+
+这是 Phase 1b / issue #9。没有它，`voyager switch` 说不响。
 
 ---
 
@@ -50,7 +150,9 @@ voyager switch codex
 | Index | SQLite + FTS5 trigram（`voyager/store.py`），幂等扫描 |
 | 单 Session handoff V1 | `voyager/handoff.py`：一个会话 → Markdown 上下文包 → 拉起 `claude` / `codex` / `grok` |
 | Continue V1 | 最新会话；能原生 resume 就 resume，否则 handoff |
-| MCP | `brief` / `search` / `list` / `show` / `handoff` |
+| Merge / Continuity V1 | `voyager/continuity.py`：N 个会话 → Continuation Bundle；`voyager merge`；`continue --from`；MCP `voyager_merge` |
+| Watch V1 | 定时轮询（`voyager watch`，默认 300s）。**还不会**在 handoff/switch 前自动跑。 |
+| MCP | `brief` / `search` / `list` / `show` / `handoff` / `merge` |
 | 约束 | provider 文件只读；无网络；无遥测；core 零依赖 |
 
 Handoff V1 已经抽出：原始请求、后续指令、最后一条助手消息、碰过的文件、
@@ -93,6 +195,10 @@ Voyager 现在看到四条 Session。下一版应该开始看到**一个 WorkThr
 7. **核心只有一份，前端可以有多个。** CLI / MCP / Skill / UI 都调同一套
    编译器。不要分别做 Claude / Codex / Cursor 插件各写一遍 merge。
 8. **UI 放最后。** 侧边栏只是展示。真正形成壁垒的是下面这条 pipeline。
+9. **只有一份归一化模型，不做两两转换。** 绝不把 Claude JSONL 改写成 Codex JSONL。
+   Adapter 负责读；编译器产出 bundle；以后若有 writer，也只读归一化 Event。
+10. **同步的是索引，不是 Session 文件。** 自动同步 = 先扫再编译 + `watch`。
+    不是两家活 Session 的双向镜像。
 
 ---
 
@@ -100,6 +206,7 @@ Voyager 现在看到四条 Session。下一版应该开始看到**一个 WorkThr
 
 ```
 原始历史（多 Session、多 Provider）
+      ↓  0. sync       增量 scan（mtime+size），避免索引过期
       ↓  1. select     按 repo / 时间 / 文件 / 分支 / 目标筛选
       ↓  2. extract    带指针的事实（不是作文）
       ↓  3. dedup      同一文件、同一命令、同一错误
@@ -318,7 +425,7 @@ Skill（`skills/voyager/SKILL.md`），装到
 
 **完成标准：** 读完不会以为 Voyager 能把 Claude 的 Session 原样搬到 Codex。
 
-### Phase 1 — 多会话上下文合成  **（先做这个）**
+### Phase 1 — 多会话上下文合成  **（已落地，`ff13096`）**
 
 **为什么。** 比单 Session handoff 更重要，后面全堵在这一步。
 
@@ -343,6 +450,35 @@ voyager continue --from A,B,C --to claude
 `voyager/mcp_server.py`、`tests/test_handoff.py` / `tests/test_continuity.py`。
 
 **本阶段不做：** thread 表、`--goal` 排序、token 预算、UI。
+
+### Phase 1b — 索引新鲜度 / 自动同步  **（接下来做这个）**
+
+**为什么。** 跨 Agent 切换只和索引一样新。格式翻译在 scan 时已经发生；
+缺的是 scan **什么时候**跑。
+
+```
+voyager switch codex          # 必须先 scan，再编译
+voyager merge A B C --launch  # 同样
+voyager watch                 # 后台；不能代替前者
+```
+
+**做**
+
+- `handoff` / `merge` / `continue` / `switch` 读会话之前先跑一次增量
+  `scan`（尊重 mtime+size，绝不 `--force`）。命令已经知道 provider / repo
+  时，尽量只扫那一块。
+- 打一行新鲜度（`scanned 0.8s, 2 sources changed`），bundle 看起来旧时能查。
+- `voyager watch` 继续当后台（默认 300s）。switch 正确不依赖 daemon。
+- 拉起 handoff/switch 之后，下一次 scan/watch 收进目标 Agent 的新 Session。
+  Phase 2 再挂到 WorkThread。
+- 测试：两次 `merge` 之间把 fixture 的 mtime 推高，第二次 bundle 必须看见新内容；
+  没变的 source 不得重解析（幂等）。
+- 仍然单向：测试必须断言我们没有写入 provider 的 session 目录。
+
+**文件：** `voyager/cli.py`、必要时 `voyager/store.py`（scoped scan helper）、
+`tests/test_cli.py` / `tests/test_continuity.py`。
+
+**本阶段不做：** 操作系统文件事件、双向 Session 镜像、transcript writer、WorkThread。
 
 ### Phase 2 — WorkThread
 
@@ -426,12 +562,15 @@ voyager switch codex
 
 **做**
 
+0. 增量 scan（Phase 1b / D12）。本进程里没刷新过的 store 不许拿来编译。
 1. 解析活动 thread（cwd / `--repo` / 显式 `--thread`）。
-2. 同一 provider 且 `can_resume` → 原生 resume（D7）。
+2. 同一 provider 且 `can_resume` **且没有 `--to`** → 原生 resume（D7）。
 3. 否则编译 bundle（goal + budget 用默认）→ 拉起目标（D8）。
 4. 再看一遍 git working tree；脏得意外就警告。
+5. **不要**往目标 Agent 的 store 里写合成 Session（D11）。注入方式仍是
+   bundle 文件 +「读这个路径」。
 
-用户只看到一条命令。内部是 select → compile → launch。
+用户只看到一条命令。内部是 scan → select → compile → launch。
 
 ### Phase 7 — VS Code 侧边栏 / Context Composer  *（最后）*
 
@@ -453,26 +592,32 @@ voyager switch codex
 | Issue | 标题 | Phase | 被谁挡住 |
 |---|---|---|---|
 | [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine：总跟踪 issue | 0 | — |
-| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — |
+| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — *（已落地 `ff13096`）* |
+| [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — |
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5 |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9** |
+| [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9，且合成 JSONL 的原生 resume 已证实 |
 | [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 |
 
-#1 是伞。#2–#7 完成就关；#8 明确是壁垒形成之后的事。
+#1 是伞。#2–#7 和 #9 完成就关；#8 和 #10 明确是壁垒形成之后的事（#10 可能永远不落地）。
 
 ---
 
 ## 这一代明确不做
 
 - 无缝 **Session** 迁移（system prompt / tool state / cached reasoning 搬不过去）。
+- 两两格式转换（Claude JSONL → Codex JSONL 之类）。
+- 两家活 Session 文件的双向实时镜像。
 - 把各家插件当第一 UI。
 - 把 transcript concat 起来叫做 merge。
 - 在 core 里用 LLM 做摘要、接云端 API、给 core 加新依赖。
 - 用 bundle 冒充同平台原生 resume（D7）。
-- 写入 provider 的 session 目录。
+- **默认** switch 路径写入 provider 的 session 目录（D8、D11）。
+  opt-in writer 是 #10，要等各 CLI 对合成 Session 的 resume 被证实；
+  即便做了：只写新 id、只压纯文本、只覆盖 JSONL CLI。
 - 独立 Web App。
 - 把 TUI / 更多 adapter 当成*战略*下一步。Adapter 在上游改格式时仍然重要，
   但不是这次的产品跳跃。
@@ -494,15 +639,17 @@ Codex 在**新** Session 里启动，读到的 bundle 已经知道目标、活�
 
 ---
 
-## 未决问题（不挡 Phase 1）
+## 未决问题（不挡 Phase 1b）
 
-1. **Bundle 放哪。** 默认 `~/.voyager/bundles/` 还是仓库内 `.voyager/`（gitignore）。
-   倾向全局目录，减少 cwd 污染和误提交；永远保留 `-o`。
+1. **Bundle 放哪。** *Phase 1 已拍板：* 默认 `~/.voyager/bundles/`；永远保留 `-o`。
 2. **Thread 怎么诞生。** 只自动聚类，还是必须 `merge` 才创建。
    倾向：`continue --repo` 可以自动聚；用户 merge 或 switch 时再持久化。
 3. **可选 LLM extra。** 以后用 `[llm]` extra 把引文提升成已决议的 Decision。
    必须 opt-in，不走 core 路径。不进 Phase 1–6。
 4. **Daemon。** `voyager watch` 已经存在。本地 API daemon 只在 VS Code
    客户端需要时才做（Phase 7）。
+5. **Transcript transplant。** 停在这里：要先有一个 headless 探测，能让
+   Claude、Codex **和** Grok 对合成 JSONL 做原生 resume，并答出埋进去的密语。
+   在那之前 #10 开着、不排期。
 
 需要拍板时写入 `docs/DECISIONS.md`。

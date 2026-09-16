@@ -64,7 +64,11 @@ voyager continue --repo black_box --launch
 
 This is work continuation, not session teleportation. Same-provider
 pickup uses the native CLI (`codex resume`, `claude --resume`, …).
-Multi-session merge / WorkThread: [ROADMAP.md](ROADMAP.md).
+Histories stay in each agent's own format; Voyager syncs the **index**
+(planned: scan before `continue`/`switch`) and compiles a bundle rather
+than rewriting Codex files as Claude JSONL. Multi-session merge is
+shipped (`voyager merge`); auto-sync then WorkThread:
+[ROADMAP.md](ROADMAP.md).
 
 ## 6. Hand a task to a different agent
 

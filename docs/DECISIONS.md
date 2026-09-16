@@ -133,3 +133,44 @@ VS Code Sidebar / Context Composer 明确排在编译器之后（Phase 7）。
 **Consequences**: bundle 里每条断言带 provenance
 （`extracted` / `inferred` / `unverified`）。编译器撑不住的叙事宁可省略，
 也不编。Phase 1 的验收测试是合成夹具，不调任何模型。
+
+## D11 — 跨 Agent 默认走编译 Bundle，不改写目标 Session 文件
+
+**Decision**: `voyager switch` / 跨 provider `continue --to` 的默认路径是
+「增量 scan → 从归一化 Event 编译 Continuation Bundle → 新 Session + 读这个文件」（D8）。
+不把 Claude JSONL 改写成 Codex rollout，不往目标 Agent 的 session 目录写合成历史。
+若以后做 transcript transplant，必须同时满足：opt-in（`--mode transcript`）、
+只写**新** session id、只压 user/assistant 文本（丢掉 tool call）、只覆盖
+已证实能 resume 合成 JSONL 的 CLI（目前候选：Claude / Codex / Grok / DSH）、
+每个 writer 有夹具测试。Cursor / ZCode / Antigravity / Kiro 不在范围内。
+
+**Reason**: 八家落盘格式不能互换；工具名对不上；不成对的 tool_use/result
+会让下一次 API 调用失败；Grok/Codex reasoning 加密；往活 Session 目录写
+会和正在跑的 Agent 抢文件。2026-09-16 的合成 Session resume 探测未通过
+（Claude `-p --resume` 挂死）。D8 已经拒绝「写成目标格式再假装 resume」。
+
+**Alternatives**: 默认就写目标 Session 文件，TUI 里能翻到旧回合（更「像无缝」，
+但格式脆弱、未证实）；两两 converter 矩阵（8×7，不可维护）。
+
+**Consequences**: 用户在目标 Agent 里看到的是一份 Bundle 开场的**新**对话，
+不是原来那条聊天记录。同平台续聊仍然走原生 resume（D7）。路线图 Phase 1b / #9
+先做同步；#10 停在「合成 resume 被证实」之后。
+
+## D12 — Continuity 命令在编译前必须刷新索引
+
+**Decision**: `handoff` / `merge` / `continue` / `switch` 读 store 之前先跑一次
+增量 `scan`（尊重 sources 的 mtime+size，不用 `--force`）。命令已经知道
+provider 或 repo 时，尽量只扫那一块。`voyager watch`（默认 300s）继续当后台，
+但 switch 的正确性不依赖它刚好刚跑过。同步是**单向**的：provider 文件 → 索引。
+不做两家 Session 文件的双向实时镜像。
+
+**Reason**: 刚在 Claude 里聊完立刻 `voyager switch codex` 时，最后一轮可能
+还没进 `~/.voyager/index.db`。跨 Agent「无缝」先死在陈旧索引，不是死在
+bundle 文案。格式翻译已经发生在 adapter 的 parse()；缺的是 parse 的时机。
+
+**Alternatives**: 强制用户先 `voyager scan`（会忘）；只靠 `watch`（300s 窗口
+里一定过时）；双向写回各家 Session 文件（D11 否决）。
+
+**Consequences**: 编译路径会多一次（通常很快的）增量 scan。测试必须覆盖
+「mtime 变了的 source 出现在下一份 bundle」和「没变的 source 不重解析」。
+这是路线图 Phase 1b / issue #9，并且挡住 `voyager switch`（#7）。

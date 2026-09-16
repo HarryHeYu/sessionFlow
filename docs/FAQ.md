@@ -49,6 +49,46 @@ session that is told to read it and continue the work. Same-provider
 pickup still uses native resume (`codex resume`, `claude --resume`, …).
 See [ROADMAP.md](ROADMAP.md).
 
+**Can I finish a chat in Claude and keep the same history visible in Codex?**
+
+Not as the same native session. The eight agents store history in eight
+formats (JSONL, zstd JSONL, SQLite, protobuf, VS Code KV); tool names
+do not map; hidden tool state and cached reasoning stay behind.
+Voyager's path is: refresh the index, compile a Continuation Bundle
+from the canonical events, start a *new* Codex session that reads it.
+Same-provider continue still uses native resume. Writing a synthetic
+transcript into another agent's session directory is not the default
+and is not promised ([ROADMAP.md](ROADMAP.md) Phase 1b / #10).
+
+**Does Voyager keep histories in sync automatically?**
+
+It syncs the **index**, not the session files. `voyager watch` already
+polls on an interval. Continuity commands (`handoff` / `merge` /
+`continue` / `switch`) are planned to run an incremental scan
+*before* they compile, so a switch right after a Claude turn still
+sees that turn. Sync is one-way (provider files → `~/.voyager/index.db`).
+Voyager does not mirror a live Claude JSONL into a Codex rollout.
+
+**Can I finish a chat in Claude and keep the same history visible in Codex?**
+
+Not as the same native session. The eight agents store history in eight
+formats (JSONL, zstd JSONL, SQLite, protobuf, VS Code KV); tool names
+do not map; hidden tool state and cached reasoning stay behind.
+Voyager's path is: refresh the index, compile a Continuation Bundle
+from the canonical events, start a *new* Codex session that reads it.
+Same-provider continue still uses native resume. Writing a synthetic
+transcript into another agent's session directory is not the default
+and is not promised ([ROADMAP.md](ROADMAP.md) Phase 1b / #10).
+
+**Does Voyager keep histories in sync automatically?**
+
+It syncs the **index**, not the session files. `voyager watch` already
+polls on an interval. Continuity commands (`handoff` / `merge` /
+`continue` / `switch`) are planned to run an incremental scan
+*before* they compile, so a switch right after a Claude turn still
+sees that turn. Sync is one-way (provider files → `~/.voyager/index.db`).
+Voyager does not mirror a live Claude JSONL into a Codex rollout.
+
 ## Usage problems
 
 **`voyager` is not recognized as a command**

@@ -114,8 +114,10 @@ tool state 或 cached reasoning）。`voyager handoff <id> --to codex` 会把
 
 **一条命令继续**：`voyager continue` 自动挑你最新的会话并做对的事——
 codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager continue
---repo myproj --launch` 直接回到某个项目的现场。多会话合并和 WorkThread
-是下一步，见 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)。
+--repo myproj --launch` 直接回到某个项目的现场。多会话合并已经有了
+（`voyager merge` / `continue --from`）；下一步是自动同步（switch 前先
+scan），然后才是 WorkThread ——
+见 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)。
 
 **日常套路**——`brief` 看全局动态，`export` 完整细读某个会话（实测把
 2915 条消息的 DSH 会话导成 20MB Markdown），`continue` / `handoff` 接着干。
