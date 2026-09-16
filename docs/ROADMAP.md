@@ -473,23 +473,23 @@ Only after Phases 1–4 exist, so the UI is a client of the compiler.
 
 ---
 
-## Suggested GitHub issues
+## GitHub issues
 
-Open these as issues (labels `enhancement` + `continuity`) and treat
-the checkboxes as the implementation contract.
+Opened on `HarryHeYu/voyager` (labels `enhancement` + `continuity`).
+Treat the checkboxes as the implementation contract.
 
-| # | Title | Phase | Blocked by |
+| Issue | Title | Phase | Blocked by |
 |---|---|---|---|
-| 1 | Continuity Engine: tracking issue | 0 | — |
-| 2 | `voyager merge`: multi-session context synthesis | 1 | — |
-| 3 | WorkThread: project → thread → sessions | 2 | 2 |
-| 4 | Goal-conditioned extraction (`--goal`) | 3 | 2 |
-| 5 | Context Budget (`--budget auto\|Nk`) | 4 | 2 |
-| 6 | Voyager Skill + `voyager skill install` | 5 | 2 |
-| 7 | `voyager switch <agent>` | 6 | 3, 4, 5 |
-| 8 | VS Code sidebar / Context Composer | 7 | 3, 4, 5 |
+| [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine: tracking issue | 0 | — |
+| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — |
+| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 |
+| [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 |
+| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 |
+| [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5 |
+| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 |
 
-Issue 1 is the umbrella. Close it when 2–7 are done; 8 is explicitly
+#1 is the umbrella. Close it when #2–#7 are done; #8 is explicitly
 post-moat.
 
 ---

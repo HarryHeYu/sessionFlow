@@ -445,22 +445,23 @@ voyager switch codex
 
 ---
 
-## 建议的 GitHub Issue
+## GitHub Issue
 
-打上 `enhancement` + `continuity`，把勾选用作实现契约。
+已在 `HarryHeYu/voyager` 打开（标签 `enhancement` + `continuity`）。
+把勾选用作实现契约。
 
-| # | 标题 | Phase | 被谁挡住 |
+| Issue | 标题 | Phase | 被谁挡住 |
 |---|---|---|---|
-| 1 | Continuity Engine：总跟踪 issue | 0 | — |
-| 2 | `voyager merge`：多会话上下文合成 | 1 | — |
-| 3 | WorkThread：project → thread → sessions | 2 | 2 |
-| 4 | 面向目标的抽取（`--goal`） | 3 | 2 |
-| 5 | Context Budget（`--budget auto\|Nk`） | 4 | 2 |
-| 6 | Voyager Skill + `voyager skill install` | 5 | 2 |
-| 7 | `voyager switch <agent>` | 6 | 3, 4, 5 |
-| 8 | VS Code 侧边栏 / Context Composer | 7 | 3, 4, 5 |
+| [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine：总跟踪 issue | 0 | — |
+| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — |
+| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 |
+| [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 |
+| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 |
+| [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5 |
+| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 |
 
-Issue 1 是伞。2–7 完成就关；8 明确是壁垒形成之后的事。
+#1 是伞。#2–#7 完成就关；#8 明确是壁垒形成之后的事。
 
 ---
 
