@@ -94,6 +94,24 @@ CREATE TABLE IF NOT EXISTS files (
 );
 CREATE INDEX IF NOT EXISTS idx_files_sid ON files(sid);
 
+CREATE TABLE IF NOT EXISTS threads (
+    id         TEXT PRIMARY KEY,
+    repo_root  TEXT,
+    title      TEXT,
+    goal       TEXT,
+    created_at REAL,
+    updated_at REAL,
+    status     TEXT DEFAULT 'active'
+);
+
+CREATE TABLE IF NOT EXISTS thread_sessions (
+    thread_id   TEXT NOT NULL,
+    session_id  TEXT NOT NULL,
+    attached_at REAL,
+    ord         INTEGER,
+    PRIMARY KEY (thread_id, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS sources (
     provider TEXT NOT NULL,
     path     TEXT NOT NULL,
@@ -341,6 +359,87 @@ class Store:
             self.con.execute("DELETE FROM sources WHERE provider=? AND sid=?", (provider, sid))
         self.con.commit()
         return len(gone)
+
+    # -- WorkThreads (Phase 2) ---------------------------------------------
+
+    def thread_create(self, repo_root=None, title=None, goal=None) -> str:
+        import time as _time
+        import uuid as _uuid
+        tid = "thr_" + _uuid.uuid4().hex[:10]
+        now = _time.time()
+        self.con.execute(
+            "INSERT INTO threads(id, repo_root, title, goal, created_at,"
+            " updated_at, status) VALUES (?,?,?,?,?,?,'active')",
+            (tid, repo_root, title, goal, now, now))
+        self.con.commit()
+        return tid
+
+    def thread_get(self, tid: str):
+        """Exact id or unambiguous prefix; returns None otherwise."""
+        rows = self.q("SELECT * FROM threads WHERE id=?", (tid,))
+        if rows:
+            return rows[0]
+        esc = tid.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_") + "%"
+        rows = self.q(
+            "SELECT * FROM threads WHERE id LIKE ? ESCAPE '\\' ORDER BY id",
+            (esc,))
+        return rows[0] if len(rows) == 1 else None
+
+    def thread_set_status(self, tid: str, status: str) -> None:
+        import time as _time
+        self.con.execute("UPDATE threads SET status=?, updated_at=? WHERE id=?",
+                         (status, _time.time(), tid))
+        self.con.commit()
+
+    def thread_touch(self, tid: str) -> None:
+        import time as _time
+        self.con.execute("UPDATE threads SET updated_at=? WHERE id=?",
+                         (_time.time(), tid))
+        self.con.commit()
+
+    def thread_attach(self, tid: str, sid: str) -> bool:
+        """Attach a session; duplicates are ignored. Returns True if newly
+        attached. Attaching requires the session to exist."""
+        if not self.q("SELECT 1 FROM sessions WHERE id=?", (sid,)):
+            return False
+        import time as _time
+        cur = self.con.execute(
+            "SELECT MAX(ord) m FROM thread_sessions WHERE thread_id=?", (tid,))
+        nxt = (cur.fetchone()["m"] or 0) + 1
+        cur2 = self.con.execute(
+            "INSERT OR IGNORE INTO thread_sessions VALUES (?,?,?,?)",
+            (tid, sid, _time.time(), nxt))
+        self.con.commit()
+        self.thread_touch(tid)
+        return cur2.rowcount > 0
+
+    def thread_members(self, tid: str) -> List[sqlite3.Row]:
+        """Member session rows in attach order; silently skips sessions that
+        were pruned from the index."""
+        return self.q(
+            """SELECT s.* FROM thread_sessions t
+               JOIN sessions s ON s.id = t.session_id
+               WHERE t.thread_id=? ORDER BY t.ord""", (tid,))
+
+    def thread_member_ids(self, tid: str) -> List[str]:
+        return [r["session_id"] for r in self.q(
+            "SELECT session_id FROM thread_sessions WHERE thread_id=? ORDER BY ord",
+            (tid,))]
+
+    def thread_find_by_members(self, sids: set) -> Optional[str]:
+        """Return the active thread whose member set is exactly `sids`."""
+        for r in self.q("SELECT id FROM threads WHERE status='active'"):
+            if set(self.thread_member_ids(r["id"])) == sids:
+                return r["id"]
+        return None
+
+    def thread_list(self, status: str = "active"):
+        return self.q(
+            """SELECT t.*, COUNT(ts.session_id) members
+               FROM threads t LEFT JOIN thread_sessions ts
+                 ON ts.thread_id = t.id
+               WHERE t.status=?
+               GROUP BY t.id ORDER BY t.updated_at DESC""", (status,))
 
     # -- reading -----------------------------------------------------------
 

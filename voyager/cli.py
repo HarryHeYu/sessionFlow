@@ -465,6 +465,35 @@ def cmd_continue(args) -> int:
     # Phase 1b: the index is only as fresh as the last scan
     _ensure_fresh(args, store,
                   providers=[args.platform] if getattr(args, "platform", None) else None)
+    if getattr(args, "thread", None):
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+        member_rows = store.thread_members(t["id"])
+        if not member_rows:
+            print("thread " + t["id"] + " has no live member sessions",
+                  file=sys.stderr)
+            return 1
+        print("thread {0}  [{1}]  {2} member(s)".format(
+            t["id"], t["status"], len(member_rows)))
+        if not getattr(args, "to", None):
+            for m in sorted(member_rows, key=lambda x: x["updated_at"] or 0,
+                            reverse=True):
+                if m["can_resume"] and m["resume_cmd"]:
+                    argv = m["resume_cmd"].split()
+                    print("$ " + " ".join(argv))
+                    if not args.launch:
+                        print("add --launch to start it now")
+                        return 0
+                    try:
+                        return subprocess.call(argv)
+                    except KeyboardInterrupt:
+                        return 130
+            args.to = "claude"
+            print("no natively-resumable member — compiling continuation bundle "
+                  "for claude (override with --to)")
+        return _merge_and_handoff(store, member_rows, args)
     from_sessions = getattr(args, "from_sessions", None)
     if from_sessions:
         refs = [s.strip() for s in from_sessions.split(",") if s.strip()]
@@ -548,7 +577,7 @@ def cmd_handoff(args) -> int:
 
 
 def cmd_merge(args) -> int:
-    """Synthesize multiple sessions into one Continuation Bundle."""
+    """Synthesize multiple sessions into one Continuation Bundle + WorkThread."""
     store = Store(args.db)
     _ensure_fresh(args, store)
     session_refs = args.sessions
@@ -556,7 +585,121 @@ def cmd_merge(args) -> int:
         print("error: at least one session id required", file=sys.stderr)
         return 2
     rows = [_resolve(store, ref) for ref in session_refs]
-    return _merge_and_handoff(store, rows, args)
+
+    rc = _merge_and_handoff(store, rows, args)
+    _thread_from_merge(store, rows, args)
+    return rc
+
+
+def _thread_from_merge(store: Store, rows: list, args) -> None:
+    """Phase 2: a merge over N sessions yields (or updates) a WorkThread
+    whose member set is exactly those N sessions."""
+    sids = {r["id"] for r in rows}
+    tid = store.thread_find_by_members(sids)
+    repo_root = next((r["repo_root"] or r["cwd"] for r in rows
+                      if r["repo_root"] or r["cwd"]), None)
+    label = " + ".join("{0}:{1}".format(r["provider"], (r["native_id"] or "")[:10])
+                       for r in rows)
+    title = getattr(args, "thread_title", None) or getattr(args, "goal", None)         or "merge: " + label
+    if tid:
+        store.thread_touch(tid)
+        action = "updated"
+    else:
+        tid = store.thread_create(repo_root=repo_root, title=title,
+                                  goal=getattr(args, "goal", None))
+        action = "created"
+    for sid in sids:
+        store.thread_attach(tid, sid)
+    print("Thread {0} {1}".format(tid, action))
+    print("repo: " + (repo_root or "?"))
+    print("members:")
+    for r in rows:
+        print("  {0} {1}".format(r["provider"], r["native_id"]))
+
+
+def cmd_thread(args) -> int:
+    store = Store(args.db)
+    action = args.thread_cmd
+    if action == "list":
+        status = getattr(args, "status", "active")
+        rows = store.thread_list(status)
+        if not rows:
+            print("no {0} threads".format(status))
+            return 0
+        for t in rows:
+            print("{0}  [{1}]  members:{2}  repo: {3}".format(
+                t["id"], t["status"], t["members"], t["repo_root"] or "?"))
+            print("    " + (t["title"] or "")[:100])
+        return 0
+    if action == "show":
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+        args.thread = t["id"]          # resolve prefix to the real id
+        members = store.thread_members(args.thread)
+        print("Thread {0}  [{1}]".format(t["id"], t["status"]))
+        print("repo: " + (t["repo_root"] or "?"))
+        print("title: " + (t["title"] or "?"))
+        if t["goal"]:
+            print("goal: " + t["goal"])
+        print("members:")
+        for m in members:
+            print("  {0:<8} {1}  ({2} msgs)  {3}".format(
+                m["provider"], m["native_id"], m["message_count"],
+                (m["title"] or "")[:60]))
+        return 0
+    if action == "create":
+        tid = store.thread_create(repo_root=getattr(args, "repo", None),
+                                  title=getattr(args, "title", None),
+                                  goal=getattr(args, "goal", None))
+        for ref in (getattr(args, "attach", None) or []):
+            for part in ref.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                row, amb = store.session(part)
+                if row is None:
+                    print("  ! cannot attach '{0}': not found".format(part),
+                          file=sys.stderr)
+                    continue
+                store.thread_attach(tid, row["id"])
+        print("Thread {0} created".format(tid))
+        return 0
+    if action == "attach":
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+        args.thread = t["id"]          # resolve prefix to the real id
+        attached = skipped = 0
+        for ref in (args.sessions or []):
+            for part in ref.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                row, amb = store.session(part)
+                if row is None:
+                    print("  ! skip '{0}': not found".format(part), file=sys.stderr)
+                    skipped += 1
+                    continue
+                if store.thread_attach(args.thread, row["id"]):
+                    attached += 1
+                else:
+                    skipped += 1
+        print("attached {0} session(s)".format(attached)
+              + (", {0} skipped/duplicate".format(skipped) if skipped else ""))
+        return 0
+    if action == "close":
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+        store.thread_set_status(t["id"], "closed")
+        print("thread {0} closed (sessions untouched)".format(args.thread))
+        return 0
+    print("unknown thread action: " + action, file=sys.stderr)
+    return 1
 
 
 def _merge_and_handoff(store: Store, rows: list, args) -> int:
@@ -718,6 +861,7 @@ def main(argv=None) -> int:
     sp = sub.add_parser("merge", parents=[common],
                         help="synthesize multiple sessions into a continuation bundle")
     sp.add_argument("sessions", nargs="+", help="session ids/prefixes to merge")
+    sp.add_argument("--thread-title")
     sp.add_argument("--goal", help="explicit primary goal for the next agent")
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
     sp.add_argument("--output", "-o", help="bundle file path (default ~/.voyager/bundles/...)")
@@ -731,6 +875,30 @@ def main(argv=None) -> int:
     sp.add_argument("--force", action="store_true")
     sp.set_defaults(func=cmd_watch)
 
+    sp = sub.add_parser("thread", help="WorkThread: list/show/create/attach/close")
+    tsub = sp.add_subparsers(dest="thread_cmd", required=True)
+    tsp = tsub.add_parser("list", help="list active threads")
+    tsp.add_argument("--status", default="active")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("show", help="show one thread and its members")
+    tsp.add_argument("thread")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("create", help="create an empty thread")
+    tsp.add_argument("--repo")
+    tsp.add_argument("--title")
+    tsp.add_argument("--goal")
+    tsp.add_argument("--attach", action="append",
+                     help="session id/prefix to attach (repeatable, comma-ok)")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("attach", help="attach sessions to a thread")
+    tsp.add_argument("thread")
+    tsp.add_argument("sessions", nargs="+",
+                     help="session id/prefix (repeatable, comma-ok)")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("close", help="mark a thread closed (sessions untouched)")
+    tsp.add_argument("thread")
+    tsp.set_defaults(func=cmd_thread)
+
     sp = sub.add_parser("continue", parents=[common],
                         help="pick work back up in one command (native resume, or auto-handoff)")
     sp.add_argument("session", nargs="?", help="session id/prefix (default: newest session)")
@@ -739,6 +907,7 @@ def main(argv=None) -> int:
     sp.add_argument("--goal", help="explicit primary goal for the continuation bundle")
     sp.add_argument("--repo", help="pick the newest session of this repo")
     sp.add_argument("--platform", help="pick the newest session of this provider")
+    sp.add_argument("--thread", help="continue from a WorkThread's members")
     sp.add_argument("--to", help="force cross-agent handoff to this target")
     sp.add_argument("--output", "-o", help="bundle file path (when continuing via handoff/merge)")
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
