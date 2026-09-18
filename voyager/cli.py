@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .adapters import load_all
-from .adapters.base import enabled_adapters
+from .adapters.base import enabled_adapters, git_info
 from .store import Store, default_db_path
 
 
@@ -458,6 +458,42 @@ def cmd_watch(args) -> int:
             _time.sleep(interval)
 
 
+
+def _same_repo(a: str, b: str) -> bool:
+    a = (a or "").replace("\\", "/").rstrip("/").lower()
+    b = (b or "").replace("\\", "/").rstrip("/").lower()
+    return bool(a) and (a == b or a.endswith(b) or b.endswith(a))
+
+
+def _continue_from_thread(store: Store, t, args) -> int:
+    """Continue inside a WorkThread: newest natively-resumable member wins
+    without --to; otherwise compile the continuation bundle from members."""
+    member_rows = store.thread_members(t["id"])
+    if not member_rows:
+        print("thread " + t["id"] + " has no live member sessions",
+              file=sys.stderr)
+        return 1
+    print("thread {0}  [{1}]  {2} member(s)".format(
+        t["id"], t["status"], len(member_rows)))
+    if not getattr(args, "to", None):
+        for m in sorted(member_rows, key=lambda x: x["updated_at"] or 0,
+                        reverse=True):
+            if m["can_resume"] and m["resume_cmd"]:
+                argv = m["resume_cmd"].split()
+                print("$ " + " ".join(argv))
+                if not args.launch:
+                    print("add --launch to start it now")
+                    return 0
+                try:
+                    return subprocess.call(argv)
+                except KeyboardInterrupt:
+                    return 130
+        args.to = "claude"
+        print("no natively-resumable member — compiling continuation bundle "
+              "for claude (override with --to)")
+    return _merge_and_handoff(store, member_rows, args)
+
+
 def cmd_continue(args) -> int:
     """One command to pick work back up: native resume when possible,
     automatic cross-agent handoff otherwise."""
@@ -470,30 +506,18 @@ def cmd_continue(args) -> int:
         if not t:
             print("thread not found: " + args.thread, file=sys.stderr)
             return 1
-        member_rows = store.thread_members(t["id"])
-        if not member_rows:
-            print("thread " + t["id"] + " has no live member sessions",
-                  file=sys.stderr)
-            return 1
-        print("thread {0}  [{1}]  {2} member(s)".format(
-            t["id"], t["status"], len(member_rows)))
-        if not getattr(args, "to", None):
-            for m in sorted(member_rows, key=lambda x: x["updated_at"] or 0,
-                            reverse=True):
-                if m["can_resume"] and m["resume_cmd"]:
-                    argv = m["resume_cmd"].split()
-                    print("$ " + " ".join(argv))
-                    if not args.launch:
-                        print("add --launch to start it now")
-                        return 0
-                    try:
-                        return subprocess.call(argv)
-                    except KeyboardInterrupt:
-                        return 130
-            args.to = "claude"
-            print("no natively-resumable member — compiling continuation bundle "
-                  "for claude (override with --to)")
-        return _merge_and_handoff(store, member_rows, args)
+        return _continue_from_thread(store, t, args)
+    # Phase 2 task-centric default: cwd -> repo_root -> active WorkThread
+    if not args.session and not getattr(args, "from_sessions", None):
+        repo = (git_info(os.getcwd()).get("repo_root")
+                or os.getcwd().replace("\\", "/"))
+        cands = [t for t in store.thread_list("active")
+                 if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+        if cands:
+            t = max(cands, key=lambda x: x["updated_at"] or 0)
+            print("active thread: {0}  ({1})".format(
+                t["id"], (t["title"] or "")[:70]))
+            return _continue_from_thread(store, t, args)
     from_sessions = getattr(args, "from_sessions", None)
     if from_sessions:
         refs = [s.strip() for s in from_sessions.split(",") if s.strip()]

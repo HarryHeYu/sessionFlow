@@ -61,6 +61,16 @@ All notable changes to Voyager are documented here. Format loosely follows
   line (`freshness: scanned in 0.4s, 2 source(s) changed`);
   `VOYAGER_NO_SYNC=1` skips it (tests, offline inspection).
 
+- **WorkThreads (roadmap #3, Phase 2a)** — task-centric continuity: threads +
+  thread_sessions tables (additive migration; existing index.db upgrades in
+  place), `voyager thread list/show/create/attach/close`, `merge A B C`
+  now also yields/updates a thread with exactly that member set, and
+  `continue --thread <id>` recompiles from members. Bare `voyager
+  continue` is task-centric: cwd -> repo -> active thread -> newest member
+  (native resume, or compile + handoff). Membership is explicit-only —
+  same-repo sessions are never auto-swallowed; closing a thread keeps its
+  sessions.
+
 ### Fixed
 - `--db` was only accepted *before* the subcommand (`voyager --db X stats`);
   `voyager stats --db X` died with an argparse usage error. It is now

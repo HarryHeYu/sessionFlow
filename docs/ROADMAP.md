@@ -3,7 +3,7 @@
 > Voyager compiles scattered agent histories into the context the next agent actually needs.
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
-**Phase 1b shipped (`5e8271c`); Phase 2 WorkThread next (#3).**
+**Phase 1b shipped (`5e8271c`); Phase 2a WorkThread landed (thread model, explicit CRUD/attach, merge->thread, continue --thread, cwd->thread default pickup). Next: Phase 2b single-writer lease (#11).**
 Phases 3–7 remain planning.
 
 **Issue #9 close-out (commit `5e8271c`):** incremental pre-compile scan ✅,

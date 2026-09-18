@@ -5,7 +5,7 @@
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
-**Phase 1b shipped（`5e8271c`）；Phase 2 WorkThread next（#3）。**
+**Phase 1b shipped（`5e8271c`）；Phase 2a WorkThread 已落地（thread 数据模型、显式 CRUD/attach、merge→thread、continue --thread、cwd→thread 默认接续）。下一步：Phase 2b 单写者租约（#11）。**
 Phase 3–7 仍是规划。
 
 **Issue #9 结项对账（commit `5e8271c`）：**

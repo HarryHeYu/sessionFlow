@@ -165,3 +165,49 @@ def test_thread_cli_lifecycle(tmp_path, three_sessions, capsys):
     store = Store(three_sessions)
     assert store.q("SELECT COUNT(*) n FROM sessions")[0]["n"] == 4
     store.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: bare `voyager continue` — cwd -> repo -> active WorkThread
+# ---------------------------------------------------------------------------
+
+def test_bare_continue_uses_active_thread_of_cwd(tmp_path, three_sessions,
+                                                 monkeypatch, capsys):
+    import os
+    # a real-looking repo dir (needs .git for the toplevel probe)
+    repo = tmp_path / "shared" / "repo"
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / ".git").mkdir(exist_ok=True)
+
+    store = Store(three_sessions)
+    # newest member (grok:m2, updated_at=2002) resumes natively
+    store.con.execute("UPDATE sessions SET can_resume=1, resume_cmd=? "
+                      "WHERE id='grok:m2'", ("echo grok-native-resume",))
+    store.con.commit()
+    tid = store.thread_create(repo_root=str(repo).replace("\\", "/"),
+                              title="the shared task")
+    for sid in ("claude:m0", "codex:m1", "grok:m2"):
+        store.thread_attach(tid, sid)
+    store.close()
+
+    monkeypatch.chdir(repo)
+    monkeypatch.delenv("VOYAGER_NO_SYNC", raising=False)
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")   # keep tests off real HOME
+    rc = main(["--db", str(three_sessions), "continue"])
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert "active thread:" in printed
+    assert "$ echo grok-native-resume" in printed, printed
+
+
+def test_bare_continue_without_thread_falls_back_to_newest(
+        tmp_path, three_sessions, monkeypatch, capsys):
+    repo = tmp_path / "somewhere" / "else"
+    repo.mkdir(parents=True)
+    (repo / ".git").mkdir()
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
+    rc = main(["--db", str(three_sessions), "continue"])
+    printed = capsys.readouterr().out
+    assert rc == 0
+    assert "latest session:" in printed   # old newest-session fallback
