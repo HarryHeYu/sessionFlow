@@ -30,6 +30,11 @@ CONTENT_TRUNCATE = 600_000
 # full text stays in `events` and at the provider source.
 FTS_BODY_CAP = 600
 
+# D13 / #11: a WorkThread is leased to at most one live writer. The lease
+# expires when its heartbeat is older than this, or its holder pid is gone —
+# a crashed agent must never block the next one forever.
+LEASE_HEARTBEAT_TIMEOUT = 120.0
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id            TEXT PRIMARY KEY,      -- "provider:native_id"
@@ -112,6 +117,16 @@ CREATE TABLE IF NOT EXISTS thread_sessions (
     PRIMARY KEY (thread_id, session_id)
 );
 
+CREATE TABLE IF NOT EXISTS thread_leases (
+    thread_id         TEXT PRIMARY KEY,
+    holder            TEXT NOT NULL,   -- provider currently allowed to write
+    native_session_id TEXT,
+    pid               INTEGER,
+    acquired_at       REAL,
+    heartbeat_at      REAL,
+    lease_token       TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sources (
     provider TEXT NOT NULL,
     path     TEXT NOT NULL,
@@ -156,6 +171,61 @@ def _rebuild_fts(con: sqlite3.Connection) -> None:
 
 def default_db_path() -> Path:
     return Path.home() / ".voyager" / "index.db"
+
+
+def _pid_alive(pid) -> bool:
+    """Is a process with this pid running right now?
+
+    Windows has no safe os.kill(pid, 0) — os.kill on nt with an arbitrary
+    signal calls TerminateProcess — so probe via OpenProcess instead.
+    """
+    if not pid or pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not h:
+            # 87 = bad parameters (no such process); 5 = exists, denied
+            return ctypes.get_last_error() == 5
+        try:
+            code = ctypes.c_ulong()
+            if not k32.GetExitCodeProcess(h, ctypes.byref(code)):
+                return ctypes.get_last_error() == 5
+            return code.value == STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
+    import errno
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as e:
+        return e.errno == errno.EPERM
+    return True
+
+
+def lease_state(row, now=None) -> Dict[str, Any]:
+    """Classify a lease row: {"held", "expired", "why"}.
+
+    Not held -> free. Held but expired when the heartbeat is stale
+    (LEASE_HEARTBEAT_TIMEOUT) or the holder pid is gone; a pid-less lease
+    lives and dies by its heartbeat alone.
+    """
+    import time as _time
+    now = _time.time() if now is None else now
+    if row is None:
+        return {"held": False, "expired": False, "why": "free"}
+    hb = row["heartbeat_at"]
+    if hb is None or now - hb > LEASE_HEARTBEAT_TIMEOUT:
+        return {"held": True, "expired": True, "why": "heartbeat stale"}
+    if row["pid"] and not _pid_alive(row["pid"]):
+        return {"held": True, "expired": True, "why": "pid gone"}
+    return {"held": True, "expired": False, "why": "active"}
 
 
 def _truncate(s: Optional[str], limit: int) -> Optional[str]:
@@ -379,7 +449,7 @@ class Store:
         rows = self.q("SELECT * FROM threads WHERE id=?", (tid,))
         if rows:
             return rows[0]
-        esc = tid.replace("\\", "\\\\").replace("%", "\%").replace("_", "\_") + "%"
+        esc = tid.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         rows = self.q(
             "SELECT * FROM threads WHERE id LIKE ? ESCAPE '\\' ORDER BY id",
             (esc,))
@@ -440,6 +510,128 @@ class Store:
                  ON ts.thread_id = t.id
                WHERE t.status=?
                GROUP BY t.id ORDER BY t.updated_at DESC""", (status,))
+
+    # -- WorkThread single-writer leases (Phase 2b / D13 / #11) -------------
+
+    def _lease_log(self, event: str, tid: str, holder, pid, token: str) -> None:
+        """Append-only audit trail for lease grants, steals and releases."""
+        import time as _time
+        from datetime import datetime
+        line = "{0} | {1} | thread={2} | holder={3} | pid={4} | token={5}\n".format(
+            datetime.fromtimestamp(_time.time()).isoformat(timespec="seconds"),
+            event, tid, holder, pid, (token or "")[:8])
+        try:
+            with open(self.db_path.parent / "leases.log", "a",
+                      encoding="utf-8") as f:
+                f.write(line)
+        except OSError:
+            pass  # the lease itself is the source of truth; audit is best-effort
+
+    def thread_lease_get(self, tid):
+        rows = self.q("SELECT * FROM thread_leases WHERE thread_id=?", (tid,))
+        return rows[0] if rows else None
+
+    def thread_lease_acquire(self, tid: str, holder: str,
+                             native_session_id=None, pid=None,
+                             steal: bool = False) -> tuple:
+        """Atomically take the single-writer lease on a WorkThread.
+
+        Returns (granted, lease_row): the fresh row on success, the
+        blocker's row on refusal, (False, None) when the thread doesn't
+        exist. A live lease blocks unless steal=True; an expired one
+        (stale heartbeat or dead pid) is taken over. BEGIN IMMEDIATE
+        serializes concurrent acquirers on the same index.db — no second
+        process can slip through between read and write.
+        """
+        if not self.q("SELECT 1 FROM threads WHERE id=?", (tid,)):
+            return False, None
+        import time as _time
+        import uuid as _uuid
+        try:
+            self.con.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            # could not take the write lock at all: refuse, never race
+            return False, self.thread_lease_get(tid)
+        try:
+            now = _time.time()
+            row = self.thread_lease_get(tid)
+            st = lease_state(row, now)
+            if st["held"] and not st["expired"] and not steal:
+                self.con.execute("COMMIT")
+                return False, row
+            event = ("acquire" if row is None
+                     else "steal" if steal else "takeover-expired")
+            token = _uuid.uuid4().hex
+            self.con.execute(
+                """INSERT OR REPLACE INTO thread_leases(
+                       thread_id, holder, native_session_id, pid,
+                       acquired_at, heartbeat_at, lease_token)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (tid, holder, native_session_id, pid, now, now, token))
+            self.con.execute("COMMIT")
+        except Exception:
+            try:
+                self.con.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        self._lease_log(event, tid, holder, pid, token)
+        return True, self.thread_lease_get(tid)
+
+    def thread_lease_renew(self, tid: str, token: str) -> bool:
+        """Refresh the lease heartbeat; only the token holder may."""
+        import time as _time
+        cur = self.con.execute(
+            "UPDATE thread_leases SET heartbeat_at=? "
+            "WHERE thread_id=? AND lease_token=?",
+            (_time.time(), tid, token))
+        self.con.commit()
+        return cur.rowcount > 0
+
+    def thread_lease_release(self, tid: str, token: str,
+                             reason: str = "voluntary") -> bool:
+        """Give the lease up; only the token holder (or a steal via the
+        same row's token) can. Returns False when token doesn't match —
+        that caller must use steal semantics instead."""
+        row = self.thread_lease_get(tid)
+        if row is None or row["lease_token"] != token:
+            return False
+        self.con.execute(
+            "DELETE FROM thread_leases WHERE thread_id=? AND lease_token=?",
+            (tid, token))
+        self.con.commit()
+        self._lease_log("release-" + reason, tid, row["holder"],
+                        row["pid"], token)
+        return True
+
+    def thread_lease_renew_alive(self) -> int:
+        """D13: watch is the heartbeat. Renew every lease whose holder pid
+        is still alive; pid-less or dead-pid leases are left to expire on
+        their heartbeat, so a crashed agent never holds the thread forever."""
+        import time as _time
+        now = _time.time()
+        renewed = 0
+        for row in self.q("SELECT * FROM thread_leases"):
+            if row["pid"] and _pid_alive(row["pid"]):
+                self.con.execute(
+                    "UPDATE thread_leases SET heartbeat_at=? WHERE thread_id=?",
+                    (now, row["thread_id"]))
+                renewed += 1
+        if renewed:
+            self.con.commit()
+        return renewed
+
+    def thread_lease_active_count(self, now=None) -> int:
+        """Live (held, not expired) leases — watch uses this to keep its
+        sleep interval well under the heartbeat expiry."""
+        import time as _time
+        now = _time.time() if now is None else now
+        n = 0
+        for row in self.q("SELECT * FROM thread_leases"):
+            st = lease_state(row, now)
+            if st["held"] and not st["expired"]:
+                n += 1
+        return n
 
     # -- reading -----------------------------------------------------------
 

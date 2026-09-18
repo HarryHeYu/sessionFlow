@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from .adapters import load_all
 from .adapters.base import enabled_adapters, git_info
-from .store import Store, default_db_path
+from .store import Store, default_db_path, lease_state
 
 
 # ---------------------------------------------------------------------------
@@ -434,12 +434,21 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def _watch_sleep(args, store) -> float:
+    """Interval for the watch loop. Active thread leases pull it well under
+    the D13 heartbeat expiry (120s) so holder leases never go stale between
+    cycles, even with a slow scan in front of them."""
+    interval = max(10, args.interval)
+    if store.thread_lease_active_count() > 0:
+        return min(interval, 30.0)
+    return interval
+
+
 def cmd_watch(args) -> int:
     """Keep the index in sync automatically: scan on a fixed interval."""
     import time as _time
     store = Store(args.db)
-    interval = max(10, args.interval)
-    print(f"watching for agent session changes every {interval}s "
+    print(f"watching for agent session changes every {max(10, args.interval)}s "
           f"(Ctrl+C to stop)", flush=True)
     while True:
         try:
@@ -449,13 +458,16 @@ def cmd_watch(args) -> int:
             after = store.stats()
             if after["sessions"] != before["sessions"]:
                 print(f"  ↳ {after['sessions'] - before['sessions']:+d} sessions")
-            _time.sleep(interval)
+            renewed = store.thread_lease_renew_alive()
+            if renewed:
+                print(f"  ↳ lease heartbeat renewed ({renewed})")
+            _time.sleep(_watch_sleep(args, store))
         except KeyboardInterrupt:
             print("\nwatch stopped")
             return 0
         except Exception as e:
             print(f"  ! scan error: {e}; retrying in {interval}s", file=sys.stderr)
-            _time.sleep(interval)
+            _time.sleep(max(10, args.interval))
 
 
 
@@ -641,6 +653,23 @@ def _thread_from_merge(store: Store, rows: list, args) -> None:
         print("  {0} {1}".format(r["provider"], r["native_id"]))
 
 
+def _print_lease(store: Store, tid: str) -> None:
+    """One human-readable line about a thread's writer lease (D13)."""
+    import time as _time
+    lease = store.thread_lease_get(tid)
+    st = lease_state(lease)
+    if not st["held"]:
+        print("lease: free")
+        return
+    holder = "{0} pid={1}".format(lease["holder"], lease["pid"])
+    if st["expired"]:
+        print("lease: EXPIRED — {0} ({1})".format(holder, st["why"]))
+        print("       clear it with: voyager thread unlock " + tid)
+    else:
+        print("lease: held by {0}, heartbeat {1:.0f}s ago".format(
+            holder, _time.time() - (lease["heartbeat_at"] or 0)))
+
+
 def cmd_thread(args) -> int:
     store = Store(args.db)
     action = args.thread_cmd
@@ -667,6 +696,7 @@ def cmd_thread(args) -> int:
         print("title: " + (t["title"] or "?"))
         if t["goal"]:
             print("goal: " + t["goal"])
+        _print_lease(store, t["id"])
         print("members:")
         for m in members:
             print("  {0:<8} {1}  ({2} msgs)  {3}".format(
@@ -721,6 +751,37 @@ def cmd_thread(args) -> int:
             return 1
         store.thread_set_status(t["id"], "closed")
         print("thread {0} closed (sessions untouched)".format(args.thread))
+        return 0
+    if action == "unlock":
+        import time as _time
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+        lease = store.thread_lease_get(t["id"])
+        if lease is None:
+            print("thread {0} holds no lease".format(t["id"]))
+            return 0
+        st = lease_state(lease)
+        holder = "{0} pid={1}".format(lease["holder"], lease["pid"])
+        if st["expired"]:
+            store.thread_lease_release(t["id"], lease["lease_token"],
+                                       reason="expired")
+            print("cleared EXPIRED lease on {0} (was {1}, {2})".format(
+                t["id"], holder, st["why"]))
+            return 0
+        if not getattr(args, "steal", False):
+            print("thread {0} is leased to {1}, heartbeat {2:.0f}s ago".format(
+                t["id"], holder, _time.time() - (lease["heartbeat_at"] or 0)))
+            print("refusing to unlock a live lease (D13); "
+                  "pass --steal to take it (logged)")
+            return 1
+        if store.thread_lease_release(t["id"], lease["lease_token"],
+                                      reason="steal"):
+            print("stole lease on {0} from {1} (logged to {2})".format(
+                t["id"], holder, store.db_path.parent / "leases.log"))
+        else:
+            print("lease vanished while unlocking", file=sys.stderr)
         return 0
     print("unknown thread action: " + action, file=sys.stderr)
     return 1
@@ -899,7 +960,7 @@ def main(argv=None) -> int:
     sp.add_argument("--force", action="store_true")
     sp.set_defaults(func=cmd_watch)
 
-    sp = sub.add_parser("thread", help="WorkThread: list/show/create/attach/close")
+    sp = sub.add_parser("thread", help="WorkThread: list/show/create/attach/close/unlock")
     tsub = sp.add_subparsers(dest="thread_cmd", required=True)
     tsp = tsub.add_parser("list", help="list active threads")
     tsp.add_argument("--status", default="active")
@@ -921,6 +982,13 @@ def main(argv=None) -> int:
     tsp.set_defaults(func=cmd_thread)
     tsp = tsub.add_parser("close", help="mark a thread closed (sessions untouched)")
     tsp.add_argument("thread")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("unlock",
+                          help="release a thread's writer lease (--steal for a live one)")
+    tsp.add_argument("thread")
+    tsp.add_argument("--steal", action="store_true",
+                     help="force-release a LIVE lease (expired ones clear freely; "
+                          "steals are logged)")
     tsp.set_defaults(func=cmd_thread)
 
     sp = sub.add_parser("continue", parents=[common],
