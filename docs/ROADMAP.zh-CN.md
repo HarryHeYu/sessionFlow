@@ -5,7 +5,21 @@
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
-Phase 1b（索引新鲜度/自动同步）已落地；下一步是 Phase 2（WorkThread）。Phase 2–7 的其余部分仍是规划。
+**Phase 1b shipped（`5e8271c`）；Phase 2 WorkThread next（#3）。**
+Phase 3–7 仍是规划。
+
+**Issue #9 结项对账（commit `5e8271c`）：**
+- ✅ 编译前增量 `scan`（尊重 mtime+size，绝不 `--force`）
+- ✅ 新鲜度行（`freshness: scanned in Xs, N source(s) changed`）
+- ✅ 幂等：未变更的 source 不重解析
+- ✅ `watch` 仍是后台，`continue/handoff/merge` 不依赖 daemon
+- ✅ 绝不写 provider 会话文件（测试断言）
+- ⏳ **scoped scan**（按 provider/repo 缩小扫描范围）未实现——拆为后续优化，
+  不影响 #9 的核心承诺（编译前必有新鲜索引）
+- ⏳ 拉起目标 Agent 后下一次 scan 收进新 Session——已由既有 scan 语义覆盖，
+  WorkThread 挂钩归 Phase 2
+
+GitHub issue #9 请在网页端以此对账关闭（本机无 gh 凭据）。
 **英文版：** [ROADMAP.md](ROADMAP.md)
 
 Voyager 现在是机器上所有 AI 编码 Agent 的统一**索引**。
@@ -543,7 +557,7 @@ voyager continue --from A,B,C --to claude
 
 **本阶段不做：** thread 表、`--goal` 排序、token 预算、UI。
 
-### Phase 1b — 索引新鲜度 / 自动同步  **（已落地）**
+### Phase 1b — 索引新鲜度 / 自动同步  **（已落地，`5e8271c`）**
 
 **为什么。** 跨 Agent 切换只和索引一样新。格式翻译在 scan 时已经发生；
 缺的是 scan **什么时候**跑。
