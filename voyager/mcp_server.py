@@ -182,7 +182,8 @@ def voyager_show(session_id: str, max_events: int = 60) -> str:
 
 
 @mcp.tool()
-def voyager_handoff(session_id: str, target: str = "claude") -> str:
+def voyager_handoff(session_id: str, target: str = "claude",
+                    goal: str = "") -> str:
     """Generate a Context Package (goal, instructions, files, commands,
     errors, where work stopped) from a session, for handing the task to a
     DIFFERENT agent. Returns the package file path — the target agent

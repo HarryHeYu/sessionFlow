@@ -43,7 +43,7 @@ def _fmt_ts(ts) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
-def build_context_package(store: Store, srow) -> str:
+def build_context_package(store: Store, srow, goal=None) -> str:
     events = store.events(srow["id"])
     meta = json.loads(srow["metadata_json"] or "{}")
 
@@ -87,6 +87,26 @@ def build_context_package(store: Store, srow) -> str:
             L.append("")
     else:
         L.append("(no user messages captured)")
+        L.append("")
+
+    # ---- Goal-ranked evidence (Phase 3 / #4, shared pipeline) -----------
+    # Same extract/rank functions as the multi-session merge; only the
+    # session list differs (one instead of N). Without a goal this section
+    # does not exist and the package is byte-identical to pre-Phase-3.
+    if goal and goal.strip():
+        from .ranker import extract_candidate_facts, rank_candidates
+        ranked = rank_candidates(extract_candidate_facts(store, [srow]),
+                                 goal=goal)[:12]
+        L.append("## Goal-ranked evidence")
+        L.append("")
+        L.append('goal: "{0}" — top {1} ranked facts '
+                 "(deterministic; each line is provenance-bound):".format(
+                     goal, len(ranked)))
+        L.append("")
+        for f, score in ranked:
+            head = " ".join((f.text or f.command or "").split())[:220]
+            L.append("- [{0}] ({1}, score {2}) {3}".format(
+                f.provenance, f.kind, score, head))
         L.append("")
 
     # ---- last assistant state ------------------------------------------

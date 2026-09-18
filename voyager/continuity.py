@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .store import Store
+from .ranker import extract_candidate_facts, rank_candidates
 
 PROMPT_TARGETS = {
     "claude": "claude",
@@ -171,6 +172,26 @@ def build_continuation_bundle(
             L.append("(no user instructions captured)")
             L.append("")
 
+    # ---- 1b. Goal-ranked evidence (Phase 3 / #4) ------------------------
+    # Only when a goal is given: same extract+rank pipeline as handoff.
+    # Without a goal this section does not exist (pre-Phase-3 semantics).
+    top_facts: List[Tuple[Any, float]] = []
+    if goal and goal.strip():
+        facts = extract_candidate_facts(store, sorted_rows)
+        ranked = rank_candidates(facts, goal=goal)
+        top_facts = ranked[:12]
+        L.append("## Goal-ranked evidence")
+        L.append("")
+        L.append('goal: "{0}" — top {1} of {2} ranked facts '
+                 "(deterministic; each line is provenance-bound):".format(
+                     goal, len(top_facts), len(facts)))
+        L.append("")
+        for f, score in top_facts:
+            head = " ".join((f.text or f.command or "").split())[:220]
+            L.append("- [{0}] ({1}, score {2}) {3}".format(
+                f.provenance, f.kind, score, head))
+        L.append("")
+
     # ---- 2. Current verified state (newest session wins) ----------------
     L.append("## Current verified state")
     L.append("")
@@ -250,6 +271,14 @@ def build_continuation_bundle(
 
     seen_files = set()
     dedup_files = [f for f in all_files if not (f in seen_files or seen_files.add(f))][:_MAX_FILES]
+    # Phase 3: with a goal, shrink the file list to what the ranked facts
+    # touched (never to empty — the unfiltered list is the fallback).
+    if goal and top_facts:
+        goal_files = {p for f, _ in top_facts for p in f.paths}
+        if goal_files:
+            narrowed = [f for f in dedup_files if f in goal_files]
+            if narrowed:
+                dedup_files = narrowed
     if dedup_files:
         L.append("## Files touched across sessions")
         L.append("")
@@ -275,6 +304,16 @@ def build_continuation_bundle(
                 seen_cmds.add(norm)
                 dedup_cmds.append((ts, norm, rc))
         dedup_cmds.reverse()
+
+        # Phase 3: with a goal, shrink to the commands the ranked facts ran
+        # (never to empty — the unfiltered list is the fallback).
+        if goal and top_facts:
+            goal_cmds = {" ".join((f.command or "").split())
+                         for f, _ in top_facts if f.command}
+            if goal_cmds:
+                narrowed = [c for c in dedup_cmds if c[1] in goal_cmds]
+                if narrowed:
+                    dedup_cmds = narrowed
 
         for ts, cmd_str, rc in dedup_cmds[-_MAX_COMMANDS:]:
             rc_s = f"  # exit {rc}" if rc is not None else ""

@@ -835,7 +835,7 @@ def _merge_and_handoff(store: Store, rows: list, args) -> int:
 def _handoff_from_row(store: Store, row, args) -> int:
     from .handoff import PROMPT_TARGETS, build_context_package, default_package_name, handoff_command
     out = Path(args.output) if getattr(args, "output", None) else Path(default_package_name(row))
-    package = build_context_package(store, row)
+    package = build_context_package(store, row, goal=getattr(args, "goal", None))
     out.write_text(package, encoding="utf-8")
     print(f"context package: {out.resolve()} ({len(package)} chars)")
 
@@ -939,6 +939,7 @@ def main(argv=None) -> int:
                         help="export a session as a context package for another agent")
     sp.add_argument("session")
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
+    sp.add_argument("--goal", help="rank the evidence against this goal")
     sp.add_argument("--output", "-o", help="package file path (default ~/.voyager/bundles/...)")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the package")
     sp.set_defaults(func=cmd_handoff)
