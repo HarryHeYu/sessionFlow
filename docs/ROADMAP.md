@@ -3,13 +3,25 @@
 > Voyager compiles scattered agent histories into the context the next agent actually needs.
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
-**Phase 1b shipped (`5e8271c`); Phase 2a WorkThread landed (thread model, explicit CRUD/attach, merge->thread, continue --thread, cwd->thread default pickup). Next: Phase 2b single-writer lease (#11).**
-Phases 3–7 remain planning.
+**Phase 1b shipped (`5e8271c`); Phase 2 fully landed — 2a WorkThread (thread model, explicit CRUD/attach, merge->thread, continue --thread, cwd->thread default pickup; `b580001`/`934dfd5`) and 2b single-writer lease (`c41f99b`). Next: Phase 3 goal-conditioned extraction (#4).**
+Phases 4–7 remain planning.
 
 **Issue #9 close-out (commit `5e8271c`):** incremental pre-compile scan ✅,
 freshness line ✅, idempotent ✅, watch stays background ✅, provider files
 never written ✅. Scoped scan (provider/repo-limited) split out as a
 follow-up optimization. Close issue #9 with this reconciliation.
+
+**Issue #11 close-out (commit `c41f99b`):** `thread_leases` table with
+additive migration ✅, atomic `BEGIN IMMEDIATE` acquire — a live lease
+blocks the second writer and names its holder, an expired one never
+blocks ✅, expiry = heartbeat >120s stale OR dead pid (OpenProcess probe
+on nt, `kill(pid,0)` on POSIX) ✅, token-bound renew/release with
+explicit `--steal` appended to `~/.voyager/leases.log` ✅,
+`voyager thread unlock [--steal]` + lease line in `thread show` ✅,
+`voyager watch` doubles as the D13 heartbeat (renews live pids; sleep
+shortens to <=30s while a lease is live) ✅. Consumers of the lock are
+#7 (`switch`) and #10 (writers). Close issue #11 with this
+reconciliation.
 **Companion:** [中文版](ROADMAP.zh-CN.md)
 
 Voyager today is a unified **index** of every AI coding agent on the machine.
@@ -251,9 +263,9 @@ Grok at once. That is multi-writer mirroring and is a non-goal.
 | Piece | Status |
 |---|---|
 | Canonical Event / SQLite | shipped |
-| Scan / watch ingest | shipped; freshness before compile is #9 |
-| WorkThread identity | Phase 2 / #3 |
-| Lease table + acquire/heartbeat/release | Phase 2 / **#11** (this) |
+| Scan / watch ingest | shipped (#9) |
+| WorkThread identity | shipped (Phase 2a) |
+| Lease table + acquire/heartbeat/release | shipped (Phase 2b, `c41f99b`) |
 | Writer Grok / Codex | probe HIT; implement under the lease, new ids only (#10) |
 | Writer Claude | blocked on a HIT |
 | Live rewrite of an open native file | never |
@@ -636,7 +648,7 @@ helper is needed), `tests/test_cli.py` / `tests/test_continuity.py`.
 **Out of scope:** OS filesystem events, two-way session mirroring,
 transcript writers, WorkThread.
 
-### Phase 2 — WorkThread
+### Phase 2 — WorkThread **(shipped: 2a `b580001`/`934dfd5`, 2b lease `c41f99b`)**
 
 **Why.** `continue` should mean "the work I am in", not "the newest
 chat".
@@ -764,9 +776,9 @@ Treat the checkboxes as the implementation contract.
 |---|---|---|---|
 | [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine: tracking issue | 0 | — |
 | [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — *(shipped `ff13096`)* |
-| [#9](https://github.com/HarryHeYu/voyager/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — |
-| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 |
-| [#11](https://github.com/HarryHeYu/voyager/issues/11) | Single-writer lease on a WorkThread | 2 | #3 |
+| [#9](https://github.com/HarryHeYu/voyager/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — *(shipped `5e8271c`)* |
+| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 *(shipped Phase 2a)* |
+| [#11](https://github.com/HarryHeYu/voyager/issues/11) | Single-writer lease on a WorkThread | 2 | #3 *(shipped `c41f99b`)* |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |

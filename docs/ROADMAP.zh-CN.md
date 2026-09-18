@@ -5,8 +5,22 @@
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
-**Phase 1b shipped（`5e8271c`）；Phase 2a WorkThread 已落地（thread 数据模型、显式 CRUD/attach、merge→thread、continue --thread、cwd→thread 默认接续）。下一步：Phase 2b 单写者租约（#11）。**
-Phase 3–7 仍是规划。
+**Phase 1b shipped（`5e8271c`）；Phase 2 已全部落地——2a WorkThread（thread 数据模型、显式 CRUD/attach、merge→thread、continue --thread、cwd→thread 默认接续，`b580001`/`934dfd5`）；2b 单写者租约（`c41f99b`）。下一步：Phase 3 面向目标的抽取（#4）。**
+Phase 4–7 仍是规划。
+
+**Issue #11 结项对账（commit `c41f99b`）：**
+- ✅ `thread_leases` 表（加法迁移，老索引直接升级）
+- ✅ `BEGIN IMMEDIATE` 原子抢锁：活租约挡住第二家并报出持有者
+  （`held by codex pid=123, heartbeat 8s ago`）；过期租约不挡人
+- ✅ 过期 = 心跳 >120s **或** pid 已死（nt 下用 OpenProcess 探测，POSIX 用 `kill(pid,0)`）
+- ✅ token 绑定的 renew / release；`--steal` 必须显式，全部进出都追加进
+  `~/.voyager/leases.log` 审计
+- ✅ `voyager thread unlock [--steal]`；`voyager thread show` 显示租约行
+- ✅ `voyager watch` 兼任 D13 心跳：只为 pid 存活的租约续期，活跃租约期间
+  睡眠自动缩短到 ≤30s（心跳 120s 不会在两轮 watch 之间过期）
+- ⏳ 抢锁的消费方（`voyager switch`）是 #7，writer 是 #10——都排在这把锁后面
+
+GitHub issue #11 请在网页端以此对账关闭（本机无 gh 凭据）。
 
 **Issue #9 结项对账（commit `5e8271c`）：**
 - ✅ 编译前增量 `scan`（尊重 mtime+size，绝不 `--force`）
@@ -234,9 +248,9 @@ X 还活着的时候，Voyager **不回写**它的原生文件。锁就是为了
 | 零件 | 状态 |
 |---|---|
 | 归一化 Event / SQLite | 已有 |
-| scan / watch 吸入 | 已有；编译前刷新是 #9 |
-| WorkThread 身份 | Phase 2 / #3 |
-| 租约表 + 抢锁/心跳/释放 | Phase 2 / **#11** |
+| scan / watch 吸入 | 已有（#9 已落地） |
+| WorkThread 身份 | 已落地（Phase 2a，`b580001` / `934dfd5`） |
+| 租约表 + 抢锁/心跳/释放 | 已落地（Phase 2b，`c41f99b`） |
 | Writer Grok / Codex | 探测 HIT；必须在租约下、只写新 id（#10） |
 | Writer Claude | 等 HIT |
 | 回写正在跑的原生文件 | 永不 |
@@ -586,7 +600,7 @@ voyager watch                 # 后台；不能代替前者
 
 **本阶段不做：** 操作系统文件事件、双向 Session 镜像、transcript writer、WorkThread。
 
-### Phase 2 — WorkThread
+### Phase 2 — WorkThread **（已落地：2a `b580001`/`934dfd5`，2b 租约 `c41f99b`）**
 
 **为什么。** `continue` 应该是「我正在推进的那件事」，不是「最新一条聊天」。
 
@@ -703,9 +717,9 @@ voyager switch codex
 |---|---|---|---|
 | [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine：总跟踪 issue | 0 | — |
 | [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — *（已落地 `ff13096`）* |
-| [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — |
-| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 |
-| [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 |
+| [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — *（已落地 `5e8271c`）* |
+| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（已落地 Phase 2a）* |
+| [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 *（已落地 `c41f99b`）* |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |

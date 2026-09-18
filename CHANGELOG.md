@@ -5,6 +5,18 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Single-writer thread lease (roadmap Phase 2b, issue #11 / D13)** —
+  `thread_leases` table with additive migration; atomic acquire via
+  SQLite `BEGIN IMMEDIATE` (a live lease blocks the second writer and
+  names its holder; an expired one never blocks — expiry = heartbeat
+  >120s stale OR holder pid gone, probed cross-platform); token-bound
+  renew/release; explicit `--steal`, with every grant/steal/release
+  appended to an audit log (`~/.voyager/leases.log`); CLI: `voyager
+  thread unlock [--steal]` and a lease line in `voyager thread show`;
+  `voyager watch` doubles as the lease heartbeat (renews live pids,
+  shortens its sleep to ≤30s while a lease is held). Consumers of the
+  lock — `voyager switch` (#7) and transcript writers (#10) — stay
+  gated behind it.
 - **Continuity plan: single-writer lease.** Canonical history lives in
   Voyager; a WorkThread is leased to one live agent (D13 / #11).
   Sync-on-open materializes into that agent; continuous write is
