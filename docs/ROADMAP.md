@@ -3,8 +3,9 @@
 > Voyager compiles scattered agent histories into the context the next agent actually needs.
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
-**Phase 1b shipped (`5e8271c`); Phase 2 mostly landed — 2a WorkThread (thread model, explicit CRUD/attach, merge->thread, continue --thread, cwd->thread default pickup; `b580001`/`934dfd5`); 2b single-writer lease (`c41f99b`).**
-Next: Phase 3 goal-conditioned extraction (#4). Phases 4–7 remain planning.
+**Phase 1b shipped (`5e8271c`); Phase 2 landed (2a WorkThread `b580001`/`934dfd5`; 2b lease `c41f99b`; two #3 scope items deferred — see Deferred). **
+**Phase 3 shipped (`d931b02`). Next: Phase 4 Context Budget (#5), then Skill (#6) / switch (#7).**
+Phases 5–7 remain planning.
 
 **Phase 2 close-out audit (2026-09-18, checked against the code):**
 
@@ -806,7 +807,7 @@ Treat the checkboxes as the implementation contract.
 | [#9](https://github.com/HarryHeYu/voyager/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — *(shipped `5e8271c`)* |
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 *(2a core shipped; --repo auto-cluster + MCP voyager_thread deferred — see Deferred)* |
 | [#11](https://github.com/HarryHeYu/voyager/issues/11) | Single-writer lease on a WorkThread | 2 | #3 *(shipped `c41f99b`)* |
-| [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 |
+| [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 *(shipped `d931b02`)* |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
 | [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |

@@ -5,6 +5,18 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Goal-conditioned extraction (roadmap Phase 3, issue #4 / D10)** —
+  `--goal` now ranks evidence on `handoff`, `merge`, `continue --repo`
+  and `continue --thread` through ONE shared deterministic pipeline
+  (`voyager/ranker.py`): CandidateFact extraction (failure-biased,
+  provenance-bound `session#seq`) + lexicon-boosted lexical ranking
+  (goal coverage, path/command overlap, direct hits, recency,
+  fact-type priority). With `--goal`, bundles gain a "Goal-ranked
+  evidence" section and Files/Commands shrink to top-fact artifacts;
+  without it, output is byte-compatible with pre-Phase-3. CI facts
+  rank above README/UI for goal "fix CI" and reverse for "improve
+  README" (contrast-tested). No LLM, no network, no new core deps.
+
 - **Single-writer thread lease (roadmap Phase 2b, issue #11 / D13)** —
   `thread_leases` table with additive migration; atomic acquire via
   SQLite `BEGIN IMMEDIATE` (a live lease blocks the second writer and

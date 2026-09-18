@@ -5,8 +5,9 @@
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
-**Phase 1b shipped（`5e8271c`）；Phase 2 主体已落地——2a WorkThread（thread 数据模型、显式 CRUD/attach、merge→thread、continue --thread、cwd→thread 默认接续，`b580001`/`934dfd5`）；2b 单写者租约（`c41f99b`）。**
-下一步：Phase 3 面向目标的抽取（#4）。Phase 4–7 仍是规划。
+**Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；两项 #3 范围内容显式延期——见 Deferred）。**
+**Phase 3 shipped（`d931b02`）。下一步：Phase 4 Context Budget（#5），随后 Skill（#6）/ switch（#7）。**
+Phase 5–7 仍是规划。
 
 **Phase 2 close-out audit（2026-09-18，对照代码逐条核实）：**
 
@@ -648,7 +649,22 @@ voyager thread attach <sid>
 **本阶段不做：** 花哨的主题模型、重命名体验打磨、UI、
 writer（那是 #10，而且**必须**先有这把锁）。
 
-### Phase 3 — 面向目标的 handoff
+### Phase 3 — 面向目标的 handoff **（已落地，`d931b02`）**
+
+**Issue #4 结项对账（commit `d931b02`）：**
+- ✅ `--goal` 接入 `handoff` / `merge` / `continue --repo` / `continue --thread`
+- ✅ 单会话 handoff 与多会话 merge 共用同一条管线
+  （`voyager/ranker.py`：`extract_candidate_facts` + `rank_candidates`，
+  CandidateFact 含 kind/text/source_session/timestamp/paths/command/
+  provenance/confidence）
+- ✅ 确定性、离线、core 零新增依赖（D10）
+- ✅ 概念词典是数据（boost only）——没有按 goal 写分支
+- ✅ 排序信号：goal 覆盖度、路径/命令重叠、直接命中、新近度、
+  事实类型优先级（失败加权）
+- ✅ 无 goal → 与 Phase 3 之前语义完全一致（无 ranked 段、保持输入顺序）
+- ✅ 对照测试：goal="fix CI" 时 CI 事实压过 README/UI；goal="improve
+  README" 反转；共享管线验证（handoff 与 merge 的首条证据相同）；
+  每条证据带 `session#seq`；provider 文件零写入
 
 ```
 voyager handoff A --to claude --goal "finish adapter tests"
@@ -742,7 +758,7 @@ voyager switch codex
 | [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — *（已落地 `5e8271c`）* |
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（2a 核心已落地；--repo 自动聚类与 MCP voyager_thread 延期，见 Deferred）* |
 | [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 *（已落地 `c41f99b`）* |
-| [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 |
+| [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 *（已落地 `d931b02`）* |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
 | [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |
