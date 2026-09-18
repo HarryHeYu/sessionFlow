@@ -56,6 +56,11 @@ All notable changes to Voyager are documented here. Format loosely follows
   `scripts/make_diagram.py`): 8 agents / 8 formats → one index → the six
   ways to use it. Embedded at the top of both READMEs.
 
+- **Index freshness (roadmap Phase 1b)** — `continue` / `handoff` / `merge`
+  run an incremental scan before reading sessions and print a freshness
+  line (`freshness: scanned in 0.4s, 2 source(s) changed`);
+  `VOYAGER_NO_SYNC=1` skips it (tests, offline inspection).
+
 ### Fixed
 - `--db` was only accepted *before* the subcommand (`voyager --db X stats`);
   `voyager stats --db X` died with an argparse usage error. It is now
@@ -168,6 +173,10 @@ All notable changes to Voyager are documented here. Format loosely follows
   (`mcp.json`), so agents can query other agents' sessions without shell.
 
 ### Fixed
+- Prune is now source-aware: sessions seeded without a source row are
+  never auto-pruned, and a session is dropped only when ALL of its source
+  files vanish from disk (previously an unrelated scan could wipe
+  manually-seeded sessions).
 - Prune could delete sessions of a multi-session artifact (one SQLite DB →
   N sessions) because `sources` was keyed per path; source bookkeeping is
   now `(provider, path, sid)`.

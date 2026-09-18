@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import List, Optional
 
 from .adapters import load_all
 from .adapters.base import enabled_adapters
@@ -18,52 +19,44 @@ from .store import Store, default_db_path
 # scan
 # ---------------------------------------------------------------------------
 
-def cmd_scan(args) -> int:
+def run_scan(store: Store, providers: Optional[List[str]] = None,
+             force: bool = False, quiet: bool = False) -> dict:
+    """Incremental scan core (Phase 1b). Returns stats; respects mtime+size,
+    never rewrites provider files, prunes vanished sources."""
+    import time as _time
+    t0 = _time.time()
     load_all()
-    store = Store(args.db)
-    adapters = enabled_adapters(args.platform.split(",") if args.platform else None)
+    adapters = enabled_adapters(providers)
 
-    grand_new = grand_skip = grand_evt = 0
+    grand_new = grand_skip = grand_evt = grand_changed = 0
     for ad in adapters:
         new = skip = evt = 0
+        changed = 0
         multi = hasattr(ad, "scan") and callable(getattr(ad, "scan"))
-        live_ids: set = set()
-        rescan = args.force
+        rescan = force
 
         sources = ad.discover()
         if not sources:
             # nothing on disk anymore: drop everything this provider had
             gone = store.prune_missing_sessions(ad.provider, set())
-            if gone:
+            if gone and not quiet:
                 print(f"  {ad.provider}: pruned {gone} vanished session(s)")
-            else:
+            elif not quiet:
                 print(f"  {ad.provider}: no sources found")
             continue
 
-        if multi:
-            for src in sources:
-                try:
-                    if store.source_changed(ad.provider, src):
-                        rescan = True
-                        break
-                except OSError:
-                    continue
-        else:
-            for src in sources:
-                try:
-                    if store.source_changed(ad.provider, src):
-                        rescan = True
-                        break
-                except OSError:
-                    continue
+        for src in sources:
+            try:
+                if store.source_changed(ad.provider, src):
+                    changed += 1
+                    rescan = True
+            except OSError:
+                continue
 
         # Sessions whose sources are still on disk survive pruning even when
         # they were skipped (unchanged) or failed to parse this round; only
         # sources that vanished from disk release their sessions.
         disk_paths = {str(p) for p in sources}
-        for r in store.q("SELECT path, sid FROM sources WHERE provider=?", (ad.provider,)):
-            if r["sid"] and r["path"] in disk_paths:
-                live_ids.add(r["sid"])
 
         if not rescan:
             skip = len(sources)
@@ -87,13 +80,12 @@ def cmd_scan(args) -> int:
                         Path(bundle.get("source_path") or anchor),
                         bundle.get("extra_sources"),
                     )
-                    live_ids.add(bundle["session"]["id"])
                     new += 1
                     evt += len(bundle["events"])
         else:
             for src in sources:
                 try:
-                    if not args.force and not store.source_changed(ad.provider, src):
+                    if not force and not store.source_changed(ad.provider, src):
                         skip += 1
                         continue
                 except OSError:
@@ -112,24 +104,50 @@ def cmd_scan(args) -> int:
                     result["session"], result["events"], ad.provider,
                     src, result.get("extra_sources"),
                 )
-                live_ids.add(result["session"]["id"])
                 new += 1
                 evt += len(result["events"])
 
-        gone = store.prune_missing_sessions(ad.provider, live_ids)
-        if gone:
+        gone = store.prune_missing_sessions(ad.provider, disk_paths)
+        if gone and not quiet:
             print(f"  {ad.provider}: pruned {gone} vanished session(s)")
 
         stats = store.stats()
-        print(f"  {ad.provider}: {stats['by_provider'].get(ad.provider, 0)} sessions indexed "
-              f"({new} new/refreshed, {skip} unchanged)", flush=True)
+        if not quiet:
+            print(f"  {ad.provider}: {stats['by_provider'].get(ad.provider, 0)} sessions indexed "
+                  f"({new} new/refreshed, {skip} unchanged)", flush=True)
         grand_new += new; grand_skip += skip; grand_evt += evt
+        grand_changed += changed
 
     stats = store.stats()
-    print(f"\nscan complete: {stats['sessions']} sessions, {stats['events']} events "
-          f"(new/refreshed: {grand_new}, unchanged: {grand_skip})")
-    print(f"index: {store.db_path}")
+    res = {"new": grand_new, "skip": grand_skip, "events_added": grand_evt,
+           "changed_sources": grand_changed, "elapsed": _time.time() - t0,
+           "sessions": stats["sessions"], "events": stats["events"]}
+    if not quiet:
+        print(f"\nscan complete: {stats['sessions']} sessions, {stats['events']} events "
+              f"(new/refreshed: {grand_new}, unchanged: {grand_skip})")
+        print(f"index: {store.db_path}")
+    return res
+
+
+def cmd_scan(args) -> int:
+    store = Store(args.db)
+    run_scan(store,
+             providers=args.platform.split(",") if args.platform else None,
+             force=args.force, quiet=False)
     return 0
+
+
+def _ensure_fresh(args, store: Store, providers: Optional[List[str]] = None) -> dict:
+    """Phase 1b: incremental scan before compiling/reading sessions.
+    Never --force; prints one freshness line so stale bundles are explicable.
+    Set VOYAGER_NO_SYNC=1 to skip (tests, offline inspection)."""
+    if os.environ.get("VOYAGER_NO_SYNC"):
+        print("freshness: skipped (VOYAGER_NO_SYNC)")
+        return {"changed_sources": 0, "elapsed": 0.0}
+    res = run_scan(store, providers=providers, force=False, quiet=True)
+    print(f"freshness: scanned in {res['elapsed']:.1f}s, "
+          f"{res['changed_sources']} source(s) changed")
+    return res
 
 
 def _sid_of_source(store: Store, provider: str, src: Path):
@@ -444,6 +462,9 @@ def cmd_continue(args) -> int:
     """One command to pick work back up: native resume when possible,
     automatic cross-agent handoff otherwise."""
     store = Store(args.db)
+    # Phase 1b: the index is only as fresh as the last scan
+    _ensure_fresh(args, store,
+                  providers=[args.platform] if getattr(args, "platform", None) else None)
     from_sessions = getattr(args, "from_sessions", None)
     if from_sessions:
         refs = [s.strip() for s in from_sessions.split(",") if s.strip()]
@@ -521,6 +542,7 @@ def cmd_brief(args) -> int:
 
 def cmd_handoff(args) -> int:
     store = Store(args.db)
+    _ensure_fresh(args, store)
     row = _resolve(store, args.session)
     return _handoff_from_row(store, row, args)
 
@@ -528,6 +550,7 @@ def cmd_handoff(args) -> int:
 def cmd_merge(args) -> int:
     """Synthesize multiple sessions into one Continuation Bundle."""
     store = Store(args.db)
+    _ensure_fresh(args, store)
     session_refs = args.sessions
     if not session_refs:
         print("error: at least one session id required", file=sys.stderr)

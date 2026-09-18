@@ -5,7 +5,7 @@
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
-下一步实现是 Phase 1b（自动同步）；Phase 2–7 仍是规划。
+Phase 1b（索引新鲜度/自动同步）已落地；下一步是 Phase 2（WorkThread）。Phase 2–7 的其余部分仍是规划。
 **英文版：** [ROADMAP.md](ROADMAP.md)
 
 Voyager 现在是机器上所有 AI 编码 Agent 的统一**索引**。
@@ -543,7 +543,7 @@ voyager continue --from A,B,C --to claude
 
 **本阶段不做：** thread 表、`--goal` 排序、token 预算、UI。
 
-### Phase 1b — 索引新鲜度 / 自动同步  **（接下来做这个）**
+### Phase 1b — 索引新鲜度 / 自动同步  **（已落地）**
 
 **为什么。** 跨 Agent 切换只和索引一样新。格式翻译在 scan 时已经发生；
 缺的是 scan **什么时候**跑。

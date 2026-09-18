@@ -308,12 +308,28 @@ class Store:
                 pass  # COMMIT itself failed: sqlite already rolled back
             raise
 
-    def prune_missing_sessions(self, provider: str, live_ids: set) -> int:
-        """Remove sessions of a provider whose sources disappeared entirely."""
+    def prune_missing_sessions(self, provider: str, disk_paths: set) -> int:
+        """Drop sessions of `provider` whose source files all vanished.
+
+        Only sessions that HAVE source rows are managed here. Sessions
+        seeded without a source row (synthetic tests, manual inserts) are
+        never touched — the caller cannot know their lifecycle.
+        """
         rows = self.con.execute(
             "SELECT id FROM sessions WHERE provider=?", (provider,)
         ).fetchall()
-        gone = [r["id"] for r in rows if r["id"] not in live_ids]
+        gone = []
+        for r in rows:
+            sid = r["id"]
+            src_rows = self.q(
+                "SELECT path FROM sources WHERE provider=? AND sid=?",
+                (provider, sid),
+            )
+            if not src_rows:
+                continue  # manually seeded; not ours to prune
+            if any(sr["path"] in disk_paths for sr in src_rows):
+                continue  # at least one source still on disk
+            gone.append(sid)
         for sid in gone:
             self.con.execute(
                 "DELETE FROM event_fts WHERE rowid IN (SELECT id FROM events WHERE sid=?)",

@@ -21,6 +21,13 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _no_sync_by_default(monkeypatch):
+    """Tests never hit the real HOME stores during continue/handoff/merge.
+    Phase 1b freshness tests opt out explicitly via monkeypatch.delenv."""
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 # module-level path globals an adapter may expose for discovery; the isolation
@@ -307,3 +314,11 @@ def zcode_row(indexed_store):
     row, ambiguous = indexed_store.session(ZCODE_SID)
     assert row is not None and not ambiguous, "zcode fixture row missing"
     return row
+
+
+def patch_adapter_paths(monkeypatch, ad, **values):
+    """Monkeypatch module-level path globals on an adapter's module."""
+    import importlib
+    mod = importlib.import_module(type(ad).__module__)
+    for k, v in values.items():
+        monkeypatch.setattr(mod, k, v)

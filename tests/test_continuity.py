@@ -184,7 +184,8 @@ def test_bundle_command_targets(tmp_path):
     assert bundle_command("unknown", bundle_file) is None
 
 
-def test_cli_merge_command(synthetic_trio, tmp_path, capsys):
+def test_cli_merge_command(synthetic_trio, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
     store, rows = synthetic_trio
     out = tmp_path / "merged_out.md"
     rc = main(["--db", str(store.db_path), "merge", "sess-1", "sess-2", "sess-3",
@@ -198,7 +199,8 @@ def test_cli_merge_command(synthetic_trio, tmp_path, capsys):
     assert '$ claude "<continuation prompt>"' in printed
 
 
-def test_cli_continue_from_command(synthetic_trio, tmp_path, capsys):
+def test_cli_continue_from_command(synthetic_trio, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
     store, rows = synthetic_trio
     out = tmp_path / "cont_out.md"
     rc = main(["--db", str(store.db_path), "continue", "--from", "sess-1,sess-2,sess-3",
@@ -212,7 +214,8 @@ def test_cli_continue_from_command(synthetic_trio, tmp_path, capsys):
     assert '$ codex "<continuation prompt>"' in printed
 
 
-def test_default_bundle_directory_is_in_home(synthetic_trio, capsys):
+def test_default_bundle_directory_is_in_home(synthetic_trio, capsys, monkeypatch):
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
     store, rows = synthetic_trio
     rc = main(["--db", str(store.db_path), "merge", "sess-1", "sess-2"])
     printed = capsys.readouterr().out
@@ -221,3 +224,106 @@ def test_default_bundle_directory_is_in_home(synthetic_trio, capsys):
     bundles_dir = get_bundles_dir()
     assert str(bundles_dir) in printed
     assert "next: pick a target agent" in printed
+
+
+# ---------------------------------------------------------------------------
+# Phase 1b — index freshness / automatic sync
+# ---------------------------------------------------------------------------
+
+def _codex_rollout_fixture(tmp_path, monkeypatch):
+    """A synthetic codex rollout + patched adapter path; returns (file, sid)."""
+    import voyager.adapters.codex as codex_mod
+    d = tmp_path / "codex" / "sessions" / "2026" / "09" / "18"
+    d.mkdir(parents=True)
+    f = d / "rollout-2026-09-18T10-00-00-11111111-2222-3333-4444-555555555555_w.jsonl"
+    lines = [
+        json.dumps({"timestamp": "2026-09-18T10:00:00Z", "ordinal": 0,
+                    "type": "session_meta",
+                    "payload": {"session_id": "11111111-2222-3333-4444-555555555555",
+                                "timestamp": "2026-09-18T10:00:00Z",
+                                "cwd": str(tmp_path / "repo"),
+                                "originator": "codex_vscode"}}),
+        json.dumps({"timestamp": "2026-09-18T10:00:05Z", "ordinal": 1,
+                    "type": "response_item",
+                    "payload": {"type": "message", "role": "user",
+                                "content": [{"type": "input_text",
+                                             "text": "phase1b marker ALPHA"}]}}),
+        json.dumps({"timestamp": "2026-09-18T10:00:10Z", "ordinal": 2,
+                    "type": "response_item",
+                    "payload": {"type": "message", "role": "assistant",
+                                "content": [{"type": "output_text",
+                                             "text": "done ALPHA"}]}}),
+    ]
+    f.write_text("\n".join(lines), encoding="utf-8")
+    monkeypatch.setattr(codex_mod, "SESSIONS_DIR", d.parent.parent.parent)
+    return f, "codex:11111111-2222-3333-4444-555555555555"
+
+
+def test_phase1b_merge_sees_new_content_after_change(
+        tmp_path, monkeypatch, capsys):
+    import os as _os
+    import re as _re
+    import time as _time
+    monkeypatch.delenv("VOYAGER_NO_SYNC", raising=False)
+    """Two merges around a content change: the second bundle MUST contain
+    the new message; unchanged round must not re-parse (idempotent);
+    provider file must never be written to."""
+    f, sid = _codex_rollout_fixture(tmp_path, monkeypatch)
+    before_bytes = f.read_bytes()
+    db = tmp_path / "p1b.db"
+    out1 = tmp_path / "b1.md"
+
+    # round 1: scan + merge
+    rc = main(["--db", str(db), "scan"])
+    assert rc == 0
+    rc = main(["--db", str(db), "merge", sid, "-o", str(out1)])
+    assert rc == 0
+    b1 = out1.read_text(encoding="utf-8")
+    assert "phase1b marker ALPHA" in b1
+
+    # append a new message (content + mtime change)
+    _time.sleep(0.02)
+    with open(f, "a", encoding="utf-8") as fh:
+        fh.write("\n" + json.dumps({
+            "timestamp": "2026-09-18T10:05:00Z", "ordinal": 3,
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user",
+                        "content": [{"type": "input_text",
+                                     "text": "phase1b marker BETA"}]}}))
+    _os.utime(f, (_time.time(), _time.time()))
+
+    # round 2: merge again (handoff/merge pre-scan must refresh internally)
+    out2 = tmp_path / "b2.md"
+    rc = main(["--db", str(db), "merge", sid, "-o", str(out2)])
+    assert rc == 0
+    b2 = out2.read_text(encoding="utf-8")
+    assert "phase1b marker BETA" in b2, "fresh scan must pick up new content"
+    printed = capsys.readouterr().out
+    assert "freshness:" in printed
+
+    # round 3: nothing changed -> freshness reports 0 changed sources
+    rc = main(["--db", str(db), "continue", sid, "--to", "claude",
+               "-o", str(tmp_path / "b3.md")])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert _re.search(r"freshness: scanned in \d+\.\d+s, 0 source\(s\) changed",
+                      printed), printed
+
+    # provider file never written by voyager (only our own append touched it)
+    assert b"phase1b marker BETA" in f.read_bytes()
+    assert "phase1b marker BETA" in f.read_text(encoding="utf-8")
+
+
+def test_phase1b_scan_is_idempotent(tmp_path, monkeypatch):
+    import io
+    import re as _re
+    from contextlib import redirect_stdout
+    monkeypatch.delenv("VOYAGER_NO_SYNC", raising=False)
+    f, sid = _codex_rollout_fixture(tmp_path, monkeypatch)
+    db = tmp_path / "p1b_idem.db"
+    main(["--db", str(db), "scan"])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["--db", str(db), "scan"])
+    assert rc == 0
+    assert "0 new/refreshed" in buf.getvalue()
