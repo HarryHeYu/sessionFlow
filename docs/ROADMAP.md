@@ -3,7 +3,13 @@
 > Voyager compiles scattered agent histories into the context the next agent actually needs.
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
-Phase 1b (auto-sync) is the next implementation cut; Phases 2–7 remain planning.
+**Phase 1b shipped (`5e8271c`); Phase 2 WorkThread next (#3).**
+Phases 3–7 remain planning.
+
+**Issue #9 close-out (commit `5e8271c`):** incremental pre-compile scan ✅,
+freshness line ✅, idempotent ✅, watch stays background ✅, provider files
+never written ✅. Scoped scan (provider/repo-limited) split out as a
+follow-up optimization. Close issue #9 with this reconciliation.
 **Companion:** [中文版](ROADMAP.zh-CN.md)
 
 Voyager today is a unified **index** of every AI coding agent on the machine.
