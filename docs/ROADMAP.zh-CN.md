@@ -5,8 +5,30 @@
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
-**Phase 1b shipped（`5e8271c`）；Phase 2 已全部落地——2a WorkThread（thread 数据模型、显式 CRUD/attach、merge→thread、continue --thread、cwd→thread 默认接续，`b580001`/`934dfd5`）；2b 单写者租约（`c41f99b`）。下一步：Phase 3 面向目标的抽取（#4）。**
-Phase 4–7 仍是规划。
+**Phase 1b shipped（`5e8271c`）；Phase 2 主体已落地——2a WorkThread（thread 数据模型、显式 CRUD/attach、merge→thread、continue --thread、cwd→thread 默认接续，`b580001`/`934dfd5`）；2b 单写者租约（`c41f99b`）。**
+下一步：Phase 3 面向目标的抽取（#4）。Phase 4–7 仍是规划。
+
+**Phase 2 close-out audit（2026-09-18，对照代码逐条核实）：**
+
+*已实现且有测试：* thread 数据模型（加法迁移有回归测试）、显式 CRUD/attach、
+merge→thread、continue --thread、cwd→thread 默认接续、租约表、原子抢锁
+（BEGIN IMMEDIATE）、过期判定（心跳/pid）、token 绑定 renew/release、
+--steal + leases.log 审计、thread unlock CLI、watch 心跳。
+
+*已实现但无专项测试：* 无（thread/租约行为均有覆盖）。
+
+*未实现——从 Phase 2 明确延期，不算已完成：*
+- `continue --repo` 自动聚类信号（repo_root + 时间窗 + branch + 文件交集 +
+  FTS 重叠）：**未实现**。现在 `--repo` 只是「最新会话」过滤。延期理由：
+  自动聚类是「看起来聪明、实际乱归类」风险最高的一块；显式 thread +
+  merge→thread 已覆盖工作流。后续单独开 issue 跟踪。
+- MCP `voyager_thread` 工具：**未实现**。CLI 刚稳定，等 Phase 3 之后再加。
+
+*明确属于其他 issue（不混在 Phase 2）：* `voyager switch` 抢锁消费方是 #7；
+transcript writer / 吸入是 #10（必须在租约之后）。
+
+**⇒ issue #3 保持 open**（直到自动聚类 + MCP voyager_thread 落地或被
+所有者显式重定向）；issue #11 可按上文对账关闭（本机无 gh 凭据，网页操作）。
 
 **Issue #11 结项对账（commit `c41f99b`）：**
 - ✅ `thread_leases` 表（加法迁移，老索引直接升级）
@@ -718,7 +740,7 @@ voyager switch codex
 | [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine：总跟踪 issue | 0 | — |
 | [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — *（已落地 `ff13096`）* |
 | [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — *（已落地 `5e8271c`）* |
-| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（已落地 Phase 2a）* |
+| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（2a 核心已落地；--repo 自动聚类与 MCP voyager_thread 延期，见 Deferred）* |
 | [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 *（已落地 `c41f99b`）* |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 |
