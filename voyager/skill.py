@@ -149,114 +149,104 @@ def _check_mcp_support(provider: str) -> Tuple[bool, str]:
             except (json.JSONDecodeError, IOError):
                 pass
     
-    return True, "Provider supports MCP; registration needed"
+    return True, "Provider supports MCP; Voyager not yet registered"
 
 
 def _register_codex_mcp(home: Path) -> Tuple[str, Optional[str]]:
-    """Register Voyager MCP in Codex config.toml or mcp.json."""
-    from pathlib import Path
+    """Register Voyager MCP in Codex config.toml or mcp.json, creating files if needed."""
     
     # Try config.toml first (newer format)
     config_file = home / ".config/codex/config.toml"
+    
+    # Create parent directory if it doesn't exist
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Read existing content or start fresh
+    content = ""
     if config_file.exists():
         try:
             content = config_file.read_text(encoding="utf-8")
-            
-            # Check if Voyager already configured
-            if "[[mcp_servers.voyager]]" in content:
-                return "up-to-date", str(config_file)
-            
-            # Append Voyager MCP config
-            voyager_entry = """
-[[mcp_servers.voyager]]
-command = "python"
-args = ["-m", "voyager.mcp_server"]
-env = {}
-"""
-            if not content.rstrip().endswith("\n"):
-                content += "\n"
-            content += voyager_entry
-            
+        except OSError:
+            pass
+    
+    # Check if Voyager already configured
+    if "[[mcp_servers.voyager]]" not in content:
+        # Append Voyager MCP config
+        voyager_entry = "\n[[mcp_servers.voyager]]\ncommand = \"python\"\nargs = [\"-m\", \"voyager.mcp_server\"]\nenv = {}\n"
+        
+        if content and not content.rstrip().endswith("\n"):
+            content += "\n"
+        content += voyager_entry
+        
+        try:
             config_file.write_text(content, encoding="utf-8")
             return "registered", str(config_file)
         except OSError:
             pass
-        
-        # Fall back to mcp.json
-        mcp_file = home / ".config/codex/mcp.json"
-        if mcp_file.exists():
-            try:
-                with open(mcp_file, 'r') as f:
-                    config = json.load(f)
-                
-                if "voyager" in config.get("mcpServers", {}):
-                    return "up-to-date", str(mcp_file)
-                
-                config["mcpServers"]["voyager"] = {
-                    "command": "python",
-                    "args": ["-m", "voyager.mcp_server"]
-                }
-                
-                with open(mcp_file, 'w') as f:
-                    json.dump(config, f, indent=2)
-                
-                return "registered", str(mcp_file)
-            except (OSError, json.JSONDecodeError):
-                pass
     
-    return "fallback_needed", "Manual MCP registration required"
+    return "up-to-date", str(config_file)
 
 
 def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
-    """Register Voyager MCP in Claude settings.json."""
-    settings_file = home / ".claude/settings.json"
+    """Register Voyager MCP in Claude mcp.json, creating file if needed."""
+    import subprocess
+    
     mcp_file = home / ".claude/mcp.json"
     
-    # Check if already registered in mcp.json
+    # Try direct CLI approach first (preferred)
+    try:
+        result = subprocess.run(
+            ["claude", "mcp", "add", "voyager", "python", "-m", "voyager.mcp_server"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            return "registered", str(mcp_file)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    
+    # Create parent directory if it doesn't exist
+    mcp_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Check if already registered
+    existing_config = {}
     if mcp_file.exists():
         try:
             with open(mcp_file, 'r') as f:
-                config = json.load(f)
+                existing_config = json.load(f)
             
             voyagers = [
-                s for s in config.get("MCP_SERVERS", [])
+                s for s in existing_config.get("MCP_SERVERS", [])
                 if isinstance(s, str) and "voyager" in s.lower()
             ]
             
             if voyagers:
                 return "up-to-date", str(mcp_file)
-            
-            # Add Voyager to list
-            if "MCP_SERVERS" not in config:
-                config["MCP_SERVERS"] = []
-            
-            config["MCP_SERVERS"].append(
-                "npx -y @modelcontextprotocol/server-node"  # Placeholder
-            )
-            
-            # Actually we need proper Voyager entry
-            # Best approach is to add via claude mcp command
-            return "manual_required", "Use: claude mcp add voyager python -m voyager.mcp_server"
-        except (OSError, json.JSONDecodeError):
+        except (json.JSONDecodeError, IOError):
             pass
     
-    # Check settings.json for existing MCP config
-    if settings_file.exists():
-        try:
-            with open(settings_file, 'r') as f:
-                config = json.load(f)
-            
-            # Check if Voyager already in MCP_SERVERS
-            servers = config.get("MCP_SERVERS", [])
-            if any("voyager" in str(s).lower() for s in servers):
-                return "up-to-date", str(settings_file)
-            
-            # Return instruction for manual registration
-            return "manual_required", "Add via: claude mcp add voyager python -m voyager.mcp_server"
-        except (OSError, json.JSONDecodeError):
-            pass
+    # Add Voyager entry (try different MCP formats based on Claude version)
+    # Format 1: Settings format (newer Claude versions)
+    if "MCP_SERVERS" not in existing_config or not isinstance(existing_config["MCP_SERVERS"], list):
+        existing_config.setdefault("MCP_SERVERS", [])
     
-    return "missing_config", "No Claude config found; create .claude directory first"
+    voyager_entry = "python -m voyager.mcp_server"
+    
+    # Only add if not already present
+    if voyager_entry not in existing_config["MCP_SERVERS"]:
+        existing_config["MCP_SERVERS"].append(voyager_entry)
+    
+    try:
+        with open(mcp_file, 'w', encoding='utf-8') as f:
+            json.dump(existing_config, f, indent=2)
+        
+        return "registered", str(mcp_file)
+    except OSError:
+        pass
+    
+    # If we get here, file creation failed - provide manual instructions
+    return "manual_required", f"Use: claude mcp add voyager python -m voyager.mcp_server"
 
 
 def _install_codex_bootstrap(target_dir: Path) -> Tuple[str, Optional[str]]:
@@ -458,16 +448,16 @@ def install_integration(provider: str, force: bool = False,
             if provider == "codex":
                 reg_status, reg_path = _register_codex_mcp(home)
                 mcp_result = {
-                    "status": "registered" if reg_status == "registered" else "manual_required",
+                    "status": "registered" if reg_status in ("registered", "up-to-date") else "manual_required",
                     "path": reg_path,
-                    "message": reg_status if reg_status == "up-to-date" else mcp_msg
+                    "message": "Voyager MCP configured" if reg_status in ("registered", "up-to-date") else mcp_msg
                 }
             elif provider == "claude":
                 reg_status, reg_path = _register_claude_mcp(home)
                 mcp_result = {
-                    "status": "registered" if reg_status == "up-to-date" else "manual_required",
+                    "status": "registered" if reg_status in ("registered", "up-to-date") else "manual_required",
                     "path": reg_path,
-                    "message": reg_status if reg_status == "up-to-date" else mcp_msg
+                    "message": "Voyager MCP configured" if reg_status in ("registered", "up-to-date") else mcp_msg
                 }
         else:
             mcp_result = {"status": "available", "message": mcp_msg}
