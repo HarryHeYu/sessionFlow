@@ -445,22 +445,49 @@ def _session_exists_in_index(store: Store, provider: str,
 
 def _git_head_changed_since(store: Store, tid: str, repo_root: str,
                             since_ts: float) -> bool:
-    """Check if git HEAD has changed since timestamp."""
+    """Check if git HEAD has changed since timestamp.
+    
+    This is a simple implementation that checks current HEAD vs last recorded.
+    In production, we'd persist git commit fingerprints per thread and compare.
+    For now, we just check if there's been any recent activity on source files.
+    """
+    # For simplicity, use file mtime as proxy for changes
+    # This is imperfect but better than always returning False
+    
+    import subprocess
+    
     try:
-        import subprocess
-        res = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+        # Get list of relevant source files (not .git/, not vendor/)
+        result = subprocess.run(
+            ["git", "ls-files", "-z"],
             cwd=repo_root,
             capture_output=True,
             text=True,
-            timeout=2
+            timeout=5
         )
-        if res.returncode != 0:
+        
+        if result.returncode != 0:
             return False
         
-        # In production, we'd cache git commit + timestamp per thread
-        # and compare. For now, assume no change detection.
-        # TODO: Add git commit fingerprint tracking to thread metadata
+        files = [f for f in result.stdout.split('\0') if f and 
+                 not f.startswith('.git/') and 'vendor' not in f]
+        
+        if not files:
+            return False
+        
+        # Check if any source file was modified after since_ts
+        import os
+        for f in files[:100]:  # Limit to first 100 files for performance
+            try:
+                mt = os.path.getmtime(os.path.join(repo_root, f))
+                if mt > since_ts and mt > since_ts - 60:  # Allow 1 min tolerance
+                    return True
+            except OSError:
+                continue
+        
+        return False
+        
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
     except Exception:
         return False

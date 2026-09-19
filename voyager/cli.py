@@ -547,19 +547,26 @@ def cmd_integrate_status(args) -> int:
         return 0
     
     # Print table header (ASCII compatible)
-    print(f"{'Provider':<12} {'Installed':<14} {'Skill':<10} {'MCP':<10} {'Bootstrap':<12} {'Auto-Attach':<12}")
-    print("-" * 90)
+    print(f"{'Provider':<15} {'Skill':<8} {'MCP':<10} {'Startup':<10} {'Auto':<6}")
+    print("-" * 70)
     
     for r in results:
-        installed = r.get("installed", "")
-        skill_avail = "Y" if r.get("skill", {}).get("available") else "N"
-        skill_inst = "Y" if r.get("skill", {}).get("installed") else " "
-        mcp_avail = "Y" if r.get("mcp", {}).get("available") else "N"
-        mcp_en = "Y" if r.get("mcp", {}).get("enabled") else " "
-        boot_avail = "Y" if r.get("bootstrap", {}).get("available") else " "
-        auto_attach = "Y" if r.get("auto_attach") else "N"
+        skill_y = "Y" if r.get("skill", {}).get("installed") else "N"
+        mcp_reg = "R" if r.get("mcp", {}).get("registered") else ("A" if r.get("mcp", {}).get("available") else "N")
+        start_stat = r.get("startup_status", "N")  # Y=AUTO, A=ASSISTED, N=NONE
+        auto = "Y" if r.get("auto_attach") else "N"
         
-        print(f"{installed:<12} {installed.lower():<14} {skill_avail+skill_inst:<10} {mcp_avail+mcp_en:<10} {boot_avail:<12} {auto_attach:<12}")
+        print(f"{r['installed']:<15} {skill_y:<8} {mcp_reg:<10} {start_stat:<10} {auto:<6}")
+    
+    # Add notes section
+    print("\nLegend:")
+    print("  Skill: Y=installed, N=not found")
+    print("  MCP:   R=registered, A=available(unsupported), N=no support")
+    print("  Start: Y=verified zero-touch, A=startup-assisted, N=no hook")
+    print("  Auto:  Y=core supports auto-attach")
+    print("\nNote: No provider yet has 'Y' for startup - all are STARTUP_ASSISTED or BEST_EFFORT")
+    print("      Real provider dogfood tests pending.")
+    return 0
 
 
 def cmd_integrate_remove(args) -> int:

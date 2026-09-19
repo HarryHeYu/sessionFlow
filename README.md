@@ -157,35 +157,58 @@ the candidates and exits. `resume` runs the native agent's own command
 (e.g. `codex resume <id>`); providers without a CLI resume path say so
 explicitly instead of pretending.
 
-## Automatic Continuity — zero-touch startup
+## Startup Continuity — honest assessment
 
-Voyager automatically continues work when you switch agents in the same repo:
+**Core capability**: Zero-Touch startup continuity is **complete in Voyager core**.  
+The `startup_continuity()` function correctly discovers WorkThreads, auto-attaches sessions, and compiles continuation context.
 
-1. **Index is synced** (incremental scan, always fresh)
-2. **Active WorkThread is discovered** for your current repository path  
-3. **Your session is auto-attached** to the existing WorkThread when safe
-4. **Continuation bundle is compiled** (goal-conditioned if `--goal`, packed to budget if `--budget`)
-5. **Context is loaded immediately** — no need to re-explain what you were working on
+**Integration reality**: No provider yet achieves verified **zero-touch** at runtime without manual configuration. All integrations are currently:
 
-This happens even when you don't run any Voyager command: just start another
-agent (Codex / Claude Code / Grok) in a repo where Voyager has an active
-WorkThread. The agent's MCP tool `voyager_startup` will discover everything
-and load the context automatically.
+| Provider | Skill | MCP | Status    | Verification      |
+|----------|-------|-----|-----------|-------------------|
+| Codex    | Y     | A   | ASSISTED  | Pending real test |
+| Claude   | Y     | A   | ASSISTED  | Pending real test |
+| Grok CLI | Y     | N   | BEST_EFF  | Not tested        |
+| DSH      | Y     | N   | BEST_EFF  | Not tested        |
 
-Manual commands (`voyager switch`, `handoff`, `thread attach`) remain as
-explicit overrides and recovery tools, but they are not needed for typical
-cross-agent workflows anymore.
+Legend: **Y** = ready/installed, **A** = available/manual setup needed, **N** = unsupported
 
-**Startup capability matrix**:
+### What "STARTUP_ASSISTED" means
 
-| Provider | Skill | MCP | Auto-startup | Verified |
-|---|---|---|---|---|
-| Codex | ✅ | ✅ | ✅ | yes |
-| Claude Code | ✅ | ✅ | ✅ | yes |
-| Grok CLI | ✅ | ❌ | best-effort | yes |
-| DSH | ✅ | ❌ | best-effort | unverified |
+Provider supports Voyager integration (Skill installed, MCP config available), but requires **manual one-time setup**:
+
+1. Run `voyager integrate <provider>` to install Skill and generate instructions
+2. Manually configure MCP connection (e.g., `claude mcp add voyager ...`)
+3. Restart the agent for changes to take effect
+
+After this initial setup, subsequent agent launches will automatically invoke `voyager_startup` via the instruction file/MCP mechanism.
+
+### Core features that DO work right now
+
+- ✅ `startup_continuity()` function handles discovery, attach, staleness detection
+- ✅ Auto-attach works when conditions are safe (exact repo match, single thread)
+- ✅ Context compilation reuses existing ranker+budget+continuation pipeline
+- ✅ Staleness detection based on source file mtimes and session updated_at
+- ✅ Ambiguity protection: returns explicit error if multiple active threads
+
+### What still needs verification
+
+Real-provider dogfood tests are needed to confirm actual zero-touch behavior:
+
+```sh
+# Test sequence: Claude → Codex in same repo
+1. Work on something in Claude, let it index naturally
+2. Close Claude
+3. Start Codex directly (no `voyager switch`)
+4. Observe Codex calling `voyager_startup` tool automatically
+5. Verify new Codex session appears in original WorkThread
+6. Check if Codex can read and continue from prior context
+```
+
+Similar sequences needed for Claude→Codex, Codex→Claude, etc.
 
 Run `voyager integrate status` to check your local installation state.
+See [docs/DOGFOOD.md](docs/DOGFOOD.md) for detailed verification procedure.
 
 ## MCP — native tools inside your agents
 
