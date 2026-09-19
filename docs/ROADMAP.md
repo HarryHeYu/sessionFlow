@@ -3,7 +3,7 @@
 > Voyager compiles scattered agent histories into the context the next agent actually needs.
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
-**Phase 1b shipped (`5e8271c`); Phase 2 landed (2a WorkThread `b580001`/`934dfd5`; 2b lease `c41f99b`; two #3 scope items deferred — see Deferred). **
+**Phase 1b shipped (`5e8271c`); Phase 2 COMPLETE — 2a WorkThread (`b580001`/`934dfd5`), 2b lease (`c41f99b`), 2c deferred items closed (MCP voyager_thread + deterministic --repo thread resolution; multi-signal auto-clustering re-scoped as a later enhancement under #3).**
 **Phase 3 shipped (`d931b02`); Phase 4 Context Budget shipped (`96fc752`); Phase 5 Voyager Skill shipped. Next: switch (#7) / VS Code sidebar (#8).**
 Phases 6–7 remain planning.
 
@@ -18,14 +18,16 @@ watch heartbeat.
 *Implemented without dedicated tests:* none (thread/lease behavior is
 covered).
 
-*NOT implemented — explicitly deferred out of Phase 2, not counted as done:*
-- `continue --repo` auto-clustering signals (repo_root + 48h window + branch
-  + file overlap + FTS overlap): **not implemented**. `--repo` today only
-  filters the newest-session fallback. Reason to defer: auto-clustering is
-  the highest "looks smart, mislabels" risk; explicit threads + merge->thread
-  already cover the workflow. Track in a follow-up issue.
-- MCP `voyager_thread` tool: **not implemented**. CLI just stabilized;
-  revisit after Phase 3.
+*Was deferred in the first audit — now CLOSED:*
+- `continue --repo` now resolves the newest active WorkThread for the repo
+  deterministically (loud thread pick, members-only compilation) and falls
+  back to the newest session when no thread matches. The multi-signal
+  auto-cluster (48h window + branch + file overlap + FTS overlap) is
+  re-scoped as a **later enhancement** under #3: explicit threads are the
+  product semantics, and silently swallowing same-repo sessions was the
+  highest mislabeling risk.
+- MCP `voyager_thread_list/show/attach/close` shipped as thin wrappers
+  over the Store API.
 
 *Belongs to other issues (not Phase 2):* `voyager switch` acquires the
 lease (#7); transcript writer / ingest is #10 (gated behind the lease).
@@ -676,7 +678,7 @@ helper is needed), `tests/test_cli.py` / `tests/test_continuity.py`.
 **Out of scope:** OS filesystem events, two-way session mirroring,
 transcript writers, WorkThread.
 
-### Phase 2 — WorkThread **(2a/2b shipped; --repo auto-cluster + MCP voyager_thread deferred → see Deferred under #3)**
+### Phase 2 — WorkThread **(complete: 2a/2b shipped; deferred items closed — see Deferred under #3)**
 
 **Why.** `continue` should mean "the work I am in", not "the newest
 chat".
@@ -692,12 +694,12 @@ voyager thread attach <sid>
 
 - `threads` / `thread_sessions` tables; additive schema migration
   (existing indexes keep working).
-- Auto-cluster on `continue --repo` using the signal table above.
+- ~~Auto-cluster on `continue --repo`~~ re-scoped: `continue --repo` resolves the newest active thread deterministically; multi-signal auto-clustering is a later enhancement.
 - `voyager merge A B C` creates (or updates) a thread.
 - `continue` with no args: cwd repo → active thread → native resume if
   the latest member can resume **and** `--to` is absent; otherwise
   compile + handoff.
-- MCP `voyager_thread` once the CLI is stable.
+- ✅ MCP `voyager_thread_list/show/attach/close` (CLI is stable).
 - **Single-writer lease** (issue #11, D13): `thread_leases` table;
   `switch` acquires or refuses; `watch` heartbeats; stale pid/heartbeat
   releases; `--steal` is explicit and logged.
@@ -805,7 +807,7 @@ Treat the checkboxes as the implementation contract.
 | [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine: tracking issue | 0 | — |
 | [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — *(shipped `ff13096`)* |
 | [#9](https://github.com/HarryHeYu/voyager/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — *(shipped `5e8271c`)* |
-| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 *(2a core shipped; --repo auto-cluster + MCP voyager_thread deferred — see Deferred)* |
+| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 *(complete — see close-out under Deferred; auto-cluster re-scoped)* |
 | [#11](https://github.com/HarryHeYu/voyager/issues/11) | Single-writer lease on a WorkThread | 2 | #3 *(shipped `c41f99b`)* |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 *(shipped `d931b02`)* |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 *(shipped Phase 4)* |

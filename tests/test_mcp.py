@@ -18,7 +18,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 TOOL_NAMES = ["voyager_brief", "voyager_search", "voyager_list", "voyager_show",
-              "voyager_handoff", "voyager_merge"]
+              "voyager_handoff", "voyager_merge", "voyager_thread_list",
+              "voyager_thread_show", "voyager_thread_attach",
+              "voyager_thread_close"]
 
 
 def test_module_imports_and_exposes_tools():

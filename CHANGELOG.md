@@ -5,6 +5,15 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Phase 2 deferred items closed (issue #3)** — MCP
+  `voyager_thread_list/show/attach/close` tools (thin wrappers over the
+  Store API) and deterministic `continue --repo` resolution: the newest
+  active WorkThread for that repo is picked loudly and only its members
+  are compiled; no match falls back to the newest session. Multi-signal
+  auto-clustering is re-scoped as a later enhancement under #3 — explicit
+  threads are the product semantics. False-positive regression tests:
+  same-repo sessions from another thread are never swallowed.
+
 - **Voyager Skill (roadmap Phase 5, issue #6)** — `voyager skill install`
   copies a routing SKILL.md into the skill dirs of known agents (Codex
   `~/.codex/skills`, Claude Code `~/.claude/skills`, Grok `~/.grok/skills`).

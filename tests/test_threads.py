@@ -211,3 +211,51 @@ def test_bare_continue_without_thread_falls_back_to_newest(
     printed = capsys.readouterr().out
     assert rc == 0
     assert "latest session:" in printed   # old newest-session fallback
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 deferred completion: --repo resolves the newest active thread
+# deterministically; no silent auto-clustering, no cross-thread swallowing
+# ---------------------------------------------------------------------------
+
+def test_continue_repo_resolves_newest_thread(tmp_path, three_sessions,
+                                              monkeypatch, capsys):
+    store = Store(three_sessions)
+    # thread A (older): the three "task" members
+    tid_a = store.thread_create(repo_root="E:/shared/repo", title="thread A")
+    for sid in ("claude:m0", "codex:m1", "grok:m2"):
+        store.thread_attach(tid_a, sid)
+    # thread B (newer): only the "other thing" session — same repo,
+    # deliberately different membership
+    tid_b = store.thread_create(repo_root="E:/shared/repo", title="thread B")
+    store.thread_attach(tid_b, "claude:d3")
+    store.close()
+
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
+    out_b = tmp_path / "b.md"
+    assert main(["--db", str(three_sessions), "continue", "--repo",
+                 "shared", "--to", "claude", "-o", str(out_b)]) == 0
+    printed = capsys.readouterr().out
+    assert "active thread:" in printed and "thread B" in printed
+    content = out_b.read_text(encoding="utf-8")
+    assert "other thing" in content
+    assert "task part 0" not in content      # thread A members not swallowed
+
+    # membership untouched by the run
+    store = Store(three_sessions)
+    a_ids = set(store.thread_member_ids(tid_a))
+    b_ids = set(store.thread_member_ids(tid_b))
+    assert a_ids == {"claude:m0", "codex:m1", "grok:m2"}
+    assert b_ids == {"claude:d3"}
+    store.close()
+
+
+def test_continue_repo_without_threads_falls_back(tmp_path, three_sessions,
+                                                  monkeypatch, capsys):
+    monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
+    out = tmp_path / "b.md"
+    assert main(["--db", str(three_sessions), "continue", "--repo",
+                 "shared", "--to", "claude", "-o", str(out)]) == 0
+    printed = capsys.readouterr().out
+    assert "latest session:" in printed       # newest-session fallback
+    assert "active thread:" not in printed

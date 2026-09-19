@@ -18,12 +18,14 @@ merge→thread、continue --thread、cwd→thread 默认接续、租约表、原
 
 *已实现但无专项测试：* 无（thread/租约行为均有覆盖）。
 
-*未实现——从 Phase 2 明确延期，不算已完成：*
-- `continue --repo` 自动聚类信号（repo_root + 时间窗 + branch + 文件交集 +
-  FTS 重叠）：**未实现**。现在 `--repo` 只是「最新会话」过滤。延期理由：
-  自动聚类是「看起来聪明、实际乱归类」风险最高的一块；显式 thread +
-  merge→thread 已覆盖工作流。后续单独开 issue 跟踪。
-- MCP `voyager_thread` 工具：**未实现**。CLI 刚稳定，等 Phase 3 之后再加。
+*首轮审计延期的两项——现已收口：*
+- `continue --repo` 现在**确定性解析**该 repo 最新的活跃 WorkThread
+  （大声选中、只用其成员编译 bundle），无匹配 thread 时回退「该 repo 最新
+  会话」。多信号自动聚类（48h 窗口 + branch + 文件交集 + FTS 重叠）
+  **重定位为后续增强**，归属 #3：显式 thread 就是产品语义，静默吞掉
+  同 repo 会话是最高误归类风险。
+- MCP `voyager_thread_list/show/attach/close` 已作为 Store API 的薄封装
+  落地。
 
 *明确属于其他 issue（不混在 Phase 2）：* `voyager switch` 抢锁消费方是 #7；
 transcript writer / 吸入是 #10（必须在租约之后）。
@@ -756,7 +758,7 @@ voyager switch codex
 | [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine：总跟踪 issue | 0 | — |
 | [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — *（已落地 `ff13096`）* |
 | [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — *（已落地 `5e8271c`）* |
-| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（2a 核心已落地；--repo 自动聚类与 MCP voyager_thread 延期，见 Deferred）* |
+| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（已完成——close-out 见 Deferred；自动聚类重定位为后续增强）* |
 | [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 *（已落地 `c41f99b`）* |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 *（已落地 `d931b02`）* |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 *（已落地 Phase 4）* |

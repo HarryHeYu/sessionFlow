@@ -240,6 +240,97 @@ def voyager_merge(session_ids: list[str], target: str = "claude", goal: str = ""
             f"Target agent ({target}) should read this file and continue the task.")
 
 
+@mcp.tool()
+def voyager_thread_list(status: str = "active") -> str:
+    """List WorkThreads (task-centric groups of sessions that span agents).
+    Use when the user refers to a task/thread rather than a single session."""
+    store = Store()
+    rows = store.thread_list(status)
+    store.close()
+    if not rows:
+        return f"no {status} threads"
+    out = []
+    for t in rows:
+        out.append("{0}  [{1}]  members:{2}  repo: {3}\n    {4}".format(
+            t["id"], t["status"], t["members"], t["repo_root"] or "?",
+            (t["title"] or "")[:150]))
+    return "\n".join(out)
+
+
+@mcp.tool()
+def voyager_thread_show(thread_id: str) -> str:
+    """One WorkThread in detail: status, repo, goal, writer lease state and
+    its member sessions (provider, message counts, titles). Accepts a
+    prefix of the thread id."""
+    from .store import lease_state
+    store = Store()
+    t = store.thread_get(thread_id)
+    if not t:
+        store.close()
+        return f"thread not found: {thread_id}"
+    members = store.thread_members(t["id"])
+    lease = store.thread_lease_get(t["id"])
+    st = lease_state(lease)
+    if st["held"]:
+        lease_line = ("held by {0} pid={1}".format(
+            lease["holder"], lease["pid"]))
+        if st["expired"]:
+            lease_line += " (EXPIRED: " + st["why"] + ")"
+    else:
+        lease_line = "free"
+    out = ["Thread {0}  [{1}]".format(t["id"], t["status"]),
+           "repo: " + (t["repo_root"] or "?"),
+           "title: " + (t["title"] or "?")]
+    if t["goal"]:
+        out.append("goal: " + t["goal"])
+    out.append("lease: " + lease_line)
+    out.append("members:")
+    for m in members:
+        out.append("  {0:<8} {1}  ({2} msgs)  {3}".format(
+            m["provider"], m["native_id"], m["message_count"],
+            (m["title"] or "")[:80]))
+    store.close()
+    return "\n".join(out)
+
+
+@mcp.tool()
+def voyager_thread_attach(thread_id: str, session_ids: list[str]) -> str:
+    """Attach sessions (any agents) to a WorkThread. Duplicates are
+    ignored; unknown ids are reported. Returns per-id results."""
+    store = Store()
+    t = store.thread_get(thread_id)
+    if not t:
+        store.close()
+        return f"thread not found: {thread_id}"
+    results = []
+    for ref in session_ids:
+        row, ambiguous = store.session(ref)
+        if row is None and ambiguous:
+            results.append(f"  ! {ref}: ambiguous ({len(ambiguous)} matches)")
+            continue
+        if row is None:
+            results.append(f"  ! {ref}: not found")
+            continue
+        ok = store.thread_attach(t["id"], row["id"])
+        results.append(("  + attached " if ok else "  = already in ") +
+                       f"{row['id']}")
+    store.close()
+    return "\n".join(results)
+
+
+@mcp.tool()
+def voyager_thread_close(thread_id: str) -> str:
+    """Mark a WorkThread closed. Sessions are never deleted."""
+    store = Store()
+    t = store.thread_get(thread_id)
+    if not t:
+        store.close()
+        return f"thread not found: {thread_id}"
+    store.thread_set_status(t["id"], "closed")
+    store.close()
+    return f"thread {t['id']} closed (sessions untouched)"
+
+
 def main() -> None:
     if not MCP_AVAILABLE:
         raise SystemExit(_MISSING_MCP)

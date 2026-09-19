@@ -506,9 +506,14 @@ def cmd_watch(args) -> int:
 
 
 def _same_repo(a: str, b: str) -> bool:
+    """Repo identity match: exact, path-suffix or substring (mirrors
+    _repo_match's user-facing semantics — "black_box" must match
+    "E:/models/black_box")."""
     a = (a or "").replace("\\", "/").rstrip("/").lower()
     b = (b or "").replace("\\", "/").rstrip("/").lower()
-    return bool(a) and (a == b or a.endswith(b) or b.endswith(a))
+    if not a or not b:
+        return False
+    return a == b or a.endswith("/" + b) or b.endswith("/" + a)         or a in b or b in a
 
 
 def _continue_from_thread(store: Store, t, args) -> int:
@@ -553,10 +558,18 @@ def cmd_continue(args) -> int:
             print("thread not found: " + args.thread, file=sys.stderr)
             return 1
         return _continue_from_thread(store, t, args)
-    # Phase 2 task-centric default: cwd -> repo_root -> active WorkThread
+    # Phase 2 task-centric default: --repo / cwd -> active WorkThread.
+    # Deterministic only: an explicit thread wins, otherwise the most
+    # recently updated active thread for this repo is picked LOUDLY.
+    # Multi-signal auto-clustering is deliberately NOT implemented
+    # (roadmap Deferred) — sessions are never silently swallowed.
     if not args.session and not getattr(args, "from_sessions", None):
-        repo = (git_info(os.getcwd()).get("repo_root")
-                or os.getcwd().replace("\\", "/"))
+        repo_ref = getattr(args, "repo", None)
+        if repo_ref:
+            repo = repo_ref
+        else:
+            repo = (git_info(os.getcwd()).get("repo_root")
+                    or os.getcwd().replace("\\", "/"))
         cands = [t for t in store.thread_list("active")
                  if t["repo_root"] and _same_repo(t["repo_root"], repo)]
         if cands:
