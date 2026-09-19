@@ -118,10 +118,28 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
         grand_new += new; grand_skip += skip; grand_evt += evt
         grand_changed += changed
 
+    # Automatic Continuity: resolve pending attaches against the freshly
+    # indexed sessions (Phase A). Quiet scans still resolve — only the
+    # output is suppressed.
+    from .auto import resolve_pending_attaches, continuity_cycle
+    pend = resolve_pending_attaches(store, quiet=quiet)
+    renewed = store.thread_lease_renew_alive()
+    if not quiet:
+        for a in pend["attached"]:
+            print("  ↳ auto-attached {0} → {1}".format(a["session"], a["thread"]))
+        for a in pend["ambiguous"]:
+            print("  ↳ pending {0}: AMBIGUOUS ({1} candidates) — not attached".format(
+                a["thread"], len(a["candidates"])))
+        for st in pend["stale"]:
+            print("  ↳ pending stale: {0}".format(st["thread"]))
+        if renewed:
+            print("  ↳ lease heartbeat renewed ({0})".format(renewed))
+
     stats = store.stats()
     res = {"new": grand_new, "skip": grand_skip, "events_added": grand_evt,
            "changed_sources": grand_changed, "elapsed": _time.time() - t0,
-           "sessions": stats["sessions"], "events": stats["events"]}
+           "sessions": stats["sessions"], "events": stats["events"],
+           "auto_attached": pend["attached"], "pending_stale": pend["stale"]}
     if not quiet:
         print(f"\nscan complete: {stats['sessions']} sessions, {stats['events']} events "
               f"(new/refreshed: {grand_new}, unchanged: {grand_skip})")
@@ -468,6 +486,53 @@ def cmd_skill(args) -> int:
     return 0
 
 
+def _continuity_status_enum(disc: dict) -> str:
+    """READY | PENDING_ATTACH | AMBIGUOUS | STALE | NO_THREAD."""
+    if not disc.get("continuity_available"):
+        return "NO_THREAD"
+    pend = disc.get("pending_attach") or []
+    if any(p.get("status") == "ambiguous" for p in pend):
+        return "AMBIGUOUS"
+    if pend:
+        return "PENDING_ATTACH"
+    lease = disc.get("lease_state") or {}
+    if lease.get("held") and lease.get("expired"):
+        return "STALE"
+    return "READY"
+
+
+def cmd_status(args) -> int:
+    """Phase I: show the automatic-continuity state for the current repo."""
+    import json as _json
+    store = Store(args.db)
+    from .auto import discover_continuity
+    disc = discover_continuity(store, cwd=os.getcwd(),
+                               repo=getattr(args, "repo", None))
+    enum = _continuity_status_enum(disc)
+    if args.json:
+        print(_json.dumps({**disc, "status": enum}, ensure_ascii=False,
+                          indent=2, default=str))
+        return 0
+    t = disc.get("active_thread")
+    if not t:
+        print("continuity: NO_THREAD — no active WorkThread for this repo")
+        print("  create one: voyager thread create --repo <path>")
+        return 0
+    print("continuity: {0}".format(enum))
+    print("  thread : {0}  {1}".format(t["id"], (t["title"] or "")[:70]))
+    print("  goal   : {0}".format(t.get("goal") or t.get("title") or "?"))
+    print("  repo   : {0}".format(disc["repo_root"]))
+    ls = disc.get("lease_state") or {}
+    print("  lease  : {0}{1}".format(
+        ls.get("holder") or "free",
+        " (EXPIRED: " + ls.get("why", "") + ")" if ls.get("expired") else ""))
+    for p in disc.get("pending_attach") or []:
+        print("  pending: {0} continuation launched, awaiting session".format(
+            p.get("provider")))
+    print("  action : {0}".format(disc.get("recommended_action")))
+    return 0
+
+
 def cmd_stats(args) -> int:
     store = Store(args.db)
     stats = store.stats()
@@ -499,9 +564,8 @@ def cmd_watch(args) -> int:
             after = store.stats()
             if after["sessions"] != before["sessions"]:
                 print(f"  ↳ {after['sessions'] - before['sessions']:+d} sessions")
-            renewed = store.thread_lease_renew_alive()
-            if renewed:
-                print(f"  ↳ lease heartbeat renewed ({renewed})")
+            from .auto import continuity_cycle
+            cyc = continuity_cycle(store, quiet=False)
             _time.sleep(_watch_sleep(args, store))
         except KeyboardInterrupt:
             print("\nwatch stopped")
@@ -779,9 +843,17 @@ def cmd_switch(args) -> int:
         print("continuation bundle: {0} ({1} chars)".format(
             out.resolve(), len(bundle)))
         # the target agent's new session id is unknowable until it starts:
-        # record a pending attach instead of fabricating one
-        store.thread_pending_add(t["id"], target,
-                                 note="switch continuation: " + out.name)
+        # record a metadata-rich pending attach; the next scan/watch
+        # auto-resolves it when the target's new session appears
+        store.pending_record(
+            t["id"], target,
+            note="switch continuation: " + out.name,
+            repo_root=t["repo_root"],
+            cwd=members[0]["cwd"] if members else None,
+            source_provider=(members[-1]["provider"] if members else None),
+            source_session=(members[-1]["id"] if members else None),
+            goal=getattr(args, "goal", None),
+            lease_token=acquired)
 
         argv = bundle_command(target, out)
         print("$ {0} \"<continuation prompt>\"".format(argv[0]))
@@ -1308,6 +1380,12 @@ def main(argv=None) -> int:
     sp = sub.add_parser("api", help="local stdio JSON-lines API (VS Code client)",
                         parents=[common])
     sp.set_defaults(func=cmd_api)
+
+    sp = sub.add_parser("status", parents=[common],
+                        help="automatic-continuity state for the current repo")
+    sp.add_argument("--repo", help="resolve by repo instead of cwd")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_status)
 
     sp = sub.add_parser("stats", help="index statistics", parents=[common])
     sp.set_defaults(func=cmd_stats)

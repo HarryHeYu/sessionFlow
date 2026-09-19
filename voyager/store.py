@@ -141,6 +141,17 @@ CREATE TABLE IF NOT EXISTS thread_pending (
     provider   TEXT NOT NULL,
     note       TEXT,
     created_at REAL,
+    repo_root  TEXT,
+    cwd        TEXT,
+    source_provider TEXT,
+    source_session  TEXT,
+    goal       TEXT,
+    lease_token TEXT,
+    launch_cmd TEXT,
+    pid        INTEGER,
+    status     TEXT DEFAULT 'open',
+    resolved_at REAL,
+    resolved_sid TEXT,
     PRIMARY KEY (thread_id, provider)
 );
 
@@ -262,6 +273,19 @@ class Store:
         pk_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sources)") if r[5]]
         if pk_cols and "sid" not in pk_cols:
             self.con.execute("DROP TABLE sources")
+        # additive migration: pre-Automatic-Continuity thread_pending rows
+        # lack the metadata columns the pending auto-resolution matches on
+        pend_cols = [r[1] for r in self.con.execute("PRAGMA table_info(thread_pending)")]
+        if pend_cols:
+            for col, decl in (("repo_root", "TEXT"), ("cwd", "TEXT"),
+                              ("source_provider", "TEXT"),
+                              ("source_session", "TEXT"), ("goal", "TEXT"),
+                              ("lease_token", "TEXT"), ("launch_cmd", "TEXT"),
+                              ("pid", "INTEGER"), ("status", "TEXT DEFAULT 'open'"),
+                              ("resolved_at", "REAL"), ("resolved_sid", "TEXT")):
+                if col not in pend_cols:
+                    self.con.execute(
+                        f"ALTER TABLE thread_pending ADD COLUMN {col} {decl}")
         self.con.executescript(SCHEMA)
         if not _fts_has_sid(self.con):
             _rebuild_fts(self.con)
@@ -645,25 +669,98 @@ class Store:
                 n += 1
         return n
 
-    def thread_pending_add(self, tid: str, provider: str, note=None) -> None:
-        """Record that a continuation for `provider` was launched on this
-        thread but its new native session id is not yet known. Cleared by
-        thread_attach when a matching session shows up."""
+    # -- pending attach records (Automatic Continuity) ---------------------
+
+    PENDING_COLUMNS = ("thread_id", "provider", "note", "created_at",
+                       "repo_root", "cwd", "source_provider",
+                       "source_session", "goal", "lease_token",
+                       "launch_cmd", "pid", "status", "resolved_at",
+                       "resolved_sid")
+
+    def pending_record(self, thread_id: str, provider: str, **meta) -> None:
+        """Record (or refresh) an open pending-attach record with the launch
+        metadata the auto-resolver matches on. One open record per
+        (thread_id, provider); a re-launch replaces the previous record."""
+        import time as _time
+        vals = {"thread_id": thread_id, "provider": provider,
+                "created_at": _time.time(), "status": "open"}
+        for k, v in meta.items():
+            if k in self.PENDING_COLUMNS and k not in ("thread_id", "provider"):
+                vals[k] = v
+        cols = list(self.PENDING_COLUMNS)
+        self.con.execute(
+            "INSERT OR REPLACE INTO thread_pending({0}) VALUES ({1})".format(
+                ", ".join(cols), ", ".join("?" * len(cols))),
+            tuple(vals.get(c) for c in cols))
+        self.con.commit()
+
+    def pending_open(self, thread_id: str = None, provider: str = None) -> List[sqlite3.Row]:
+        """Open (unresolved, not stale) pending-attach records."""
+        sql = "SELECT rowid AS rid, * FROM thread_pending "               "WHERE COALESCE(status, 'open') = 'open'"
+        args = []
+        if thread_id:
+            sql += " AND thread_id=?"
+            args.append(thread_id)
+        if provider:
+            sql += " AND provider=?"
+            args.append(provider)
+        return self.q(sql, tuple(args))
+
+    def pending_get_by_rowid(self, rid) -> Optional[sqlite3.Row]:
+        return self.q("SELECT rowid AS rid, * FROM thread_pending WHERE rowid=?",
+                      (rid,))[0]
+
+    def pending_mark(self, rid, status: str, resolved_sid: str = None) -> None:
         import time as _time
         self.con.execute(
-            "INSERT OR REPLACE INTO thread_pending VALUES (?,?,?,?)",
-            (tid, provider, note, _time.time()))
+            "UPDATE thread_pending SET status=?, resolved_at=?, resolved_sid=? "
+            "WHERE rowid=?", (status, _time.time(), resolved_sid, rid))
         self.con.commit()
 
     def thread_pending_list(self, tid: str) -> List[sqlite3.Row]:
+        """Open pending records for display (thread show)."""
         return self.q(
-            "SELECT * FROM thread_pending WHERE thread_id=? ORDER BY created_at",
+            "SELECT * FROM thread_pending WHERE thread_id=? "
+            "AND COALESCE(status, 'open') = 'open' ORDER BY created_at",
             (tid,))
 
     def thread_pending_clear(self, tid: str, provider: str) -> None:
         self.con.execute(
             "DELETE FROM thread_pending WHERE thread_id=? AND provider=?",
             (tid, provider))
+        self.con.commit()
+
+    def attached_to_any_thread(self, sid: str) -> bool:
+        return bool(self.q(
+            "SELECT 1 FROM thread_sessions WHERE session_id=?", (sid,)))
+
+    # -- continuity audit log (metadata only, never session content) -------
+
+    def _continuity_log(self, event: str, **meta) -> None:
+        """Append an automatic-continuity event to continuity.log.
+
+        Only ids/providers/timestamps are logged — never user content."""
+        from datetime import datetime
+        meta_s = " ".join("{0}={1}".format(k, v) for k, v in meta.items())
+        stamp = datetime.now().isoformat(timespec="seconds")
+        try:
+            with open(self.db_path.parent / "continuity.log", "a",
+                      encoding="utf-8") as f:
+                f.write(stamp + " | " + event + " | " + meta_s + "\n")
+        except OSError:
+            pass
+
+    def pending_mark_open_resolved(self, tid: str, provider: str) -> None:
+        """Mark open pending records for (thread, provider) resolved — the
+        target agent's new session showed up and was attached."""
+        import time as _time
+        self.con.execute(
+            "UPDATE thread_pending SET status='resolved', resolved_at=?, "
+            "resolved_sid=(SELECT session_id FROM thread_sessions "
+            "WHERE thread_id=? AND session_id LIKE ?) "
+            "WHERE thread_id=? AND provider=? "
+            "AND COALESCE(status, 'open') = 'open'",
+            (_time.time(), tid, provider.replace("%", "") + "%", tid, provider))
         self.con.commit()
 
     # -- reading -----------------------------------------------------------
