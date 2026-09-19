@@ -615,8 +615,9 @@ def cmd_continue(args) -> int:
     if row["can_resume"] and row["resume_cmd"]:
         argv = row["resume_cmd"].split()
         print(f"$ {' '.join(argv)}")
-        if not args.launch:
-            print("add --launch to start it now")
+        if args.no_launch or not args.launch:
+            print("add --launch to start it now" if not args.no_launch
+                  else "(--no-launch: not launching)")
             return 0
         try:
             return subprocess.call(argv)
@@ -1240,28 +1241,28 @@ def main(argv=None) -> int:
 
     sp = sub.add_parser("thread", help="WorkThread: list/show/create/attach/close/unlock")
     tsub = sp.add_subparsers(dest="thread_cmd", required=True)
-    tsp = tsub.add_parser("list", help="list active threads")
+    tsp = tsub.add_parser("list", parents=[common], help="list active threads")
     tsp.add_argument("--status", default="active")
     tsp.set_defaults(func=cmd_thread)
-    tsp = tsub.add_parser("show", help="show one thread and its members")
+    tsp = tsub.add_parser("show", parents=[common], help="show one thread and its members")
     tsp.add_argument("thread")
     tsp.set_defaults(func=cmd_thread)
-    tsp = tsub.add_parser("create", help="create an empty thread")
+    tsp = tsub.add_parser("create", parents=[common], help="create an empty thread")
     tsp.add_argument("--repo")
     tsp.add_argument("--title")
     tsp.add_argument("--goal")
     tsp.add_argument("--attach", action="append",
                      help="session id/prefix to attach (repeatable, comma-ok)")
     tsp.set_defaults(func=cmd_thread)
-    tsp = tsub.add_parser("attach", help="attach sessions to a thread")
+    tsp = tsub.add_parser("attach", parents=[common], help="attach sessions to a thread")
     tsp.add_argument("thread")
     tsp.add_argument("sessions", nargs="+",
                      help="session id/prefix (repeatable, comma-ok)")
     tsp.set_defaults(func=cmd_thread)
-    tsp = tsub.add_parser("close", help="mark a thread closed (sessions untouched)")
+    tsp = tsub.add_parser("close", parents=[common], help="mark a thread closed (sessions untouched)")
     tsp.add_argument("thread")
     tsp.set_defaults(func=cmd_thread)
-    tsp = tsub.add_parser("unlock",
+    tsp = tsub.add_parser("unlock", parents=[common],
                           help="release a thread's writer lease (--steal for a live one)")
     tsp.add_argument("thread")
     tsp.add_argument("--steal", action="store_true",
@@ -1282,6 +1283,8 @@ def main(argv=None) -> int:
     sp.add_argument("--output", "-o", help="bundle file path (when continuing via handoff/merge)")
     sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
+    sp.add_argument("--no-launch", action="store_true",
+                    help="print what would be launched instead of launching")
     sp.set_defaults(func=cmd_continue)
 
     sp = sub.add_parser("brief", parents=[common],
