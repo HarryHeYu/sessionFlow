@@ -157,6 +157,26 @@ the candidates and exits. `resume` runs the native agent's own command
 (e.g. `codex resume <id>`); providers without a CLI resume path say so
 explicitly instead of pretending.
 
+## Automatic Continuity
+
+Voyager does not move native sessions between providers. It keeps the
+work continuous by maintaining a canonical WorkThread, refreshing it from
+the active agent, and automatically supplying the next agent with the
+continuation context.
+
+When you switch from one agent to another in the same repo, Voyager:
+
+1. syncs the index (incremental scan, always fresh)
+2. resolves the active WorkThread for that repo
+3. compiles a continuation bundle (goal-conditioned if `--goal`, packed
+   to budget if `--budget`)
+4. launches the target agent with a pointer to the bundle
+5. auto-attaches the target's new session to the WorkThread when it
+   appears in the index
+
+No manual `handoff` / `merge` / `thread attach` needed — those commands
+remain as explicit overrides and recovery tools.
+
 ## MCP — native tools inside your agents
 
 Voyager ships an MCP server, so agents can query the unified index with

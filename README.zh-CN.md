@@ -131,6 +131,23 @@ codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager c
 
 会话 ID 支持前缀匹配；前缀有歧义时会列出候选并退出，不会猜。
 
+## 自动接续（Automatic Continuity）
+
+Voyager 不在 provider 之间搬运原生会话。它通过维护一份权威 WorkThread、
+从活跃 agent 自动吸入最新状态、并自动为下一个 agent 提供接续上下文，
+让工作本身连续。
+
+当你在同一仓库里从一个 agent 切到另一个时，Voyager 会：
+
+1. 增量同步索引（永远新鲜）
+2. 解析该仓库的活跃 WorkThread
+3. 编译接续包（`--goal` 排序、`--budget` 打包）
+4. 启动目标 agent 并指向接续包
+5. 目标 agent 的新会话出现在索引时自动挂回 WorkThread
+
+不需要手动执行 `handoff` / `merge` / `thread attach`——这些命令保留为
+显式覆盖和恢复工具。
+
 ## MCP —— 在你的 Agent 里原生调用
 
 Voyager 自带 MCP server，让 agent 用原生工具查询统一索引，而不需要跑命令：
