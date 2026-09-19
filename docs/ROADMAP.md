@@ -8,7 +8,7 @@
 **Phase 6 `voyager switch` shipped; Phase 7 shipped as core API + stdio bridge + VS Code extension scaffold (see CHANGELOG).**
 
 **Continuity Engine 主线到此完整：`index → WorkThread → goal rank → budget → skill → lease → switch → API/UI client`。**
-Phases 6–7 remain planning.
+Phase 7 is partially shipped (API/bridge/scaffold done; Composer webview + one-click switch UI pending).
 
 **Phase 2 close-out audit (2026-09-18, checked against the code):**
 
@@ -35,9 +35,11 @@ covered).
 *Belongs to other issues (not Phase 2):* `voyager switch` acquires the
 lease (#7); transcript writer / ingest is #10 (gated behind the lease).
 
-**=> issue #3 stays open** until auto-cluster + MCP voyager_thread land or
-are re-scoped by the owner; issue #11 can be closed per its reconciliation
-above (no gh credentials on this machine).
+**=> issue #3 close-out (re-scoped):** the deterministic --repo thread
+resolution and the MCP voyager_thread tools shipped; multi-signal
+auto-clustering is re-scoped as a later enhancement (docs/POST-1.0.md).
+Close #3 with this reconciliation; issue #11 closes per its own
+reconciliation above (no gh credentials on this machine).
 
 **Issue #9 close-out (commit `5e8271c`):** incremental pre-compile scan ✅,
 freshness line ✅, idempotent ✅, watch stays background ✅, provider files
@@ -299,7 +301,7 @@ Grok at once. That is multi-writer mirroring and is a non-goal.
 | Scan / watch ingest | shipped (#9) |
 | WorkThread identity | shipped (Phase 2a) |
 | Lease table + acquire/heartbeat/release | shipped (Phase 2b, `c41f99b`) |
-| Writer Grok / Codex | probe HIT; implement under the lease, new ids only (#10) |
+| Writer Grok / Codex | shipped (opt-in, lease-gated, new ids only — #10) |
 | Writer Claude | blocked on a HIT |
 | Live rewrite of an open native file | never |
 
@@ -319,7 +321,7 @@ Do not rebuild this. The continuity layer sits on top.
 | Per-session handoff V1 | `voyager/handoff.py`: one session → Markdown Context Package → launch `claude` / `codex` / `grok` |
 | Continue V1 | newest session; native resume when `can_resume`, else handoff |
 | Merge / Continuity V1 | `voyager/continuity.py`: N sessions → Continuation Bundle; `voyager merge`; `continue --from`; MCP `voyager_merge` |
-| Watch V1 | interval poll (`voyager watch`, default 300s). Does **not** yet run before handoff/switch. |
+| Watch / scan | interval poll + freshness-before-compile (Phase 1b shipped) |
 | MCP | `brief` / `search` / `list` / `show` / `handoff` / `merge` |
 | Constraints | provider files read-only; no network; no telemetry; core has zero deps |
 
@@ -548,7 +550,7 @@ MCP (thin wrappers around the same functions):
 | `voyager_merge` | new |
 | `voyager_continue` | new (thread-aware) |
 | `voyager_switch` | new |
-| `voyager_thread` | new, after WorkThread exists |
+| `voyager_thread_list/show/attach/close` | shipped |
 
 Skill (`skills/voyager/SKILL.md`), installed into
 `~/.codex/skills/voyager/`, `~/.claude/skills/voyager/`, …:
@@ -645,7 +647,7 @@ voyager continue --from A,B,C --to claude
 
 **Out of scope:** thread table, `--goal` ranking, token budget, UI.
 
-### Phase 1b — Index freshness / auto-sync  **(do this next)**
+### Phase 1b — Index freshness / auto-sync  **(shipped, `5e8271c`)**
 
 **Why.** Cross-agent switch is only as fresh as the index. Format
 translation already happens at scan time; the missing piece is

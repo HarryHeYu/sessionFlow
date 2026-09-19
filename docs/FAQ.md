@@ -7,7 +7,7 @@
 No. Voyager only reads files that already exist on your machine and writes
 one local SQLite index at `~/.voyager/index.db`. There is no network code
 in the project at all. `voyager handoff` writes a Markdown file locally —
-you choose what to do with it. The planned multi-session compiler
+you choose what to do with it. The multi-session compiler
 ([ROADMAP.md](ROADMAP.md)) stays the same: deterministic extraction from
 the index, no LLM in core.
 
@@ -64,7 +64,7 @@ and is not promised ([ROADMAP.md](ROADMAP.md) Phase 1b / #10).
 
 It syncs the **index**, not the session files. `voyager watch` already
 polls on an interval. Continuity commands (`handoff` / `merge` /
-`continue` / `switch`) are planned to run an incremental scan
+`continue` / `switch`) run an incremental scan
 *before* they compile, so a switch right after a Claude turn still
 sees that turn. Sync is one-way (provider files → `~/.voyager/index.db`).
 Voyager does not mirror a live Claude JSONL into a Codex rollout.
@@ -72,7 +72,7 @@ Voyager does not mirror a live Claude JSONL into a Codex rollout.
 **What if Claude and Codex both keep writing the same chat?**
 
 They must not. A WorkThread is leased to one live agent at a time
-(planned, D13 / issue #11). `voyager switch` acquires the lease or
+(shipped, D13 / issue #11). `voyager switch` acquires the lease or
 refuses. While Grok holds it, Voyager only *ingests* Grok's file into
 the canonical log; it does not rewrite that file, and it will not
 open a Codex writer for the same thread. Sync-on-open happens at

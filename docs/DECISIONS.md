@@ -155,8 +155,9 @@ JSONL resume 是 HIT；Claude 超时。即便 writer 落地，也必须套在单
 但格式脆弱、未证实）；两两 converter 矩阵（8×7，不可维护）。
 
 **Consequences**: 用户在目标 Agent 里看到的是一份 Bundle 开场的**新**对话，
-不是原来那条聊天记录。同平台续聊仍然走原生 resume（D7）。路线图 Phase 1b / #9
-先做同步；#10 的 Grok/Codex writer 必须等 #11 租约；Claude 仍走 bundle。
+不是原来那条聊天记录。同平台续聊仍然走原生 resume（D7）。Phase 1b/#9
+同步已落地；#10 的 Grok/Codex writer 已在 #11 租约下以 opt-in 方式交付
+（`--mode transcript`）；Claude 仍走 bundle。
 
 ## D12 — Continuity 命令在编译前必须刷新索引
 
@@ -175,7 +176,8 @@ bundle 文案。格式翻译已经发生在 adapter 的 parse()；缺的是 pars
 
 **Consequences**: 编译路径会多一次（通常很快的）增量 scan。测试必须覆盖
 「mtime 变了的 source 出现在下一份 bundle」和「没变的 source 不重解析」。
-这是路线图 Phase 1b / issue #9，并且挡住 `voyager switch`（#7）。
+这是路线图 Phase 1b / issue #9，已落地（`freshness:` 行即其产物），
+`voyager switch`（#7）因此依赖它。
 
 ## D13 — 一个 WorkThread 同时只有一个写者
 
@@ -201,6 +203,7 @@ thread 日志），**追加写入**。每个 WorkThread 有一份租约：`holde
 **Alternatives**: 无锁、靠用户别同时开两家（会忘）；两家都实时镜像规范日志
 （多写者）；持锁期间也回写原生文件（和 D11 同一场竞赛）。
 
-**Consequences**: Phase 2 的 WorkThread 必须带 `thread_leases`（issue #11）。
-`switch`（#7）和 writer（#10）都挡住在这把锁后面。测试要覆盖：第二家
-switch 失败、过期租约可抢、持锁期间只吸入持锁方。
+**Consequences**: Phase 2 的 `thread_leases` 已落地（issue #11，
+`c41f99b`）。`voyager switch`（#7）已消费这把锁；writer（#10）的
+codex/grok 实现同样运行在租约之下。测试要覆盖：第二家 switch 失败、
+过期租约可抢、持锁期间只吸入持锁方。

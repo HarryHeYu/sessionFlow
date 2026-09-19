@@ -71,7 +71,7 @@ and CLI only know the normalized model (`model.py`). Every event keeps its
 
 ```sh
 pip install -e ".[all,dev]"
-python -m pytest tests/ -q            # the whole suite (69 tests, ~5s)
+python -m pytest tests/ -q            # the whole suite (163 tests)
 python -m pytest tests/test_zcode.py  # one adapter
 python scripts/run_tests_core_only.py # simulate `pip install voyager` (no extras)
 ```

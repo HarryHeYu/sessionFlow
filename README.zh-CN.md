@@ -68,7 +68,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # 
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # 69 个测试，全合成 fixture，不碰你的真实会话
+python -m pytest tests/ -q     # 163 个测试，全合成 fixture，不碰你的真实会话
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -145,7 +145,9 @@ voyager-mcp                 # 等价于 python -m voyager.mcp_server
 ```
 
 提供工具：`voyager_brief`（所有 agent 最近在忙什么）、`voyager_search`、
-`voyager_list`、`voyager_show`、`voyager_handoff`（为另一个 agent 生成上下文包）。
+`voyager_list`、`voyager_show`、`voyager_handoff` / `voyager_merge`（为另一个
+agent 生成上下文包/接续包）、`voyager_thread_list/show/attach/close`
+（WorkThread 管理）。
 已测试的宿主：Codex（`config.toml`）、Claude Code（`claude mcp add`）、
 Cursor（`mcp.json`）。没装 `mcp` 时，服务会打印上面那行安装命令而不是抛一个
 光秃秃的 `ModuleNotFoundError`；CLI 其余功能完全不需要它。
@@ -183,7 +185,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 69 个测试：适配器 / 索引 / 导出 / 接力 / CLI / MCP
+python -m pytest tests/ -q                # 163 个测试：适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
 python scripts/run_tests_core_only.py     # 模拟"只装核心依赖"，可选依赖相关测试自动跳过
 ```
 

@@ -65,10 +65,9 @@ voyager continue --repo black_box --launch
 This is work continuation, not session teleportation. Same-provider
 pickup uses the native CLI (`codex resume`, `claude --resume`, …).
 Histories stay in each agent's own format; Voyager syncs the **index**
-(planned: scan before `continue`/`switch`) and compiles a bundle rather
-than rewriting Codex files as Claude JSONL. Multi-session merge is
-shipped (`voyager merge`); auto-sync then WorkThread:
-[ROADMAP.md](ROADMAP.md).
+(scan-before-compile is shipped) and compiles a bundle rather than
+rewriting Codex files as Claude JSONL. Multi-session merge and
+`voyager switch <agent>` are shipped: [ROADMAP.md](ROADMAP.md).
 
 ## 6. Hand a task to a different agent
 
@@ -93,7 +92,8 @@ Claude Code `claude mcp add`, Cursor `mcp.json`), ask in natural language:
 > "用 voyager_show 把 dsh 那个 CAP-U 会话展开"
 
 Tools: `voyager_brief` / `voyager_search` / `voyager_list` /
-`voyager_show` / `voyager_handoff`.
+`voyager_show` / `voyager_handoff` / `voyager_merge` /
+`voyager_thread_list|show|attach|close`.
 
 ## 8. Keep it current
 

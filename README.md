@@ -172,7 +172,9 @@ voyager-mcp                 # same as: python -m voyager.mcp_server
 ```
 
 Tools: `voyager_brief` (what are all my agents doing?), `voyager_search`,
-`voyager_list`, `voyager_show`, `voyager_handoff` (write a context package
+`voyager_list`, `voyager_show`, `voyager_handoff` / `voyager_merge`
+(write a context package / continuation bundle for another agent),
+`voyager_thread_list/show/attach/close` (WorkThreads)
 for another agent). Codex (`config.toml`), Claude Code (`claude mcp add`)
 and Cursor (`mcp.json`) are the tested hosts. Without the extra the server
 prints the install line above instead of a bare `ModuleNotFoundError` — the

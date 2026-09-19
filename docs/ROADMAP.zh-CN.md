@@ -5,7 +5,7 @@
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
-**Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；两项 #3 范围内容显式延期——见 Deferred）。**
+**Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；2c 首轮审计延期的两项已收口——MCP voyager_thread 与 `continue --repo` 确定性 thread 解析（`51c1054`））。**
 **Phase 3 shipped（`d931b02`）；Phase 4 已落地（`96fc752`）；Phase 5 已落地（`2f01a7f`）；**
 **状态：Continuity Engine 核心已全部 shipped。** Phase 1/1b/2/3/4/5/6 全部落地；
 Phase 7 为**部分落地**（local API + stdio bridge + VS Code extension scaffold
@@ -35,8 +35,10 @@ merge→thread、continue --thread、cwd→thread 默认接续、租约表、原
 *明确属于其他 issue（不混在 Phase 2）：* `voyager switch` 抢锁消费方是 #7；
 transcript writer / 吸入是 #10（必须在租约之后）。
 
-**⇒ issue #3 保持 open**（直到自动聚类 + MCP voyager_thread 落地或被
-所有者显式重定向）；issue #11 可按上文对账关闭（本机无 gh 凭据，网页操作）。
+**⇒ issue #3 close-out（重定位已生效）：** 确定性 `continue --repo`
+thread 解析与 MCP voyager_thread 工具均已落地；多信号自动聚类重定位为
+后续增强（docs/POST-1.0.md）。以此对账关闭 #3；issue #11 按上文对账
+关闭（本机无 gh 凭据，网页操作）。
 
 **Issue #11 结项对账（commit `c41f99b`）：**
 - ✅ `thread_leases` 表（加法迁移，老索引直接升级）
@@ -48,7 +50,7 @@ transcript writer / 吸入是 #10（必须在租约之后）。
 - ✅ `voyager thread unlock [--steal]`；`voyager thread show` 显示租约行
 - ✅ `voyager watch` 兼任 D13 心跳：只为 pid 存活的租约续期，活跃租约期间
   睡眠自动缩短到 ≤30s（心跳 120s 不会在两轮 watch 之间过期）
-- ⏳ 抢锁的消费方（`voyager switch`）是 #7，writer 是 #10——都排在这把锁后面
+- ✅ 抢锁的消费方 `voyager switch`（#7）已落地；writer（#10）codex/grok 已以 opt-in 方式落地，运行在租约之下
 
 GitHub issue #11 请在网页端以此对账关闭（本机无 gh 凭据）。
 
@@ -406,7 +408,7 @@ CREATE TABLE thread_sessions (
 );
 ```
 
-`continue --repo` 的自动聚类信号（不用 LLM）：
+`continue --repo` 的聚类信号表——**已重定位为后续增强**（当前产品语义：显式/持久化 WorkThread 优先，确定性解析已落地），此表保留作未来研究参考：
 
 | 信号 | 权重 |
 |---|---|
@@ -515,7 +517,7 @@ MCP（对同一组函数的薄封装）：
 | `voyager_merge` | 新增 |
 | `voyager_continue` | 新增（认识 thread） |
 | `voyager_switch` | 新增 |
-| `voyager_thread` | WorkThread 落地后再加 |
+| `voyager_thread_list/show/attach/close` | 已落地 |
 
 Skill（`skills/voyager/SKILL.md`），装到
 `~/.codex/skills/voyager/`、`~/.claude/skills/voyager/` 等：
@@ -644,11 +646,11 @@ voyager thread attach <sid>
 **做**
 
 - `threads` / `thread_sessions` 表；加法迁移（旧索引继续能用）。
-- `continue --repo` 用上面的信号自动聚类。
+- ~~`continue --repo` 自动聚类~~ 已重定位：`continue --repo` 确定性解析该 repo 最新的活跃 WorkThread（大声选中，不静默吞并）；多信号自动聚类为后续增强（见 Deferred）。
 - `voyager merge A B C` 创建（或更新）一个 thread。
 - 无参数 `continue`：cwd 的 repo → 活动 thread → 若最新成员能原生 resume
   且没给 `--to`，走 resume；否则编译 + handoff。
-- CLI 稳定后再加 MCP `voyager_thread`。
+- ✅ MCP `voyager_thread_list/show/attach/close`（`51c1054`）。
 - **单写者租约**（issue #11，D13）：`thread_leases` 表；
   `switch` 抢不到就拒绝；`watch` 心跳；pid/心跳过期即释放；`--steal` 必须显式且记日志。
 - 持锁期间只把持锁方的 Session 吸入规范日志。不回写那份原生文件。
@@ -741,9 +743,9 @@ voyager switch codex
 
 用户只看到一条命令。内部是 scan → select → compile → launch。
 
-### Phase 7 — VS Code 侧边栏 / Context Composer  *（最后）*
+### Phase 7 — VS Code 侧边栏 / Context Composer  *（部分落地：API + bridge + extension scaffold 已交付；Composer webview 与一键 switch UI 待补——docs/POST-1.0.md）*
 
-必须等 Phase 1–4 存在，UI 才是编译器的客户端。
+UI 是编译器的客户端，不复制业务逻辑（核心已全部就绪）。
 
 - VS Code 侧边栏：项目、thread、sessions、Continue / budget。
 - Context Composer：勾选会话 → 实时 bundle + token 估计 → Launch。
@@ -768,9 +770,9 @@ voyager switch codex
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 *（已落地 `d931b02`）* |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 *（已落地 Phase 4）* |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *（已落地，见 CHANGELOG）* |
 | [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11** —— **保持 open**：codex/grok writer 已 opt-in 落地；claude/dsh 探测未过暂不支持 |
-| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 |
+| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 —— **部分落地**（API + bridge + extension scaffold ✅；Composer webview 与一键 switch UI 待补） |
 
 **Issue #1 结项（伞 issue，「Continuity Engine Core 里程碑」）。**
 核心链路已完成并有合约测试覆盖：
@@ -819,8 +821,7 @@ Codex 在**新** Session 里启动，读到的 bundle 已经知道目标、活�
 ## 未决问题（不挡 Phase 1b）
 
 1. **Bundle 放哪。** *Phase 1 已拍板：* 默认 `~/.voyager/bundles/`；永远保留 `-o`。
-2. **Thread 怎么诞生。** 只自动聚类，还是必须 `merge` 才创建。
-   倾向：`continue --repo` 可以自动聚；用户 merge 或 switch 时再持久化。
+2. **Thread 怎么诞生。** 已拍板：显式 `thread create/attach` 与 `merge` 持久化；`continue --repo` 确定性解析已有 thread；多信号自动聚类重定位为后续增强（见 Deferred）。
 3. **可选 LLM extra。** 以后用 `[llm]` extra 把引文提升成已决议的 Decision。
    必须 opt-in，不走 core 路径。不进 Phase 1–6。
 4. **Daemon。** `voyager watch` 已经存在。本地 API daemon 只在 VS Code
