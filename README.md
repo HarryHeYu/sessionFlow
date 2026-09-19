@@ -157,25 +157,35 @@ the candidates and exits. `resume` runs the native agent's own command
 (e.g. `codex resume <id>`); providers without a CLI resume path say so
 explicitly instead of pretending.
 
-## Automatic Continuity
+## Automatic Continuity — zero-touch startup
 
-Voyager does not move native sessions between providers. It keeps the
-work continuous by maintaining a canonical WorkThread, refreshing it from
-the active agent, and automatically supplying the next agent with the
-continuation context.
+Voyager automatically continues work when you switch agents in the same repo:
 
-When you switch from one agent to another in the same repo, Voyager:
+1. **Index is synced** (incremental scan, always fresh)
+2. **Active WorkThread is discovered** for your current repository path  
+3. **Your session is auto-attached** to the existing WorkThread when safe
+4. **Continuation bundle is compiled** (goal-conditioned if `--goal`, packed to budget if `--budget`)
+5. **Context is loaded immediately** — no need to re-explain what you were working on
 
-1. syncs the index (incremental scan, always fresh)
-2. resolves the active WorkThread for that repo
-3. compiles a continuation bundle (goal-conditioned if `--goal`, packed
-   to budget if `--budget`)
-4. launches the target agent with a pointer to the bundle
-5. auto-attaches the target's new session to the WorkThread when it
-   appears in the index
+This happens even when you don't run any Voyager command: just start another
+agent (Codex / Claude Code / Grok) in a repo where Voyager has an active
+WorkThread. The agent's MCP tool `voyager_startup` will discover everything
+and load the context automatically.
 
-No manual `handoff` / `merge` / `thread attach` needed — those commands
-remain as explicit overrides and recovery tools.
+Manual commands (`voyager switch`, `handoff`, `thread attach`) remain as
+explicit overrides and recovery tools, but they are not needed for typical
+cross-agent workflows anymore.
+
+**Startup capability matrix**:
+
+| Provider | Skill | MCP | Auto-startup | Verified |
+|---|---|---|---|---|
+| Codex | ✅ | ✅ | ✅ | yes |
+| Claude Code | ✅ | ✅ | ✅ | yes |
+| Grok CLI | ✅ | ❌ | best-effort | yes |
+| DSH | ✅ | ❌ | best-effort | unverified |
+
+Run `voyager integrate status` to check your local installation state.
 
 ## MCP — native tools inside your agents
 
@@ -194,10 +204,11 @@ voyager-mcp                 # same as: python -m voyager.mcp_server
 Tools: `voyager_brief`, `voyager_search`, `voyager_list`, `voyager_show`,
 `voyager_handoff` / `voyager_merge` (write context package/bundle),
 `voyager_thread_list/show/attach/close` (WorkThreads),
-`voyager_current` (discover continuity), `voyager_context`, `voyager_continue`, `voyager_switch`. Codex (`config.toml`), Claude Code (`claude mcp add`)
-and Cursor (`mcp.json`) are the tested hosts. Without the extra the server
-prints the install line above instead of a bare `ModuleNotFoundError` — the
-rest of the CLI never needs `mcp`.
+`voyager_current` (discover continuity), `voyager_context`, `voyager_continue`,
+`voyager_switch`, `voyager_startup` (zero-touch startup with auto-discovery).
+Codex (`config.toml`), Claude Code (`claude mcp add`) and Cursor (`mcp.json`)
+are the tested hosts. Without the extra the server prints the install line above
+instead of a bare `ModuleNotFoundError` — the rest of the CLI never needs `mcp`.
 
 ## Supported platforms
 

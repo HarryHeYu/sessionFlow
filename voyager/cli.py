@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+# Import provider config for integrate command output
+from .skill import PROVIDER_CONFIG
 from .adapters import load_all
 from .adapters.base import enabled_adapters, git_info
 from .store import Store, default_db_path, lease_state
@@ -471,19 +473,113 @@ def cmd_api(args) -> int:
 
 
 def cmd_skill(args) -> int:
-    """Phase 5: install the voyager routing skill into known agents."""
+    """Legacy wrapper for backward compatibility."""
     from .skill import install_skills, skill_source
+    
     results = install_skills(agent=args.agent, force=args.force,
                              home=Path(args.home) if args.home else None)
     print(f"skill source: {skill_source()}")
     for r in results:
-        line = f"  {r['agent']:<8} {r['status']}"
+        # Legacy install_skills uses 'agent' key; new integrate uses 'provider'
+        agent_key = r.get('agent') or r.get('provider', 'unknown')
+        line = f"  {agent_key:<8} {r['status']}"
         if r.get("path"):
             line += f"  ({r['path']})"
         if r.get("backup"):
             line += f"  backup={r['backup']}"
         print(line)
     return 0
+
+
+def cmd_integrate(args) -> int:
+    """Install full integration for a provider."""
+    from .skill import install_integration
+    
+    result = install_integration(
+        provider=args.provider,
+        force=args.force,
+        home=Path(args.home) if args.home else None,
+    )
+    
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    
+    print(f"integrate: {PROVIDER_CONFIG.get(args.provider, {}).get('name', args.provider)}")
+    print(f"  status: {result['status']}")
+    
+    skill = result.get("skill", {})
+    print(f"  skill: {skill.get('status')}")
+    if skill.get("path"):
+        print(f"           {skill['path']}")
+    
+    mcp = result.get("mcp", {})
+    print(f"  mcp: {mcp.get('status', 'unknown')}")
+    if mcp.get("message"):
+        print(f"       {mcp['message']}")
+    
+    bootstrap = result.get("bootstrap", {})
+    if bootstrap.get("status") == "generated":
+        print(f"  bootstrap: generated")
+        print(f"             {bootstrap.get('path')}")
+    elif bootstrap.get("status") == "error":
+        print(f"  bootstrap: error - {bootstrap.get('error')}")
+    
+    if result.get("warnings"):
+        print("  warnings:")
+        for w in result["warnings"]:
+            print(f"          {w}")
+    
+    print(f"\nverification: {result.get('verification', 'none')}")
+    return 0 if result["status"] not in ("error",) else 1
+
+
+def cmd_integrate_status(args) -> int:
+    """Check integration status for providers."""
+    from .skill import check_integration_status
+    
+    providers = args.providers if args.providers else None
+    results = check_integration_status(providers=providers,
+                                        home=Path(args.home) if args.home else None)
+    
+    if args.json:
+        print(json.dumps(results, indent=2, ensure_ascii=False))
+        return 0
+    
+    # Print table header (ASCII compatible)
+    print(f"{'Provider':<12} {'Installed':<14} {'Skill':<10} {'MCP':<10} {'Bootstrap':<12} {'Auto-Attach':<12}")
+    print("-" * 90)
+    
+    for r in results:
+        installed = r.get("installed", "")
+        skill_avail = "Y" if r.get("skill", {}).get("available") else "N"
+        skill_inst = "Y" if r.get("skill", {}).get("installed") else " "
+        mcp_avail = "Y" if r.get("mcp", {}).get("available") else "N"
+        mcp_en = "Y" if r.get("mcp", {}).get("enabled") else " "
+        boot_avail = "Y" if r.get("bootstrap", {}).get("available") else " "
+        auto_attach = "Y" if r.get("auto_attach") else "N"
+        
+        print(f"{installed:<12} {installed.lower():<14} {skill_avail+skill_inst:<10} {mcp_avail+mcp_en:<10} {boot_avail:<12} {auto_attach:<12}")
+
+
+def cmd_integrate_remove(args) -> int:
+    """Remove integration for a provider."""
+    from .skill import uninstall_integration
+    
+    result = uninstall_integration(
+        provider=args.provider,
+        home=Path(args.home) if args.home else None,
+    )
+    
+    print(f"remove: {args.provider}")
+    print(f"  status: {result['status']}")
+    
+    skill = result.get("skill", {})
+    print(f"  skill: {skill.get('status')}")
+    if skill.get("path"):
+        print(f"         {skill['path']}")
+    
+    return 0 if result["status"] != "error" else 1
 
 
 def _continuity_status_enum(disc: dict) -> str:
@@ -1342,16 +1438,49 @@ def main(argv=None) -> int:
     sp.add_argument("--limit", type=int, default=15)
     sp.set_defaults(func=cmd_brief)
 
-    sp = sub.add_parser("skill", help="install the voyager skill into known agents",
+    # New integrate command group replacing basic skill install
+    sp = sub.add_parser("integrate", help="install Voyager integration for a provider",
                         parents=[common])
-    tsp = sp.add_subparsers(dest="skill_cmd", required=True)
-    isp = tsp.add_parser("install", help="copy SKILL.md into agent skill dirs")
-    isp.add_argument("--agent", help="single agent (codex|claude|grok); "
-                                     "unknown agents get a manual path")
-    isp.add_argument("--force", action="store_true",
+    isp = sp.add_subparsers(dest="int_cmd", required=True)
+    
+    # voyager integrate install <provider>
+    iisp = isp.add_parser("install", help="install full integration for provider")
+    iisp.add_argument("provider", choices=["codex", "claude", "grok", "dsh"],
+                      help="target provider to integrate")
+    iisp.add_argument("--force", action="store_true",
+                      help="overwrite modified files and re-generate bootstraps")
+    iisp.add_argument("--home", help="override HOME for paths (testing)")
+    iisp.add_argument("--json", action="store_true",
+                      help="output results as JSON")
+    iisp.set_defaults(func=cmd_integrate)
+    
+    # voyager integrate status
+    istp = isp.add_parser("status", help="check integration status for providers")
+    istp.add_argument("providers", nargs="*", default=None,
+                      choices=["codex", "claude", "grok", "dsh"],
+                      help="providers to check; omit for all")
+    istp.add_argument("--home", help="override HOME for paths (testing)")
+    istp.add_argument("--json", action="store_true")
+    istp.set_defaults(func=cmd_integrate_status)
+    
+    # voyager integrate remove <provider>
+    irmp = isp.add_parser("remove", help="remove integration for provider")
+    irmp.add_argument("provider", choices=["codex", "claude", "grok", "dsh"],
+                      help="provider to remove integration for")
+    irmp.add_argument("--home", help="override HOME for paths (testing)")
+    irmp.set_defaults(func=cmd_integrate_remove)
+    
+    # Legacy skill install still supported
+    sp = sub.add_parser("skill", help="(legacy) install the voyager skill into known agents",
+                        parents=[common], aliases=["skills"])
+    lsp = sp.add_subparsers(dest="skill_cmd", required=True)
+    lisp = lsp.add_parser("install", help="copy SKILL.md into agent skill dirs")
+    lisp.add_argument("--agent", help="single agent (codex|claude|grok); "
+                                      "unknown agents get a manual path")
+    lisp.add_argument("--force", action="store_true",
                      help="overwrite a user-modified SKILL.md (backs it up first)")
-    isp.add_argument("--home", help="override HOME for skill roots (testing)")
-    isp.set_defaults(func=cmd_skill)
+    lisp.add_argument("--home", help="override HOME for skill roots (testing)")
+    lisp.set_defaults(func=cmd_skill)
 
     sp = sub.add_parser("api", help="local stdio JSON-lines API (VS Code client)",
                         parents=[common])

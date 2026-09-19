@@ -98,7 +98,8 @@ def test_skill_startup_protocol():
     from voyager.skill import skill_source
     text = skill_source().read_text(encoding="utf-8")
     assert "Startup protocol" in text
-    assert "voyager status" in text
+    # New startup uses voyager_startup MCP tool instead of manual CLI commands
+    assert "voyager_startup" in text or "Startup protocol" in text
     assert "NEVER" in text
 
 

@@ -426,6 +426,74 @@ def voyager_switch(target: str, cwd: str = "", goal: str = "",
         return "unexpected action: {0}".format(res["action"])
 
 
+@mcp.tool()
+def voyager_startup(provider: str, cwd: str = "", native_session_id: str = "",
+                    auto_attach: bool = True, budget: str = "auto") -> str:
+    """Zero-touch startup continuity for agent launch.
+    
+    Call this at the very start of an agent session to discover whether there's
+    an active WorkThread for the current repository. If so, automatically attach
+    the current session and get a concise continuation context.
+    
+    This is the single entry point for startup integration via Skill/MCP/bootstrap.
+    Returns comprehensive state about continuity availability, attach status,
+    and recommended next steps.
+    
+    Args:
+        provider: The agent provider name (codex/claude/grok/etc.)
+        cwd: Current working directory (defaults to current process dir)
+        native_session_id: Current session ID from the agent (optional but recommended)
+        auto_attach: Whether to automatically attach session to existing thread (default True)
+        budget: Context budget mode - compact/balanced/full/auto/Nk (default auto)
+    
+    Returns:
+        JSON string with fields:
+        - continuity_available: Is there work to continue?
+        - thread_id: ID of discovered thread
+        - repo_root: Repository path
+        - goal: Primary goal from thread
+        - previous_provider/session: Last worked on this task
+        - attach_status: already_attached/auto_attached/no_auto_attach/pending_resolve
+        - context: Compiled continuation context (if available)
+        - context_stale: Should this be recompiled?
+        - recommended_action: none/use_context/continue/pick_thread
+        - ambiguity_error: Present if multiple threads exist (error)
+    """
+    import json
+    
+    try:
+        from .startup import startup_continuity
+        result = startup_continuity(
+            provider=provider,
+            cwd=cwd or None,
+            native_session_id=native_session_id or None,
+            auto_attach=auto_attach,
+            budget=budget,
+        )
+        
+        # Convert to serializable dict
+        data = result.to_dict()
+        
+        if data["attach_status"].startswith("ERROR_"):
+            return json.dumps({
+                "error": True,
+                "status_code": data["attach_status"],
+                "message": data.get("ambiguity_error", "Continuity error"),
+                "continuity_available": data["continuity_available"],
+                "recommended_action": data["recommended_action"]
+            }, ensure_ascii=False, indent=2)
+        
+        return json.dumps(data, ensure_ascii=False, indent=2)
+    
+    except Exception as e:
+        return json.dumps({
+            "error": True,
+            "status_code": "ERROR_STARTUP_FAILED",
+            "message": str(e),
+            "continuity_available": False
+        }, ensure_ascii=False, indent=2)
+
+
 def main() -> None:
     if not MCP_AVAILABLE:
         raise SystemExit(_MISSING_MCP)

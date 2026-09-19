@@ -131,22 +131,30 @@ codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager c
 
 会话 ID 支持前缀匹配；前缀有歧义时会列出候选并退出，不会猜。
 
-## 自动接续（Automatic Continuity）
+## 自动接续层（Zero-Touch Startup Continuity）
 
-Voyager 不在 provider 之间搬运原生会话。它通过维护一份权威 WorkThread、
-从活跃 agent 自动吸入最新状态、并自动为下一个 agent 提供接续上下文，
-让工作本身连续。
+Voyager 在同一个仓库里切换 Agent 时会自动接续工作：
 
-当你在同一仓库里从一个 agent 切到另一个时，Voyager 会：
+1. **索引已同步**（增量扫描，实时更新）
+2. **当前仓库的 active WorkThread 被发现**  
+3. **你的会话被安全地自动挂接到现有 WorkThread**
+4. **Continuation bundle 已编译**（有 `--goal` 则条件压缩，有 `--budget` 则打包到预算内）
+5. **上下文被立即加载** —— 不需要重新解释你正在做什么
 
-1. 增量同步索引（永远新鲜）
-2. 解析该仓库的活跃 WorkThread
-3. 编译接续包（`--goal` 排序、`--budget` 打包）
-4. 启动目标 agent 并指向接续包
-5. 目标 agent 的新会话出现在索引时自动挂回 WorkThread
+即使不运行任何 Voyager 命令也会发生：只要你启动另一个 Agent（Codex / Claude Code / Grok），而该 Agent 所在的 repo 已经有 Voyager 的 active WorkThread。Agent 的 MCP 工具 `voyager_startup` 会发现自己并加载上下文。
 
-不需要手动执行 `handoff` / `merge` / `thread attach`——这些命令保留为
-显式覆盖和恢复工具。
+手动命令（`voyager switch`, `handoff`, `thread attach`）仍然是显式覆盖和恢复工具，但典型跨 Agent 工作流不再需要它们。
+
+**启动能力矩阵**：
+
+| Provider | Skill | MCP | 自动启动 | 已验证 |
+|---|---|---|---|---|
+| Codex | ✅ | ✅ | ✅ | yes |
+| Claude Code | ✅ | ✅ | ✅ | yes |
+| Grok CLI | ✅ | ❌ | best-effort | yes |
+| DSH | ✅ | ❌ | best-effort | unverified |
+
+运行 `voyager integrate status` 检查本地安装状态。
 
 ## MCP —— 在你的 Agent 里原生调用
 
@@ -164,7 +172,9 @@ voyager-mcp                 # 等价于 python -m voyager.mcp_server
 提供工具：`voyager_brief`（所有 agent 最近在忙什么）、`voyager_search`、
 `voyager_list`、`voyager_show`、`voyager_handoff` / `voyager_merge`（为另一个
 agent 生成上下文包/接续包）、`voyager_thread_list/show/attach/close`
-（WorkThread 管理）。
+（WorkThread 管理）。`voyager_current`（自动发现 WorkThread）、
+`voyager_context` / `continue` / `switch`（显式跨 Agent 切换）。
+`voyager_startup`（零-touch 启动，自动发现 + 自动挂接 + 加载上下文）。
 已测试的宿主：Codex（`config.toml`）、Claude Code（`claude mcp add`）、
 Cursor（`mcp.json`）。没装 `mcp` 时，服务会打印上面那行安装命令而不是抛一个
 光秃秃的 `ModuleNotFoundError`；CLI 其余功能完全不需要它。

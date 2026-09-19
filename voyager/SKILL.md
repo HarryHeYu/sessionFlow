@@ -31,18 +31,42 @@ provenance-bound.
 
 ## Startup protocol (automatic continuity)
 
-When starting work in a repository, BEFORE responding to the user:
+At the beginning of work in a repository, BEFORE asking the user to repeat
+prior context:
 
-1. Run `voyager status` (or `voyager status --json`) — if it reports
-   READY or PENDING_ATTACH, an active WorkThread exists for this repo.
-2. If a continuation bundle is available (`voyager_context` MCP tool or
-   `voyager continue --no-launch`), read it — it contains the goal,
-   decisions, failures and next steps from previous sessions.
-3. If the tool reports your session id is unattached and the repo
-   matches, attach yourself: `voyager thread attach <thread-id> <your-id>`
-   (or it may have been auto-attached already — check `voyager status`).
-4. Do NOT create a parallel WorkThread for the same repo; use the
-   existing one.
+1. Call `voyager_startup` MCP tool with your provider name and session id:
+   ```
+   voyager_startup(provider="YOUR_PROVIDER", cwd="$PWD", 
+                   native_session_id="YOUR_SESSION_ID")
+   ```
+
+2. If it returns `continuity_available=true`:
+   - Read the returned `context` field — it contains goal, state, decisions,
+     failures, next steps from previous sessions on this WorkThread
+   - Check `attach_status` to see if you were auto-attached or need manual attach
+
+3. If `auto_attach_reason` indicates success, your session is already linked
+   to the WorkThread and you can continue immediately.
+
+4. If `ambiguity_error` is present (multiple active threads), do NOT guess —
+   ask the user which thread to use.
+
+5. If `continuity_available=false`, no prior WorkThread exists; start fresh.
+
+6. Never create a parallel WorkThread when one already exists for this repo.
+
+### Startup continuity result fields
+
+- `continuity_available`: is there an active WorkThread for this repo?
+- `thread_id`: the active WorkThread identifier
+- `goal`: the task objective from the original session
+- `previous_provider/session`: who was working before and what session id
+- `current_provider/session`: your identity as the new worker
+- `lease_state`: whether the thread is held/expired/stale
+- `attach_status`: attached | pending | error_* | unattached
+- `context`: ranked continuation bundle (if available)
+- `context_stale`: should we recompile from source sessions?
+- `recommended_action`: explicit instructions (attach | switch-agent | proceed)
 
 ## Rules
 
