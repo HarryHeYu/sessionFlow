@@ -6,7 +6,8 @@
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
 **Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；两项 #3 范围内容显式延期——见 Deferred）。**
-**Phase 3 shipped（`d931b02`）；Phase 4 Context Budget 已落地；Phase 5 Voyager Skill 已落地。下一步：switch（#7）/ VS Code sidebar（#8）。**
+**Phase 3 shipped（`d931b02`）；Phase 4 已落地（`96fc752`）；Phase 5 已落地（`2f01a7f`）；**
+**Phase 6 `voyager switch` 已落地（见 CHANGELOG）。下一步：VS Code sidebar（#8）——最后一站。**
 Phase 6–7 仍是规划。
 
 **Phase 2 close-out audit（2026-09-18，对照代码逐条核实）：**
@@ -763,7 +764,7 @@ voyager switch codex
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 *（已落地 `d931b02`）* |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 *（已落地 Phase 4）* |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
 | [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11**，合成 JSONL 的原生 resume 已证实 |
 | [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 |
 

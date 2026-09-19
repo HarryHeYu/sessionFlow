@@ -136,6 +136,14 @@ CREATE TABLE IF NOT EXISTS sources (
     PRIMARY KEY (provider, path, sid)
 );
 
+CREATE TABLE IF NOT EXISTS thread_pending (
+    thread_id  TEXT NOT NULL,
+    provider   TEXT NOT NULL,
+    note       TEXT,
+    created_at REAL,
+    PRIMARY KEY (thread_id, provider)
+);
+
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(
@@ -556,11 +564,15 @@ class Store:
             now = _time.time()
             row = self.thread_lease_get(tid)
             st = lease_state(row, now)
-            if st["held"] and not st["expired"] and not steal:
-                self.con.execute("COMMIT")
-                return False, row
             event = ("acquire" if row is None
                      else "steal" if steal else "takeover-expired")
+            if st["held"] and not st["expired"] and not steal:
+                if row["holder"] == holder:
+                    # same provider re-acquiring its own lease = transfer
+                    event = "transfer"
+                else:
+                    self.con.execute("COMMIT")
+                    return False, row
             token = _uuid.uuid4().hex
             self.con.execute(
                 """INSERT OR REPLACE INTO thread_leases(
@@ -632,6 +644,27 @@ class Store:
             if st["held"] and not st["expired"]:
                 n += 1
         return n
+
+    def thread_pending_add(self, tid: str, provider: str, note=None) -> None:
+        """Record that a continuation for `provider` was launched on this
+        thread but its new native session id is not yet known. Cleared by
+        thread_attach when a matching session shows up."""
+        import time as _time
+        self.con.execute(
+            "INSERT OR REPLACE INTO thread_pending VALUES (?,?,?,?)",
+            (tid, provider, note, _time.time()))
+        self.con.commit()
+
+    def thread_pending_list(self, tid: str) -> List[sqlite3.Row]:
+        return self.q(
+            "SELECT * FROM thread_pending WHERE thread_id=? ORDER BY created_at",
+            (tid,))
+
+    def thread_pending_clear(self, tid: str, provider: str) -> None:
+        self.con.execute(
+            "DELETE FROM thread_pending WHERE thread_id=? AND provider=?",
+            (tid, provider))
+        self.con.commit()
 
     # -- reading -----------------------------------------------------------
 

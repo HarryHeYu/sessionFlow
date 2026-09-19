@@ -5,6 +5,19 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **`voyager switch <agent>` (roadmap Phase 6, issue #7)** — one command to
+  continue the active WorkThread in another agent. Flow: incremental scan →
+  thread resolution (--thread > --repo > cwd) → D13 lease (live foreign
+  holders refuse and are named; stale take over; --steal is explicit and
+  audited; same-provider transfers freely) → git dirty warning (never
+  stash/reset) → same-provider native resume (D7 priority) XOR
+  Continuation Bundle (goal/budget applied) → launch. Launch failure
+  releases the lease (no dangling holder); the target agent's new session
+  id is unknowable at launch, so a pending attach is recorded
+  (`thread show` lists it; `thread attach <new-id>` resolves it — never
+  fabricated). --no-launch prints the plan. Contract tests cover every
+  error path (11 tests).
+
 - **Phase 2 deferred items closed (issue #3)** — MCP
   `voyager_thread_list/show/attach/close` tools (thin wrappers over the
   Store API) and deterministic `continue --repo` resolution: the newest

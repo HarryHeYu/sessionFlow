@@ -71,17 +71,18 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
         "dirty_files": [],
     }
     try:
-        res_branch = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if res_branch.returncode != 0:
+        res_inside = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=cwd, capture_output=True, text=True, timeout=2)
+        if res_inside.returncode != 0 or res_inside.stdout.strip() != "true":
             return snapshot
         snapshot["is_git"] = True
-        snapshot["branch"] = res_branch.stdout.strip()
+        # symbolic-ref works even on an unborn branch (fresh git init)
+        res_branch = subprocess.run(
+            ["git", "symbolic-ref", "--short", "HEAD"],
+            cwd=cwd, capture_output=True, text=True, timeout=2)
+        if res_branch.returncode == 0:
+            snapshot["branch"] = res_branch.stdout.strip()
 
         res_commit = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],

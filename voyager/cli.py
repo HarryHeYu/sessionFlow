@@ -622,6 +622,162 @@ def cmd_continue(args) -> int:
     return _handoff_from_row(store, row, args)
 
 
+def cmd_switch(args) -> int:
+    """Phase 6 / #7: one command to switch agent inside the active WorkThread.
+
+    Flow (D12/D13/D7/D11): incremental scan -> resolve thread (explicit
+    --thread > --repo > cwd) -> lease check (refuse live foreign holder,
+    takeover stale, same-provider transfer) -> same-provider native resume
+    XOR Continuation Bundle -> git dirty warning -> launch (or --no-launch).
+    """
+    from .continuity import (
+        PROMPT_TARGETS,
+        build_continuation_bundle,
+        bundle_command,
+        default_bundle_name,
+        get_bundles_dir,
+        get_git_snapshot,
+    )
+    store = Store(args.db)
+    _ensure_fresh(args, store)
+
+    target = args.agent
+    if target not in PROMPT_TARGETS:
+        print("error: switch target must be one of {0} (got '{1}')".format(
+            ", ".join(sorted(PROMPT_TARGETS)), target), file=sys.stderr)
+        return 2
+
+    # -- resolve the WorkThread -------------------------------------------
+    if getattr(args, "thread", None):
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+    else:
+        repo_ref = getattr(args, "repo", None)
+        repo = repo_ref or (git_info(os.getcwd()).get("repo_root")
+                            or os.getcwd().replace("\\", "/"))
+        cands = [t for t in store.thread_list("active")
+                 if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+        if not cands:
+            print("error: no active WorkThread for this repo ({0}).".format(repo))
+            print("Create one: voyager thread create --repo {0} --attach <ids>".format(repo))
+            print("Or continue without switching: voyager continue")
+            return 1
+        t = max(cands, key=lambda x: x["updated_at"] or 0)
+    args.thread = t["id"]
+    print("thread {0}  [{1}]".format(t["id"], t["status"]))
+
+    # -- lease (D13): refuse live foreign holders, takeover stale, ---------
+    # same-provider transfers freely; --steal is explicit and logged.
+    ok, lease = store.thread_lease_acquire(t["id"], target,
+                                           steal=getattr(args, "steal", False))
+    if not ok:
+        st = lease_state(lease)
+        age = _lease_age(lease)
+        print("thread {0} is leased to {1} pid={2}, heartbeat {3:.0f}s ago".format(
+            t["id"], lease["holder"], lease["pid"], age))
+        print("refusing to switch (D13); pass --steal or run "
+              "`voyager thread unlock {0} --steal`".format(t["id"]))
+        return 1
+    acquired = lease["lease_token"]
+    print("lease: {0} ({1})".format(target, acquired and "granted"))
+
+    try:
+        members = store.thread_members(t["id"])
+        if not members:
+            print("thread has no live member sessions", file=sys.stderr)
+            store.thread_lease_release(t["id"], acquired, reason="empty-thread")
+            return 1
+
+        # -- git dirty warning (never stash/reset) ------------------------
+        repo_hint = t["repo_root"] or (members[0]["cwd"] if members else None)
+        snap = get_git_snapshot(repo_hint)
+        if snap["is_git"] and snap["dirty_count"]:
+            print("⚠ working tree has {0} uncommitted change(s) — "
+                  "review `git status` in {1}".format(
+                      snap["dirty_count"], repo_hint))
+
+        # -- same-provider native resume (D7 priority) --------------------
+        resumable = [m for m in members
+                     if m["provider"] == target and m["can_resume"]
+                     and m["resume_cmd"]]
+        if resumable and not getattr(args, "bundle", False):
+            cand = max(resumable, key=lambda x: x["updated_at"] or 0)
+            _, lease = store.thread_lease_acquire(
+                t["id"], target, native_session_id=cand["native_id"],
+                pid=os.getpid(), steal=True)
+            acquired = lease["lease_token"]      # the transfer rotated the token
+            argv = cand["resume_cmd"].split()
+            print("$ " + " ".join(argv))
+            if getattr(args, "no_launch", False):
+                print("native resume ready (same provider — the session id "
+                      "is already a thread member)")
+                return 0
+            try:
+                return subprocess.call(argv)
+            except KeyboardInterrupt:
+                return 130
+            except OSError as e:
+                # launch failed: do not leave a lease pointing at nothing
+                store.thread_lease_release(t["id"], acquired,
+                                           reason="launch-failed")
+                print("launch failed ({0}); lease released".format(e),
+                      file=sys.stderr)
+                return 1
+
+        # -- cross-provider: compile Continuation Bundle -------------------
+        bundle = build_continuation_bundle(store, members,
+                                           goal=getattr(args, "goal", None))
+        budget = getattr(args, "budget", None)
+        bundle = _render_budgeted(bundle, args, target=target)
+        out = (Path(args.output) if getattr(args, "output", None)
+               else get_bundles_dir() / default_bundle_name(members))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(bundle, encoding="utf-8")
+        print("continuation bundle: {0} ({1} chars)".format(
+            out.resolve(), len(bundle)))
+        # the target agent's new session id is unknowable until it starts:
+        # record a pending attach instead of fabricating one
+        store.thread_pending_add(t["id"], target,
+                                 note="switch continuation: " + out.name)
+
+        argv = bundle_command(target, out)
+        print("$ {0} \"<continuation prompt>\"".format(argv[0]))
+        if getattr(args, "no_launch", False):
+            print("switch ready (--no-launch); the target agent should read "
+                  "the bundle, then `voyager thread attach {0} <new-id>` "
+                  "resolves the pending attach".format(t["id"]))
+            return 0
+        try:
+            rc = subprocess.call(argv)
+        except KeyboardInterrupt:
+            return 130
+        except OSError as e:
+            store.thread_lease_release(t["id"], acquired,
+                                       reason="launch-failed")
+            print("launch failed ({0}); lease released".format(e),
+                  file=sys.stderr)
+            return 1
+        print("switch complete: after the target agent starts, run "
+              "`voyager thread attach {0} <new-session-id>` to link the "
+              "continuation".format(t["id"]))
+        return rc
+    except Exception:
+        # never leave a live lease behind on an unexpected error
+        try:
+            store.thread_lease_release(t["id"], acquired,
+                                       reason="error")
+        except Exception:
+            pass
+        raise
+
+
+def _lease_age(lease) -> float:
+    import time as _time
+    return _time.time() - (lease["heartbeat_at"] or 0)
+
+
 def cmd_brief(args) -> int:
     """Compact digest of what every agent has been doing recently —
     designed to be read by an agent in one shot."""
@@ -744,6 +900,10 @@ def cmd_thread(args) -> int:
         if t["goal"]:
             print("goal: " + t["goal"])
         _print_lease(store, t["id"])
+        pending = store.thread_pending_list(t["id"])
+        for pend in pending:
+            print("pending: {0} continuation launched, new session id unknown"
+                  " ({1})".format(pend["provider"], pend["note"] or ""))
         print("members:")
         for m in members:
             print("  {0:<8} {1}  ({2} msgs)  {3}".format(
@@ -786,6 +946,8 @@ def cmd_thread(args) -> int:
                     continue
                 if store.thread_attach(args.thread, row["id"]):
                     attached += 1
+                    # a newly attached session resolves a pending continuation
+                    store.thread_pending_clear(args.thread, row["provider"])
                 else:
                     skipped += 1
         print("attached {0} session(s)".format(attached)
@@ -1014,6 +1176,23 @@ def main(argv=None) -> int:
     sp.add_argument("--platform", help="limit to these providers (comma list)")
     sp.add_argument("--force", action="store_true")
     sp.set_defaults(func=cmd_watch)
+
+    sp = sub.add_parser("switch", parents=[common],
+                        help="switch the active WorkThread to another agent (Phase 6)")
+    sp.add_argument("agent", help="target agent (claude|codex|grok)")
+    sp.add_argument("--thread", help="explicit WorkThread id/prefix")
+    sp.add_argument("--repo", help="resolve the thread by repo")
+    sp.add_argument("--goal", help="primary goal for the continuation bundle")
+    sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
+    sp.add_argument("--bundle", action="store_true",
+                    help="force a continuation bundle even for same-provider members")
+    sp.add_argument("--steal", action="store_true",
+                    help="take over a LIVE lease held by another provider (logged)")
+    sp.add_argument("--no-launch", action="store_true",
+                    help="print what would be launched instead of launching")
+    sp.add_argument("--output", "-o",
+                    help="bundle file path (when compiling a continuation)")
+    sp.set_defaults(func=cmd_switch)
 
     sp = sub.add_parser("thread", help="WorkThread: list/show/create/attach/close/unlock")
     tsub = sp.add_subparsers(dest="thread_cmd", required=True)

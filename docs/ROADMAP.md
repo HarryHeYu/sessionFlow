@@ -4,7 +4,8 @@
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
 **Phase 1b shipped (`5e8271c`); Phase 2 COMPLETE — 2a WorkThread (`b580001`/`934dfd5`), 2b lease (`c41f99b`), 2c deferred items closed (MCP voyager_thread + deterministic --repo thread resolution; multi-signal auto-clustering re-scoped as a later enhancement under #3).**
-**Phase 3 shipped (`d931b02`); Phase 4 Context Budget shipped (`96fc752`); Phase 5 Voyager Skill shipped. Next: switch (#7) / VS Code sidebar (#8).**
+**Phase 3 shipped (`d931b02`); Phase 4 shipped (`96fc752`); Phase 5 shipped (`2f01a7f`); **
+**Phase 6 `voyager switch` shipped (see CHANGELOG). Next: VS Code sidebar (#8) — last.**
 Phases 6–7 remain planning.
 
 **Phase 2 close-out audit (2026-09-18, checked against the code):**
@@ -812,7 +813,7 @@ Treat the checkboxes as the implementation contract.
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 *(shipped `d931b02`)* |
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 *(shipped Phase 4)* |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |
+| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
 | [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11**, proven resume of synthetic JSONL |
 | [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 |
 
