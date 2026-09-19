@@ -7,7 +7,7 @@
 
 **把你机器上所有 AI 编码 Agent 的会话历史，变成一份可查询的索引。**
 
-下一步：接续层——跨会话合并上下文，在任意 Agent 里接着干。见 [路线图](docs/ROADMAP.zh-CN.md)。
+跨 Agent 接续层已内置：跨会话合并上下文，在任意 Agent 里接着干（`voyager merge` / `switch` / `continue`）——已交付范围见 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)，后续计划见 [docs/POST-1.0.md](docs/POST-1.0.md)。
 
 [English](README.md)
 

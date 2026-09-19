@@ -77,16 +77,19 @@ tests/test_export.py test_handoff.py test_cli.py test_mcp.py
 - 适配器的路径全局（`SESSIONS_DIR`/`PROJECTS_DIR`/`DB_PATH`/`VSCDB`/`CONV_DIR`）必须
   保持是模块级变量，测试靠它们重定向；`patch_paths` 会对不存在名字直接断言失败。
 
-## Phase 2 预留
+## Continuity Engine（已落地）与预留面
 
-战略下一阶段是 **Continuity Engine**（多会话合成 → WorkThread →
-goal-conditioned bundle → Context Budget → Skill / `switch`），
-而不是先做 TUI。完整计划见 [ROADMAP.md](ROADMAP.md)。
+**Continuity Engine 已落地**：多会话合成（`voyager merge` / continuity.py）、
+WorkThread（threads/thread_sessions/租约表）、goal ranker（ranker.py）、
+Context Budget（budget.py）、Skill 安装器、`voyager switch`、本地 API
+（api.py + `voyager api serve`）。当前架构见 [ROADMAP.zh-CN.md](ROADMAP.zh-CN.md)。
+
+索引层仍为后续特性留有钩子（这些属于 docs/POST-1.0.md 的 backlog，**未实现**）：
 
 索引层已为后续特性留了钩子，但不挡 Continuity：
 
 - `files` 表已建：`voyager diff/files` 走 Claude file-history 版本链（`<hash>@vN`）。
-- 录制层（Flight Recorder）：Claude 原生 hooks（PreToolUse/PostToolUse）+ Codex/ZCode
+- 录制层（Flight Recorder，**未实现**）：Claude 原生 hooks（PreToolUse/PostToolUse）+ Codex/ZCode
   rollout 文件 tail（零侵入）。统一事件模型可直接承载录制事件（kind/actor/tool/...）。
 - fork：session 表 parent 语义已留（Codex history_base、Claude --fork-session、
   Grok rewind_points）。

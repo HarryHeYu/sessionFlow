@@ -7,7 +7,7 @@
 
 **One index across every AI coding agent on your machine.**
 
-Next: a continuity layer — merge context across sessions and continue in any agent. See [the roadmap](docs/ROADMAP.md).
+Cross-agent continuity is built in: merge context across sessions and continue in any agent (`voyager merge` / `switch` / `continue`) — see [docs/ROADMAP.md](docs/ROADMAP.md) for the shipped scope and [docs/POST-1.0.md](docs/POST-1.0.md) for what's next.
 
 [中文说明](README.zh-CN.md)
 
