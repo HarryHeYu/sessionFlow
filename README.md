@@ -75,7 +75,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 69 tests, synthetic fixtures, no provider data
+python -m pytest tests/ -q     # 163 tests, synthetic fixtures, no provider data
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -108,6 +108,9 @@ voyager export <id> --format md   # or --format json (includes raw events)
 voyager resume <id>         # launches the native agent on that session
 voyager handoff <id> --to codex   # context package for another agent
 voyager continue            # one command to pick your latest work back up
+voyager thread list         # WorkThreads: task-centric session groups
+voyager switch codex        # switch the active thread to another agent
+voyager skill install       # teach other agents about voyager
 voyager brief               # 48h digest of what every agent is doing
 voyager files <id>          # files the session touched
 voyager diff <id>           # Claude sessions: rebuilt before/after diffs
@@ -126,10 +129,23 @@ Same-provider pickup still uses native resume (`codex resume`, …).
 **One command to continue**: `voyager continue` picks your newest session
 and does the right thing — native resume for codex/claude/dsh/grok,
 automatic handoff package for the rest. `voyager continue --repo myproj
---launch` goes straight back into a specific project. Multi-session merge
-is already there (`voyager merge` / `continue --from`); next is
-auto-sync (scan before switch) then WorkThread —
-[docs/ROADMAP.md](docs/ROADMAP.md).
+--launch` goes straight back into a specific project; multi-session
+synthesis (`voyager merge A B C`) groups the work into a **WorkThread**
+and cross-agent switch is one command (`voyager switch codex` — lease
+aware, see [docs/ROADMAP.md](docs/ROADMAP.md)).
+
+**Goal-conditioned & budgeted**: add `--goal "finish adapter tests"` to
+rank the evidence, and `--budget compact|balanced|full|Nk` to cap the
+bundle size (estimate printed). Without `--goal`/`--budget` the output is
+unchanged.
+
+**Transcript mode (opt-in, experimental)**: `voyager switch codex --mode
+transcript` writes a NEW native session containing a flattened
+user/assistant transcript (tools/state dropped) so the target resumes
+natively. Only codex/grok pass the resume gate today (claude timed out,
+dsh unverified) — the default remains the Continuation Bundle. This is
+work continuation, not session teleportation: hidden tool state and
+provider runtime state never move.
 
 **Everyday flow** — `brief` to see what's moving, `export` to read one
 session in full (a 2,915-message DSH session → a 20 MB Markdown file),
@@ -196,7 +212,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 69 tests: adapters, store, export, handoff, CLI, MCP
+python -m pytest tests/ -q                # 163 tests: adapters, store, continuity, budget, leases, switch, skill, API, MCP
 python scripts/run_tests_core_only.py     # same suite with no optional deps (skips extras)
 ```
 
@@ -224,10 +240,11 @@ Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 
 ## What's next
 
-The index is the foundation. The jump is a **continuity engine**: compile
-many sessions, across agents, into the context the *next* agent actually
-needs — then continue. UI (VS Code sidebar / Context Composer) comes
-after that pipeline exists.
+The Continuity Engine core is complete (see
+[docs/ROADMAP.md](docs/ROADMAP.md) for the full close-out). The
+post-1.0 backlog — VS Code Context Composer UI, auto-clustering
+research, Claude/DSH transcript gates, scoped scan, fs-event watcher,
+PyPI/packaging polish — lives in [docs/POST-1.0.md](docs/POST-1.0.md).
 
 Phased plan, CLI sketches, and the issue list:
 [docs/ROADMAP.md](docs/ROADMAP.md) · [中文](docs/ROADMAP.zh-CN.md).

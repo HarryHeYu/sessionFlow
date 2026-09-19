@@ -3,7 +3,12 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
-## [Unreleased]
+## [0.3.0] — 2026-09-19
+
+> Continuity Engine core milestone. All roadmap phases
+> (1 → 1b → 2 → 3 → 4 → 5 → 6 → 7) landed; issue #8 is partially shipped
+> (API/bridge/scaffold), issue #10 stays open (codex/grok writers shipped,
+> claude/dsh gated). Post-1.0 backlog: docs/POST-1.0.md.
 
 - **Local API + VS Code extension scaffold (roadmap Phase 7, issue #8)** —
   `voyager/api.py` is a thin JSON-able client surface over the same core

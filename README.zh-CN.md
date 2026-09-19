@@ -99,6 +99,9 @@ voyager export <id> --format md   # 或 --format json（含原始事件）
 voyager resume <id>         # 调起原 Agent 恢复该会话
 voyager handoff <id> --to codex   # 生成给另一个 agent 的上下文包
 voyager continue            # 一条命令接着上次干（原生恢复或自动接力）
+voyager thread list         # WorkThread：以任务为中心的会话组
+voyager switch codex        # 把当前 thread 切到另一个 agent
+voyager skill install       # 教其他 agent 认识 voyager
 voyager brief               # 最近 48h 所有 agent 在忙什么的摘要
 voyager files <id>          # 该会话碰过哪些文件
 voyager diff <id>           # Claude 会话：从版本链重建前后 diff
@@ -115,9 +118,12 @@ tool state 或 cached reasoning）。`voyager handoff <id> --to codex` 会把
 **一条命令继续**：`voyager continue` 自动挑你最新的会话并做对的事——
 codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager continue
 --repo myproj --launch` 直接回到某个项目的现场。多会话合并已经有了
-（`voyager merge` / `continue --from`）；下一步是自动同步（switch 前先
-scan），然后才是 WorkThread ——
-见 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)。
+（`voyager merge A B C` 会把工作聚合成 **WorkThread**）；跨 agent 切换是
+一条命令（`voyager switch codex`——租约感知）。`--goal` 按目标给证据排序，
+`--budget` 限制上下文包大小；`--mode transcript` 为选择性实验功能
+（仅 codex/grok），默认仍是 Continuation Bundle。这是**工作接续**，
+不是把 Session 原样搬过去——见
+[docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)。
 
 **日常套路**——`brief` 看全局动态，`export` 完整细读某个会话（实测把
 2915 条消息的 DSH 会话导成 20MB Markdown），`continue` / `handoff` 接着干。

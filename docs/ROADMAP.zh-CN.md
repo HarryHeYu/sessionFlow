@@ -7,8 +7,12 @@
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
 **Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；两项 #3 范围内容显式延期——见 Deferred）。**
 **Phase 3 shipped（`d931b02`）；Phase 4 已落地（`96fc752`）；Phase 5 已落地（`2f01a7f`）；**
-**Phase 6 `voyager switch` 已落地；Phase 7 已落地——core API + stdio bridge + VS Code extension scaffold（见 CHANGELOG）。Continuity Engine 主线完整。**
-Phase 6–7 仍是规划。
+**状态：Continuity Engine 核心已全部 shipped。** Phase 1/1b/2/3/4/5/6 全部落地；
+Phase 7 为**部分落地**（local API + stdio bridge + VS Code extension scaffold
+已交付；Context Composer webview 与一键 switch UI 待补，见
+[docs/POST-1.0.md](POST-1.0.md)）。Issue #10 保持 open——codex/grok writer
+已以 opt-in 方式落地，claude/dsh 因探测未过暂不支持。其余打磨项全部移入
+[docs/POST-1.0.md](POST-1.0.md)。
 
 **Phase 2 close-out audit（2026-09-18，对照代码逐条核实）：**
 
@@ -765,10 +769,15 @@ voyager switch codex
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 *（已落地 Phase 4）* |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
 | [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
-| [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11**，合成 JSONL 的原生 resume 已证实 |
+| [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11** —— **保持 open**：codex/grok writer 已 opt-in 落地；claude/dsh 探测未过暂不支持 |
 | [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 |
 
-#1 是伞。#2–#7、#9 和 #11 完成就关；#8 和 #10 是壁垒之后的事（#10 现在是 Grok/Codex 形状，仍然要套租约）。
+**Issue #1 结项（伞 issue，「Continuity Engine Core 里程碑」）。**
+核心链路已完成并有合约测试覆盖：
+`index → WorkThread → goal rank → budget → skill → lease → switch → API
+client`。转入 post-core 跟进（docs/POST-1.0.md）：VS Code Context
+Composer 打磨（#8 剩余）与可选 transcript provider 覆盖（#10 剩余——
+claude/dsh gate）。#1 可以此评论关闭。
 
 ---
 

@@ -787,7 +787,7 @@ voyager switch codex
 
 User-visible: one command. Internally: scan → select → compile → launch.
 
-### Phase 7 — VS Code sidebar / Context Composer  *(last)*
+### Phase 7 — VS Code sidebar / Context Composer  *(partially shipped: API + bridge + extension scaffold; Composer webview and one-click switch UI pending — docs/POST-1.0.md)*
 
 Only after Phases 1–4 exist, so the UI is a client of the compiler.
 
@@ -816,8 +816,8 @@ Treat the checkboxes as the implementation contract.
 | [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 *(shipped Phase 4)* |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
 | [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
-| [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11**, proven resume of synthetic JSONL |
-| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 *（Phase 7 shipped：core API + stdio bridge + extension scaffold；Composer webview 为 scaffold 待补）* |
+| [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11** — **stays OPEN**: codex/grok writers shipped (opt-in, lease-gated); claude/dsh unsupported pending probe gates |
+| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 — **partially shipped** (API + bridge + extension scaffold ✅; Composer webview + one-click switch UI pending) |
 
 #1 is the umbrella. Close it when #2–#7, #9 and #11 are done; #8 and
 #10 are post-moat (#10 is now Grok/Codex-shaped, still lease-gated).
