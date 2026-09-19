@@ -35,8 +35,8 @@ PROVIDER_CONFIG = {
         "skill_enabled": True,
         "mcp_enabled": True,
         "has_startup_hook": False,
-        "config_file": ".config/codex/config.toml",
-        "mcp_config": ".config/codex/mcp.json",
+        "config_file": ".codex/config.toml",
+        "mcp_config": ".codex/config.toml",
     },
     "claude": {
         "name": "Claude Code",
@@ -96,20 +96,13 @@ def _agent_installed(name: str, home: Path) -> bool:
 
 
 def _find_executable(name: str) -> Optional[Path]:
-    """Find executable in PATH."""
-    try:
-        which_result = subprocess.run(
-            ["which", name],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if which_result.returncode == 0:
-            exe_path = Path(which_result.stdout.strip())
-            if exe_path.exists():
-                return exe_path
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
+    """Find executable in PATH using platform-independent method."""
+    import shutil
+    which_path = shutil.which(name)
+    if which_path:
+        exe_path = Path(which_path)
+        if exe_path.exists():
+            return exe_path
     return None
 
 
@@ -122,15 +115,15 @@ def _check_mcp_support(provider: str) -> Tuple[bool, str]:
     home = Path.home()
     
     if provider == "codex":
-        mcp_config = home / ".config/codex/mcp.json"
+        mcp_config = home / ".codex/config.toml"
         if mcp_config.exists():
             try:
-                with open(mcp_config, 'r') as f:
-                    config = json.load(f)
-                if "voyager" in config.get("mcpServers", {}):
+                content = mcp_config.read_text(encoding="utf-8")
+                # Check for Voyager in TOML format [mcp_servers.voyager]
+                if "[mcp_servers.voyager]" in content:
                     return True, "Voyager MCP already registered"
                 return True, "Codex supports MCP but Voyager not yet registered"
-            except (json.JSONDecodeError, IOError):
+            except OSError:
                 pass
     
     elif provider == "claude":
@@ -153,10 +146,9 @@ def _check_mcp_support(provider: str) -> Tuple[bool, str]:
 
 
 def _register_codex_mcp(home: Path) -> Tuple[str, Optional[str]]:
-    """Register Voyager MCP in Codex config.toml or mcp.json, creating files if needed."""
+    """Register Voyager MCP in Codex config.toml, creating file if needed."""
     
-    # Try config.toml first (newer format)
-    config_file = home / ".config/codex/config.toml"
+    config_file = home / ".codex/config.toml"
     
     # Create parent directory if it doesn't exist
     config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -169,10 +161,10 @@ def _register_codex_mcp(home: Path) -> Tuple[str, Optional[str]]:
         except OSError:
             pass
     
-    # Check if Voyager already configured
-    if "[[mcp_servers.voyager]]" not in content:
-        # Append Voyager MCP config
-        voyager_entry = "\n[[mcp_servers.voyager]]\ncommand = \"python\"\nargs = [\"-m\", \"voyager.mcp_server\"]\nenv = {}\n"
+    # Check if Voyager already configured (TOML table format)
+    if "[mcp_servers.voyager]" not in content:
+        # Append Voyager MCP config using proper TOML syntax
+        voyager_entry = "\n[mcp_servers.voyager]\ncommand = \"python\"\nargs = [\"-m\", \"voyager.mcp_server\"]\nenv = {}\n"
         
         if content and not content.rstrip().endswith("\n"):
             content += "\n"
@@ -188,15 +180,14 @@ def _register_codex_mcp(home: Path) -> Tuple[str, Optional[str]]:
 
 
 def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
-    """Register Voyager MCP in Claude mcp.json, creating file if needed."""
-    import subprocess
+    """Register Voyager MCP in Claude Code via CLI if available."""
     
     mcp_file = home / ".claude/mcp.json"
     
-    # Try direct CLI approach first (preferred)
+    # Try direct CLI approach first (preferred - creates validated config)
     try:
         result = subprocess.run(
-            ["claude", "mcp", "add", "voyager", "python", "-m", "voyager.mcp_server"],
+            ["claude", "mcp", "add", "voyager", "--", "python", "-m", "voyager.mcp_server"],
             capture_output=True,
             text=True,
             timeout=10
@@ -206,6 +197,7 @@ def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
     
+    # CLI not available or failed - check if we can write directly
     # Create parent directory if it doesn't exist
     mcp_file.parent.mkdir(parents=True, exist_ok=True)
     
@@ -226,10 +218,8 @@ def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
         except (json.JSONDecodeError, IOError):
             pass
     
-    # Add Voyager entry (try different MCP formats based on Claude version)
-    # Format 1: Settings format (newer Claude versions)
-    if "MCP_SERVERS" not in existing_config or not isinstance(existing_config["MCP_SERVERS"], list):
-        existing_config.setdefault("MCP_SERVERS", [])
+    # Add Voyager entry using verified MCP_SERVERS array format
+    existing_config.setdefault("MCP_SERVERS", [])
     
     voyager_entry = "python -m voyager.mcp_server"
     
@@ -246,7 +236,7 @@ def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
         pass
     
     # If we get here, file creation failed - provide manual instructions
-    return "manual_required", f"Use: claude mcp add voyager python -m voyager.mcp_server"
+    return "manual_required", "Use: claude mcp add voyager -- python -m voyager.mcp_server"
 
 
 def _install_codex_bootstrap(target_dir: Path) -> Tuple[str, Optional[str]]:
@@ -264,7 +254,7 @@ Best available option:
 1. Install Voyager Skill (already done by `voyager integrate codex`):
    This instructs Codex to call voyager_startup at session start.
 
-2. Configure MCP connection in ~/.config/codex/config.toml or mcp.json:
+2. Configure MCP connection in ~/.codex/config.toml:
    Copy-paste the output of: voyager integrate status --json | jq '.[] | select(.provider=="codex") | .mcp'
 
 3. In each Codex session, before asking user questions:
@@ -497,7 +487,7 @@ def install_integration(provider: str, force: bool = False,
 
 
 def uninstall_integration(provider: str, home: Optional[Path] = None) -> Dict[str, Any]:
-    """Remove integration for a provider."""
+    """Remove integration for a provider - undo everything Voyager installed."""
     home = home or Path.home()
     result: Dict[str, Any] = {"provider": provider, "status": "removed"}
     
@@ -505,6 +495,7 @@ def uninstall_integration(provider: str, home: Optional[Path] = None) -> Dict[st
         result.update({"status": "error", "warnings": [f"Unknown provider: {provider}"]})
         return result
     
+    # Step 1: Remove Skill file
     skill_root = home / SKILL_AGENT_ROOTS.get(provider, Path(f".{provider}/skills"))
     target = skill_root / SKILL_REL
     
@@ -517,6 +508,93 @@ def uninstall_integration(provider: str, home: Optional[Path] = None) -> Dict[st
     except OSError as e:
         result["skill"] = {"status": "error", "path": str(target), "error": str(e)}
         result["status"] = "error"
+        return result
+    
+    # Step 2: Remove MCP registration where supported
+    has_mcp = PROVIDER_CONFIG[provider]["mcp_enabled"]
+    if has_mcp:
+        mcp_result = {"status": "not-supported"}
+        
+        if provider == "codex":
+            config_file = home / ".codex/config.toml"
+            if config_file.exists():
+                try:
+                    content = config_file.read_text(encoding="utf-8")
+                    if "[mcp_servers.voyager]" in content:
+                        # Remove Voyager entry from TOML (preserve other entries)
+                        lines = content.split("\n")
+                        new_lines = []
+                        skip_until_next_table = False
+                        
+                        for line in lines:
+                            if "[mcp_servers.voyager]" in line:
+                                skip_until_next_table = True
+                                continue
+                            if skip_until_next_table:
+                                # Skip until we hit next table marker or EOF
+                                if line.strip().startswith("["):
+                                    skip_until_next_table = False
+                                    new_lines.append(line)
+                                continue
+                            new_lines.append(line)
+                        
+                        new_content = "\n".join(new_lines)
+                        config_file.write_text(new_content, encoding="utf-8")
+                        mcp_result = {"status": "removed", "path": str(config_file)}
+                    else:
+                        mcp_result = {"status": "not-found", "path": str(config_file)}
+                except OSError as e:
+                    mcp_result = {"status": "error", "path": str(config_file), "error": str(e)}
+            else:
+                mcp_result = {"status": "not-found", "path": str(config_file)}
+            
+            result["mcp"] = mcp_result
+        
+        elif provider == "claude":
+            mcp_file = home / ".claude/mcp.json"
+            if mcp_file.exists():
+                try:
+                    with open(mcp_file, 'r') as f:
+                        config = json.load(f)
+                    
+                    if "MCP_SERVERS" in config and isinstance(config["MCP_SERVERS"], list):
+                        # Remove only Voyager entry (preserve others)
+                        original_count = len(config["MCP_SERVERS"])
+                        config["MCP_SERVERS"] = [
+                            s for s in config["MCP_SERVERS"]
+                            if not (isinstance(s, str) and "voyager" in s.lower())
+                        ]
+                        
+                        # Only write if we actually removed something
+                        if len(config["MCP_SERVERS"]) < original_count:
+                            with open(mcp_file, 'w', encoding='utf-8') as f:
+                                json.dump(config, f, indent=2)
+                            result["mcp"] = {"status": "removed", "path": str(mcp_file)}
+                        else:
+                            result["mcp"] = {"status": "not-found", "path": str(mcp_file)}
+                    else:
+                        result["mcp"] = {"status": "not-found", "path": str(mcp_file)}
+                except (json.JSONDecodeError, IOError) as e:
+                    result["mcp"] = {"status": "error", "path": str(mcp_file), "error": str(e)}
+            else:
+                result["mcp"] = {"status": "not-found", "path": str(mcp_file)}
+    
+    # Step 3: Remove bootstrap files
+    boot_marker = target.parent / f"voyager_{provider}_bootstrap.*"
+    if boot_marker.parent.exists():
+        boot_files = list(boot_marker.parent.glob("voyager_*_bootstrap.*"))
+        removed_bootstraps = []
+        for bf in boot_files:
+            try:
+                bf.unlink()
+                removed_bootstraps.append(str(bf))
+            except OSError:
+                pass
+        
+        if removed_bootstraps:
+            result["bootstrap"] = {"status": "removed", "paths": removed_bootstraps}
+        else:
+            result["bootstrap"] = {"status": "not-found"}
     
     return result
 
@@ -556,15 +634,16 @@ def check_integration_status(providers: Optional[List[str]] = None,
             mcp_support, mcp_msg = _check_mcp_support(provider)
             
             if provider == "codex":
-                mcp_config = home / ".config/codex/mcp.json"
+                mcp_config = home / ".codex/config.toml"
                 if mcp_config.exists():
                     try:
-                        with open(mcp_config, 'r') as f:
-                            config = json.load(f)
-                        if "voyager" in config.get("mcpServers", {}):
+                        content = mcp_config.read_text(encoding="utf-8")
+                        if "[mcp_servers.voyager]" in content:
                             status["mcp"]["registered"] = True
                             status["mcp"]["message"] = "Voyager MCP registered"
-                    except (json.JSONDecodeError, IOError):
+                        else:
+                            status["mcp"]["message"] = "Requires manual registration"
+                    except (OSError, IOError):
                         pass
             
             elif provider == "claude":

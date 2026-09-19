@@ -578,6 +578,10 @@ def cmd_integrate_remove(args) -> int:
         home=Path(args.home) if args.home else None,
     )
     
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0
+    
     print(f"remove: {args.provider}")
     print(f"  status: {result['status']}")
     
@@ -585,6 +589,19 @@ def cmd_integrate_remove(args) -> int:
     print(f"  skill: {skill.get('status')}")
     if skill.get("path"):
         print(f"         {skill['path']}")
+    
+    if "mcp" in result:
+        mcp = result["mcp"]
+        print(f"  mcp: {mcp.get('status')}")
+        if mcp.get("path"):
+            print(f"       {mcp['path']}")
+    
+    if "bootstrap" in result:
+        boot = result["bootstrap"]
+        print(f"  bootstrap: {boot.get('status')}")
+        if boot.get("paths"):
+            for p in boot["paths"]:
+                print(f"             {p}")
     
     return 0 if result["status"] != "error" else 1
 
