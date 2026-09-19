@@ -149,7 +149,7 @@ def startup_continuity(
         if len(threads) > 1:
             # AMBIGUITY: multiple threads for same repo
             thread_info = "\n".join([
-                f"- {t['id']}: {t.get('title', 'Untitled')}"
+                f"- {t['id']}: {dict(t).get('title', 'Untitled')}"
                 for t in sorted(threads, key=lambda x: x["updated_at"] or 0, reverse=True)
             ])
             return StartupContinuityResult({
@@ -190,7 +190,7 @@ def startup_continuity(
                     "continuity_available": True,
                     "thread_id": tid,
                     "repo_root": git_root,
-                    "goal": thread.get("goal") or thread.get("title"),
+                    "goal": dict(thread).get("goal") or dict(thread).get("title"),
                     "previous_provider": _latest_holder_provider(store, tid),
                     "previous_session": _latest_holder_session(store, tid),
                     "current_provider": provider,
@@ -265,7 +265,7 @@ def startup_continuity(
         # - Git HEAD changed
         # - Holder/provider changed
         latest_member_updated = max(
-            (m.get("updated_at") or 0) for m in members
+            (dict(m).get("updated_at") or 0) for m in members
         ) if members else 0
         
         git_head_changed = _git_head_changed_since(
@@ -273,7 +273,7 @@ def startup_continuity(
         )
         
         holder_changed = (lst["held"] and 
-                         lease.get("holder") != _latest_holder_provider(store, tid))
+                         dict(lease).get("holder") != _latest_holder_provider(store, tid))
         
         context_stale = (
             time.time() - last_compiled_at > 300 or  # 5 minute TTL
@@ -308,14 +308,15 @@ def startup_continuity(
             "continuity_available": True,
             "thread_id": tid,
             "repo_root": git_root,
-            "goal": thread.get("goal") or thread.get("title"),
+            "goal": dict(thread).get("goal") or dict(thread).get("title"),
             "previous_provider": _latest_holder_provider(store, tid),
             "previous_session": _latest_holder_session(store, tid),
             "current_provider": provider,
             "current_session": native_session_id,
             "lease_state": {"held": lst["held"], "expired": lst["expired"],
-                           "why": lst["why"], "holder": lease["holder"],
-                           "pid": lease["pid"]},
+                           "why": lst["why"], 
+                           "holder": lease.get("holder") if lease else None,
+                           "pid": lease.get("pid") if lease else None},
             "attach_status": attach_status,
             "context": context,
             "context_stale": context_stale,
@@ -347,7 +348,7 @@ def _find_matching_threads(store: Store, repo_root: str) -> List[Dict[str, Any]]
         return a == b or a.endswith("/" + b) or b.endswith("/" + a)
     
     matching = [t for t in threads 
-                if t.get("repo_root") and _same_repo(t["repo_root"], repo_root)]
+                if dict(t).get("repo_root") and _same_repo(t["repo_root"], repo_root)]
     
     # Sort by updated_at descending (newest first)
     return sorted(matching, key=lambda x: x["updated_at"] or 0, reverse=True)
@@ -359,7 +360,7 @@ def _latest_holder_provider(store: Store, tid: str) -> Optional[str]:
     if not members:
         return None
     newest = max(members, key=lambda m: m["updated_at"] or 0)
-    return newest.get("provider")
+    return dict(newest).get("provider")
 
 
 def _latest_holder_session(store: Store, tid: str) -> Optional[str]:
@@ -368,7 +369,7 @@ def _latest_holder_session(store: Store, tid: str) -> Optional[str]:
     if not members:
         return None
     newest = max(members, key=lambda m: m["updated_at"] or 0)
-    return newest.get("id")
+    return dict(newest).get("id")
 
 
 def _check_auto_attach_safety(store: Store, tid: str, provider: str,
@@ -390,7 +391,7 @@ def _check_auto_attach_safety(store: Store, tid: str, provider: str,
             return False
     
     # Repo must match exactly
-    if thread.get("repo_root"):
+    if dict(thread).get("repo_root"):
         def _same_repo(a: str, b: str) -> bool:
             a = (a or "").replace("\\", "/").rstrip("/").lower()
             b = (b or "").replace("\\", "/").rstrip("/").lower()
