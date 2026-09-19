@@ -75,7 +75,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 188 tests, synthetic fixtures, no provider data
+python -m pytest tests/ -q     # 208 tests, synthetic fixtures, no provider data
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -157,81 +157,76 @@ the candidates and exits. `resume` runs the native agent's own command
 (e.g. `codex resume <id>`); providers without a CLI resume path say so
 explicitly instead of pretending.
 
-## Startup Continuity — honest assessment
+## Startup Continuity — product status
 
-**Core capability**: Zero-Touch startup continuity is **complete in Voyager core**.  
-The `startup_continuity()` function correctly discovers WorkThreads, auto-attaches sessions, and compiles continuation context.
+**Core functionality**: Complete and operational.  
+**Runtime auto-trigger**: Not verified on any provider (STARTUP_ASSISTED).
 
-**Integration reality**: No provider yet achieves verified **zero-touch** at runtime without manual configuration. All integrations are currently:
+The `startup_continuity()` function correctly discovers WorkThreads, auto-attaches sessions, and compiles continuation context. Real-provider testing confirmed: neither Codex nor Claude invokes `voyager_startup` automatically at session start without explicit user instruction.
 
-| Provider | Skill | MCP | Status    | Verification      |
-|----------|-------|-----|-----------|-------------------|
-| Codex    | Y     | A   | ASSISTED  | Pending real test |
-| Claude   | Y     | A   | ASSISTED  | Pending real test |
-| Grok CLI | Y     | N   | BEST_EFF  | Not tested        |
-| DSH      | Y     | N   | BEST_EFF  | Not tested        |
+**Provider classification**:
 
-Legend: **Y** = ready/installed, **A** = available/manual setup needed, **N** = unsupported
+| Provider | Skill | MCP | Status         | Verification      |
+|----------|-------|-----|----------------|-------------------|
+| Codex    | Y     | R   | STARTUP_ASSISTED | Manual startup required |
+| Claude   | Y     | R   | STARTUP_ASSISTED | Manual startup required |
+| Grok CLI | Y     | N   | BEST_EFFORT    | No hook support |
+| DSH      | Y     | N   | BEST_EFFORT    | No hook support |
 
-### What "STARTUP_ASSISTED" means
+Legend: **Y** = installed, **R** = registered, **N** = unsupported, **A** = available/manual setup needed
 
-Provider supports Voyager integration (Skill installed, MCP config available), but requires **manual one-time setup**:
+### What works right now ✅
 
-1. Run `voyager integrate <provider>` to install Skill and generate instructions
-2. Manually configure MCP connection (e.g., `claude mcp add voyager ...`)
-3. Restart the agent for changes to take effect
+- `startup_continuity()` handles discovery, attach, staleness detection
+- Auto-attach works when conditions are safe (exact repo match, single thread)
+- Context compilation reuses existing ranker+budget+continuation pipeline
+- Staleness detection based on source file mtimes
+- Ambiguity protection: explicit error if multiple active threads
+- Auto-registration creates config files for Codex/Claude (`voyager integrate install <provider>`)
 
-After this initial setup, subsequent agent launches will automatically invoke `voyager_startup` via the instruction file/MCP mechanism.
+### How to use today 🔧
 
-### Core features that DO work right now
+Recommended workflows:
 
-- ✅ `startup_continuity()` function handles discovery, attach, staleness detection
-- ✅ Auto-attach works when conditions are safe (exact repo match, single thread)
-- ✅ Context compilation reuses existing ranker+budget+continuation pipeline
-- ✅ Staleness detection based on source file mtimes and session updated_at
-- ✅ Ambiguity protection: returns explicit error if multiple active threads
+1. **Explicit commands**: `voyager switch <agent>` or `voyager continue [id]`
+2. **MCP-assisted**: In agent, call tool `voyager_startup(provider="codex", cwd="$PWD")`
+3. **Skill guidance**: Read `SKILL.md` in agent's skill directory for routing instructions
 
-### What still needs verification
-
-Real-provider dogfood tests are needed to confirm actual zero-touch behavior:
+Manual one-time setup required:
 
 ```sh
-# Test sequence: Claude → Codex in same repo
-1. Work on something in Claude, let it index naturally
-2. Close Claude
-3. Start Codex directly (no `voyager switch`)
-4. Observe Codex calling `voyager_startup` tool automatically
-5. Verify new Codex session appears in original WorkThread
-6. Check if Codex can read and continue from prior context
+# Install integration
+voyager integrate codex    # writes ~/.codex/config.toml automatically
+voyager integrate claude   # writes ~/.claude/mcp.json via manual config
+
+# Then start agents normally - they can query Voyager via MCP tools
+codex
+claude-code
 ```
 
-Similar sequences needed for Claude→Codex, Codex→Claude, etc.
-
-Run `voyager integrate status` to check your local installation state.
 See [docs/DOGFOOD.md](docs/DOGFOOD.md) for detailed verification procedure.
 
-## MCP — native tools inside your agents
+## Integration — teach agents about Voyager
 
-Voyager ships an MCP server, so agents can query the unified index with
-native tools instead of running commands:
+Install the Skill file into known agent directories:
 
 ```sh
-pip install -e ".[mcp]"     # or: pip install "voyager[mcp]"
-voyager-mcp                 # same as: python -m voyager.mcp_server
+voyager skill install      # installs SKILL.md at ~/.{agent}/skills/voyager/SKILL.md
 ```
 
-```json
-{ "mcpServers": { "voyager": { "command": "python", "args": ["-m", "voyager.mcp_server"] } } }
+The Skill instructs agents when to use Voyager commands and when NOT to (never export full sessions).
+
+To register Voyager as an MCP server so agents can query it with native tools:
+
+```sh
+voyager integrate codex    # writes ~/.codex/config.toml automatically
+voyager integrate claude   # writes ~/.claude/mcp.json via CLI or manual config
+voyager integrate remove <provider>  # undo all three steps (skill + mcp + bootstrap)
 ```
 
-Tools: `voyager_brief`, `voyager_search`, `voyager_list`, `voyager_show`,
-`voyager_handoff` / `voyager_merge` (write context package/bundle),
-`voyager_thread_list/show/attach/close` (WorkThreads),
-`voyager_current` (discover continuity), `voyager_context`, `voyager_continue`,
-`voyager_switch`, `voyager_startup` (zero-touch startup with auto-discovery).
-Codex (`config.toml`), Claude Code (`claude mcp add`) and Cursor (`mcp.json`)
-are the tested hosts. Without the extra the server prints the install line above
-instead of a bare `ModuleNotFoundError` — the rest of the CLI never needs `mcp`.
+These commands now **auto-create** config files if they don't exist - no manual setup needed for first-time installation. Re-running is idempotent.
+
+For verification of actual zero-touch startup behavior, see [docs/DOGFOOD.md](docs/DOGFOOD.md).
 
 ## Supported platforms
 
@@ -267,7 +262,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 188 tests: adapters, store, continuity, budget, leases, switch, skill, API, MCP
+python -m pytest tests/ -q                # 208 tests: adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration
 python scripts/run_tests_core_only.py     # same suite with no optional deps (skips extras)
 ```
 

@@ -68,7 +68,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # 
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # 188 个测试，全合成 fixture，不碰你的真实会话
+python -m pytest tests/ -q     # 208 个测试，全合成 fixture，不碰你的真实会话
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -141,20 +141,48 @@ Voyager 在同一个仓库里切换 Agent 时会自动接续工作：
 4. **Continuation bundle 已编译**（有 `--goal` 则条件压缩，有 `--budget` 则打包到预算内）
 5. **上下文被立即加载** —— 不需要重新解释你正在做什么
 
-即使不运行任何 Voyager 命令也会发生：只要你启动另一个 Agent（Codex / Claude Code / Grok），而该 Agent 所在的 repo 已经有 Voyager 的 active WorkThread。Agent 的 MCP 工具 `voyager_startup` 会发现自己并加载上下文。
+**产品状态**（最终测试结论，2026-09-20）：
 
-手动命令（`voyager switch`, `handoff`, `thread attach`）仍然是显式覆盖和恢复工具，但典型跨 Agent 工作流不再需要它们。
+**Core functionality**: Complete and operational.  
+**Runtime auto-trigger**: Not verified on any provider (STARTUP_ASSISTED).
 
-**启动能力矩阵**：
+Real-provider testing confirmed: neither Codex nor Claude invokes `voyager_startup` automatically at session start without explicit user instruction.
 
-| Provider | Skill | MCP | 自动启动 | 已验证 |
-|---|---|---|---|---|
-| Codex | ✅ | ✅ | ✅ | yes |
-| Claude Code | ✅ | ✅ | ✅ | yes |
-| Grok CLI | ✅ | ❌ | best-effort | yes |
-| DSH | ✅ | ❌ | best-effort | unverified |
+**推荐 workflow**（按自动化程度排序）：
 
-运行 `voyager integrate status` 检查本地安装状态。
+1. **Explicit commands**: `voyager switch <agent>` or `voyager continue [id]`
+2. **MCP-assisted**: In agent, call tool `voyager_startup(provider="codex", cwd="$PWD")`
+3. **Skill guidance**: Read `SKILL.md` in agent's skill directory
+
+**Provider classification**（基于真实测试数据）：
+
+| Provider | Skill | MCP | Status         | Verification      |
+|----------|-------|-----|----------------|-------------------|
+| Codex    | Y     | R   | STARTUP_ASSISTED | Manual startup required |
+| Claude   | Y     | R   | STARTUP_ASSISTED | Manual startup required |
+| Grok CLI | Y     | N   | BEST_EFFORT    | No hook support |
+| DSH      | Y     | N   | BEST_EFFORT    | No hook support |
+
+Legend: **Y** = ready/installed, **R** = ready/auto-configured, **N** = unsupported
+
+### What "STARTUP_ASSISTED" means
+
+Provider supports Voyager integration (Skill installed, MCP config available), but requires **manual one-time setup**:
+
+1. Run `voyager integrate <provider>` to install Skill and generate instructions
+2. Manually configure MCP connection (e.g., `claude mcp add voyager ...`)
+3. Restart the agent for changes to take effect
+
+After this initial setup, subsequent agent launches will require explicit invocation of `voyager_startup` via MCP tool call or manual prompt.
+
+**Manual startup required**: The pattern that has been verified across both Codex and Claude is that users must either:
+- Explicitly type `voyager switch codex` before launching
+- Use MCP tool calls: `voyager_startup(provider="codex", cwd="$PWD")`
+- Follow Skill guidance by reading and pasting context manually
+
+There is no provider-specific startup hook that triggers `voyager_startup` automatically when the agent starts.
+
+运行 `voyager integrate status` 检查本地安装状态。See [docs/DOGFOOD.md](docs/DOGFOOD.md) for detailed verification procedure.
 
 ## MCP —— 在你的 Agent 里原生调用
 
@@ -212,7 +240,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 188 个测试：适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
+python -m pytest tests/ -q                # 208 个测试：适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
 python scripts/run_tests_core_only.py     # 模拟"只装核心依赖"，可选依赖相关测试自动跳过
 ```
 

@@ -141,10 +141,10 @@ Mark each item as ✅ or ❌ after running:
 
 | Provider | Index Ingest | Native Resume | Startup Discovery | Skill-triggered | MCP-triggered | Auto Attach | Direct Auto Verified? | Transcript Writer | Final Classification |
 |----------|--------------|---------------|-------------------|-----------------|---------------|-------------|----------------------|-------------------|---------------------|
-| **Codex** | ✅ Via adapter | ✅ `codex resume` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **Verified automatic** (via switch/continue) |
-| **Claude Code** | ✅ Via adapter | ✅ `claude --resume` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ⏳ Not yet implemented (timed out probe) | **Verified automatic** (via switch/continue) |
-| **Grok** | ✅ Via adapter | ✅ `grok -r` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **Verified automatic** (via switch/continue) |
-| **DSH** | ✅ Via adapter | ✅ `dsh --resume` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **Best-effort** (CLI available, real env not verified) |
+| **Codex** | ✅ Via adapter | ✅ `codex resume` | ⚠️ Tested → STARTUP_ASSISTED | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **No auto at startup** | ✅ Implemented | **STARTUP_ASSISTED** (manual required) |
+| **Claude Code** | ✅ Via adapter | ✅ `claude --resume` | ⚠️ Tested → STARTUP_ASSISTED | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **No auto at startup** | ⏳ Not yet implemented | **STARTUP_ASSISTED** (manual required) |
+| **Grok** | ✅ Via adapter | ✅ `grok -r` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **BEST_EFFORT** (no hook support) |
+| **DSH** | ✅ Via adapter | ✅ `dsh --resume` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **BEST_EFFORT** (CLI available, real env not verified) |
 | **ZCode** | ✅ Via SQLite | ❌ Desktop only | ❌ No CLI | ❌ No SKILL.md | ❌ No tool | ❌ Manual attach | **No** | ❌ N/A | **Explicit-only** (manual paste required) |
 | **Cursor** | ✅ Via SQLite | ❌ IDE only | ❌ No CLI | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** |
 | **Kiro** | ✅ Via JSON | ❌ IDE only | ❌ No CLI | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** |
@@ -179,9 +179,11 @@ The **automated tests** guarantee that all core logic is correct. This manual pr
 
 ## Summary
 
-- **Automated core verified**: 188 pytest tests pass (all logic paths covered)
+- **Automated core verified**: 208 pytest tests pass (all logic paths covered)
 - **Real-provider verified**: Codex/Claude/Grok via `voyager switch` + manual paste
 - **Provider-limited**: ZCode desktop, Cursor/Kiro IDE-only
 - **Not verified in this environment**: True zero-touch auto-startup without any manual intervention
 
-The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`). True invisible continuity (agent discovers and attaches itself without any user command) remains a future enhancement dependent on agent platform capabilities.
+The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`). Runtime auto-trigger (`voyager_startup` called automatically at agent startup) has been tested on both Codex and Claude and confirmed as NOT occurring — classification: **STARTUP_ASSISTED**.
+
+True invisible continuity (agent discovers and attaches itself without any user command) remains a future enhancement dependent on agent platform capabilities.

@@ -108,8 +108,14 @@ All notable changes to Voyager are documented here. Format loosely follows
   handoff, CLI and MCP tests. `.github/workflows/test.yml` runs them on
   Python 3.10–3.13 (Linux) and 3.10/3.13 (Windows), and a core-only job
   proves the CLI works with no optional dependencies. README badges added.
+  **Real-provider dogfood tests**: Codex/Claude startup discovery tested
+  via `voyager-zero-touch-test/` — confirmed neither invokes `voyager_startup`
+  automatically at session start → classification: STARTUP_ASSISTED.
 - `scripts/run_tests_core_only.py` — runs the suite with `mcp` and
   `zstandard` blocked, i.e. exactly what `pip install voyager` gives you.
+- **Test count**: Suite grew from 188 → 208 tests (added integration tests for
+  MCP registration + idempotent removal). Core-only mode verified: all optional
+  dependencies properly gated.
 - CI failures are now self-describing: the test steps write `pytest.log` and,
   on failure, `scripts/ci_report_failures.py` emits the failing tests as GitHub
   **annotations** (`::error title=pytest::`) — readable from the checks API and
