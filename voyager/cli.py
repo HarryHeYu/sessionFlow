@@ -445,6 +445,22 @@ def _render_budgeted(text: str, args, target: Optional[str] = None) -> str:
     return packed
 
 
+def cmd_skill(args) -> int:
+    """Phase 5: install the voyager routing skill into known agents."""
+    from .skill import install_skills, skill_source
+    results = install_skills(agent=args.agent, force=args.force,
+                             home=Path(args.home) if args.home else None)
+    print(f"skill source: {skill_source()}")
+    for r in results:
+        line = f"  {r['agent']:<8} {r['status']}"
+        if r.get("path"):
+            line += f"  ({r['path']})"
+        if r.get("backup"):
+            line += f"  backup={r['backup']}"
+        print(line)
+    return 0
+
+
 def cmd_stats(args) -> int:
     store = Store(args.db)
     stats = store.stats()
@@ -1038,6 +1054,17 @@ def main(argv=None) -> int:
     sp.add_argument("--repo", help="filter by repo/cwd substring")
     sp.add_argument("--limit", type=int, default=15)
     sp.set_defaults(func=cmd_brief)
+
+    sp = sub.add_parser("skill", help="install the voyager skill into known agents",
+                        parents=[common])
+    tsp = sp.add_subparsers(dest="skill_cmd", required=True)
+    isp = tsp.add_parser("install", help="copy SKILL.md into agent skill dirs")
+    isp.add_argument("--agent", help="single agent (codex|claude|grok); "
+                                     "unknown agents get a manual path")
+    isp.add_argument("--force", action="store_true",
+                     help="overwrite a user-modified SKILL.md (backs it up first)")
+    isp.add_argument("--home", help="override HOME for skill roots (testing)")
+    isp.set_defaults(func=cmd_skill)
 
     sp = sub.add_parser("stats", help="index statistics", parents=[common])
     sp.set_defaults(func=cmd_stats)

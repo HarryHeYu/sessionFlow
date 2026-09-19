@@ -4,7 +4,7 @@
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
 **Phase 1b shipped (`5e8271c`); Phase 2 landed (2a WorkThread `b580001`/`934dfd5`; 2b lease `c41f99b`; two #3 scope items deferred — see Deferred). **
-**Phase 3 shipped (`d931b02`); Phase 4 Context Budget shipped (`<budget-commit>`). Next: Phase 5 Skill (#6), then switch (#7) / VS Code sidebar (#8).**
+**Phase 3 shipped (`d931b02`); Phase 4 Context Budget shipped (`96fc752`); Phase 5 Voyager Skill shipped. Next: switch (#7) / VS Code sidebar (#8).**
 Phases 6–7 remain planning.
 
 **Phase 2 close-out audit (2026-09-18, checked against the code):**

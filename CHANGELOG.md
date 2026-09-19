@@ -5,6 +5,17 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Voyager Skill (roadmap Phase 5, issue #6)** — `voyager skill install`
+  copies a routing SKILL.md into the skill dirs of known agents (Codex
+  `~/.codex/skills`, Claude Code `~/.claude/skills`, Grok `~/.grok/skills`).
+  The skill is pure natural-language routing (when to brief/search/show/
+  continue/handoff/merge, and explicit NEVERs: no full-export dumps, no
+  provider session writes, no lease bypass). First install succeeds,
+  repeats are idempotent, user-modified targets are refused without
+  --force (backed up and overwritten with it), not-installed agents are
+  skipped without fabricating directories, unknown agents get a manual
+  path. Provider session dirs are never touched (test-asserted).
+
 - **Context Budget (roadmap Phase 4, issue #5)** — `--budget
   compact|balanced|full|auto|Nk|<int>` on `handoff`, `merge` and
   `continue`. Ranking (Phase 3) runs first, then deterministic packing

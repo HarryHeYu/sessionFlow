@@ -6,7 +6,7 @@
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
 **Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；两项 #3 范围内容显式延期——见 Deferred）。**
-**Phase 3 shipped（`d931b02`）；Phase 4 Context Budget 已落地。下一步：Phase 5 Skill（#6），随后 switch（#7）/ VS Code sidebar（#8）。**
+**Phase 3 shipped（`d931b02`）；Phase 4 Context Budget 已落地；Phase 5 Voyager Skill 已落地。下一步：switch（#7）/ VS Code sidebar（#8）。**
 Phase 6–7 仍是规划。
 
 **Phase 2 close-out audit（2026-09-18，对照代码逐条核实）：**

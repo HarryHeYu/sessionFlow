@@ -48,6 +48,9 @@ voyager-mcp = "voyager.mcp_server:main"
 [tool.setuptools]
 packages = ["voyager", "voyager.adapters"]
 
+[tool.setuptools.package-data]
+voyager = ["SKILL.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
