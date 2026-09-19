@@ -526,16 +526,3 @@ UNSUPPORTED_REASON_SHORT = {
     "antigravity": "protobuf format",
     "kiro": "no native session CLI",
 }
-
-
-# ---------------------------------------------------------------------------
-# Entry point wrappers for legacy CLI/MCP/Skill code — migrate them
-# to call handoff_thread() directly instead of duplicating logic.
-# TODO: delete cmd_switch, cmd_continue, MCP voyager_switch when all
-# callers use handoff_thread() result dict uniformly.
-# ---------------------------------------------------------------------------
-def _legacy_cli_switch(store, thread, target, args) -> Dict[str, Any]:
-    """Legacy wrapper — delete once cmd_switch fully migrated."""
-    # This exists so we can incrementally replace cli.py without
-    # refactoring the entire file at once. Current status: NOT DONE.
-    raise NotImplementedError("migrate cmd_switch to call handoff_thread()")

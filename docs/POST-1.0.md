@@ -62,7 +62,7 @@ only). Still unsupported, each needs its own repeatable gate:
 
 - more adapters (OpenCode, Goose, Aider, Continue — survey in
   docs/RECON.md §0 lists them as not-installed/unverified)
-- MCP: `voyager_continue` / `voyager_switch` / `voyager_context` / 
-  `voyager_thread_*` tools are all shipped and available; see `voyager mcp` for usage
+- **MCP**: `voyager_continue` / `voyager_switch` / `voyager_context` / 
+  `voyager_thread_list/show/attach/close` are all shipped and available
 - real-world dogfood pass: run the full flow against multi-week, multi-agent
   history and file robustness issues as they surface

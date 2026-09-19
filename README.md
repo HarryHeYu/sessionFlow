@@ -75,7 +75,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 163 tests, synthetic fixtures, no provider data
+python -m pytest tests/ -q     # 188 tests, synthetic fixtures, no provider data
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -191,11 +191,10 @@ voyager-mcp                 # same as: python -m voyager.mcp_server
 { "mcpServers": { "voyager": { "command": "python", "args": ["-m", "voyager.mcp_server"] } } }
 ```
 
-Tools: `voyager_brief` (what are all my agents doing?), `voyager_search`,
-`voyager_list`, `voyager_show`, `voyager_handoff` / `voyager_merge`
-(write a context package / continuation bundle for another agent),
-`voyager_thread_list/show/attach/close` (WorkThreads)
-for another agent). Codex (`config.toml`), Claude Code (`claude mcp add`)
+Tools: `voyager_brief`, `voyager_search`, `voyager_list`, `voyager_show`,
+`voyager_handoff` / `voyager_merge` (write context package/bundle),
+`voyager_thread_list/show/attach/close` (WorkThreads),
+`voyager_current` (discover continuity), `voyager_context`, `voyager_continue`, `voyager_switch`. Codex (`config.toml`), Claude Code (`claude mcp add`)
 and Cursor (`mcp.json`) are the tested hosts. Without the extra the server
 prints the install line above instead of a bare `ModuleNotFoundError` — the
 rest of the CLI never needs `mcp`.
@@ -234,7 +233,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 163 tests: adapters, store, continuity, budget, leases, switch, skill, API, MCP
+python -m pytest tests/ -q                # 188 tests: adapters, store, continuity, budget, leases, switch, skill, API, MCP
 python scripts/run_tests_core_only.py     # same suite with no optional deps (skips extras)
 ```
 
