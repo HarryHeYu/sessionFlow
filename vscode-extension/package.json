@@ -1,0 +1,44 @@
+{
+  "name": "voyager-sidebar",
+  "displayName": "Voyager — Cross-Agent Continuity",
+  "description": "Browse WorkThreads and agent sessions indexed by voyager, preview continuation bundles with token estimates, and launch a target agent. Scaffold client for the voyager local API.",
+  "version": "0.1.0",
+  "publisher": "HarryHeYu",
+  "license": "MIT",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:voyager.overview"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "voyager.overview", "title": "Voyager: Show Overview" },
+      { "command": "voyager.bundlePreview", "title": "Voyager: Preview Continuation Bundle" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "voyager", "title": "Voyager", "icon": "media/voyager.svg" }
+      ]
+    },
+    "views": {
+      "voyager": [
+        { "id": "voyager.threads", "name": "WorkThreads" }
+      ]
+    },
+    "configuration": {
+      "title": "Voyager",
+      "properties": {
+        "voyager.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python interpreter that has voyager installed."
+        },
+        "voyager.repoPath": {
+          "type": "string",
+          "default": "",
+          "description": "Workspace path used to resolve the active WorkThread."
+        }
+      }
+    }
+  },
+  "scripts": { "package": "vsce package" }
+}

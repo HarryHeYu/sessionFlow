@@ -445,6 +445,13 @@ def _render_budgeted(text: str, args, target: Optional[str] = None) -> str:
     return packed
 
 
+def cmd_api(args) -> int:
+    """Phase 7: local stdio JSON-lines API (the VS Code sidebar's client)."""
+    from .api import serve
+    serve(Path(args.db) if getattr(args, "db", None) else None)
+    return 0
+
+
 def cmd_skill(args) -> int:
     """Phase 5: install the voyager routing skill into known agents."""
     from .skill import install_skills, skill_source
@@ -1257,6 +1264,10 @@ def main(argv=None) -> int:
                      help="overwrite a user-modified SKILL.md (backs it up first)")
     isp.add_argument("--home", help="override HOME for skill roots (testing)")
     isp.set_defaults(func=cmd_skill)
+
+    sp = sub.add_parser("api", help="local stdio JSON-lines API (VS Code client)",
+                        parents=[common])
+    sp.set_defaults(func=cmd_api)
 
     sp = sub.add_parser("stats", help="index statistics", parents=[common])
     sp.set_defaults(func=cmd_stats)

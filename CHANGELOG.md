@@ -5,6 +5,16 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Local API + VS Code extension scaffold (roadmap Phase 7, issue #8)** —
+  `voyager/api.py` is a thin JSON-able client surface over the same core
+  (overview / thread_detail / sessions / bundle_preview — read-only, no
+  direct SQLite in callers), served as stdio JSON-lines via
+  `voyager api serve`. Contract tests include a real subprocess
+  round-trip. `vscode-extension/` is a scaffold client: overview output
+  channel, WorkThreads tree view, and a bundle-preview flow that renders
+  the bundle with its token estimate; the Context Composer webview is
+  pending. Launch stays in the CLI on purpose (lease-aware UX later).
+
 - **`voyager switch <agent>` (roadmap Phase 6, issue #7)** — one command to
   continue the active WorkThread in another agent. Flow: incremental scan →
   thread resolution (--thread > --repo > cwd) → D13 lease (live foreign
