@@ -733,7 +733,40 @@ def cmd_switch(args) -> int:
                       file=sys.stderr)
                 return 1
 
-        # -- cross-provider: compile Continuation Bundle -------------------
+        # -- cross-provider: transcript (opt-in #10) or bundle (default) ---
+        if getattr(args, "mode", "bundle") == "transcript":
+            from .writers import write_transcript
+            try:
+                w = write_transcript(store, t["id"], target,
+                                     home=Path(os.environ.get(
+                                         "VOYAGER_HOME_OVERRIDE",
+                                         str(Path.home()))))
+            except RuntimeError as e:
+                # unsupported provider / stale lease: named error, never a
+                # silent fallback to a dangerous write
+                store.thread_lease_release(t["id"], acquired,
+                                           reason="transcript-unsupported")
+                print("error: {0}; lease released".format(e), file=sys.stderr)
+                return 1
+            print("transcript written: {0} (new session id {1})".format(
+                w["path"], w["native_session_id"]))
+            argv = w["resume_cmd"].split()
+            print("$ " + " ".join(argv))
+            if getattr(args, "no_launch", False):
+                print("transplant ready; the resumed session is already a "
+                      "thread member (native id recorded on the lease)")
+                return 0
+            try:
+                return subprocess.call(argv)
+            except KeyboardInterrupt:
+                return 130
+            except OSError as e:
+                store.thread_lease_release(t["id"], acquired,
+                                           reason="launch-failed")
+                print("launch failed ({0}); lease released".format(e),
+                      file=sys.stderr)
+                return 1
+
         bundle = build_continuation_bundle(store, members,
                                            goal=getattr(args, "goal", None))
         budget = getattr(args, "budget", None)
@@ -1195,6 +1228,10 @@ def main(argv=None) -> int:
                     help="force a continuation bundle even for same-provider members")
     sp.add_argument("--steal", action="store_true",
                     help="take over a LIVE lease held by another provider (logged)")
+    sp.add_argument("--mode", choices=["bundle", "transcript"], default="bundle",
+                    help="continuation mode: bundle (default) or opt-in "
+                         "transcript transplant (codex/grok only, writes a NEW "
+                         "native session id under the lease)")
     sp.add_argument("--no-launch", action="store_true",
                     help="print what would be launched instead of launching")
     sp.add_argument("--output", "-o",
