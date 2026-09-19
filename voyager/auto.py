@@ -237,8 +237,9 @@ def get_continuation_context(store: Optional[Store] = None,
     own_store = store is None
     store = store or Store(db)
     try:
-        if sync:
-            # D12: incremental scan before compiling (never --force)
+        if sync and not os.environ.get("VOYAGER_NO_SYNC"):
+            # D12: incremental scan before compiling (never --force);
+            # tests set VOYAGER_NO_SYNC to skip real-adapter scanning
             from .cli import run_scan
             run_scan(store, force=False, quiet=True)
 

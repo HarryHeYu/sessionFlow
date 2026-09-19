@@ -29,6 +29,21 @@ provenance-bound.
 | with a specific objective | add `--goal "..."` to handoff / merge / continue |
 | large context, keep it small | add `--budget compact` (or `balanced` / `full` / `Nk`) |
 
+## Startup protocol (automatic continuity)
+
+When starting work in a repository, BEFORE responding to the user:
+
+1. Run `voyager status` (or `voyager status --json`) — if it reports
+   READY or PENDING_ATTACH, an active WorkThread exists for this repo.
+2. If a continuation bundle is available (`voyager_context` MCP tool or
+   `voyager continue --no-launch`), read it — it contains the goal,
+   decisions, failures and next steps from previous sessions.
+3. If the tool reports your session id is unattached and the repo
+   matches, attach yourself: `voyager thread attach <thread-id> <your-id>`
+   (or it may have been auto-attached already — check `voyager status`).
+4. Do NOT create a parallel WorkThread for the same repo; use the
+   existing one.
+
 ## Rules
 
 1. Prefer `voyager brief` / `voyager search` over `voyager list` dumps —
@@ -45,6 +60,15 @@ provenance-bound.
    do not inline more than the ranked-evidence section.
 6. Index freshness is handled automatically (`voyager watch` or the
    built-in pre-compile scan) — do not run `scan --force` "to be safe".
+
+## Cross-agent handoff
+
+When the user says "switch to Codex" / "交给 Codex" / "hand this to Claude":
+
+- `voyager switch <agent>` — resolves the active WorkThread, handles the
+  lease, compiles the continuation and launches the target.
+- Add `--goal "..."` and `--budget compact` as needed.
+- Do NOT explain handoff parameters to the user — just run the switch.
 
 ## Notes
 

@@ -331,6 +331,79 @@ def voyager_thread_close(thread_id: str) -> str:
     return f"thread {t['id']} closed (sessions untouched)"
 
 
+@mcp.tool()
+def voyager_current(cwd: str = "", provider: str = "",
+                    native_session_id: str = "") -> str:
+    """Which WorkThread covers the current repo? What's the lease, holder,
+    pending attach and recommended action? Call this at session start."""
+    from .auto import discover_continuity
+    store = Store()
+    disc = discover_continuity(store, cwd=cwd or None, provider=provider or None,
+                               native_session_id=native_session_id or None)
+    store.close()
+    if not disc["continuity_available"]:
+        return "no active WorkThread for this repo"
+    return json.dumps(disc, ensure_ascii=False, indent=2, default=str)
+
+
+@mcp.tool()
+def voyager_context(cwd: str = "", provider: str = "",
+                    native_session_id: str = "", goal: str = "",
+                    budget: str = "") -> str:
+    """Compile a ready-to-use continuation context (goal, state, decisions,
+    failures, next steps) for the active WorkThread. Returns the bundle
+    text — read it and continue the work."""
+    from .auto import get_continuation_context
+    store = Store()
+    res = get_continuation_context(store=store, cwd=cwd or None,
+                                   provider=provider or None,
+                                   native_session_id=native_session_id or None,
+                                   goal=goal or None, budget=budget or None)
+    if not res["continuity_available"]:
+        return "no active WorkThread — nothing to continue"
+    return res["context"]
+
+
+@mcp.tool()
+def voyager_continue(cwd: str = "", goal: str = "", budget: str = "") -> str:
+    """Discover the active WorkThread for the current repo, compile a
+    continuation bundle, and return it. Same as voyager_context but with
+    automatic session discovery — no manual session ids needed."""
+    return voyager_context(cwd=cwd, provider="", native_session_id="",
+                           goal=goal, budget=budget)
+
+
+@mcp.tool()
+def voyager_switch(target: str, cwd: str = "", goal: str = "",
+                   budget: str = "", steal: bool = False) -> str:
+    """Switch the active WorkThread to another agent. Compiles the
+    continuation bundle (or native resume if same provider). Returns
+    instructions for the target agent."""
+    from .auto import get_continuation_context, discover_continuity
+    from .budget import parse_budget, auto_budget
+    store = Store()
+    disc = discover_continuity(store, cwd=cwd or None)
+    if not disc["continuity_available"]:
+        store.close()
+        return "no active WorkThread — nothing to switch"
+    tid = disc["active_thread"]["id"]
+    members = store.thread_members(tid)
+    store.close()
+    if target in ("codex", "claude", "grok") and any(
+            m["provider"] == target and m["can_resume"] for m in members):
+        return ("same provider ({0}) — use native resume instead: "
+                "`voyager continue --launch`".format(target))
+    bundle_res = get_continuation_context(store=store, cwd=cwd or None,
+                                          goal=goal or None,
+                                          budget=budget or None,
+                                          target=target)
+    if "error" in bundle_res:
+        return bundle_res["error"]
+    return ("Continuation bundle ready ({0} tokens estimated). "
+            "Target agent ({1}) should read the bundle and continue.".format(
+                bundle_res["estimated_tokens"], target))
+
+
 def main() -> None:
     if not MCP_AVAILABLE:
         raise SystemExit(_MISSING_MCP)
