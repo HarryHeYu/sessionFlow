@@ -379,29 +379,51 @@ def voyager_switch(target: str, cwd: str = "", goal: str = "",
     """Switch the active WorkThread to another agent. Compiles the
     continuation bundle (or native resume if same provider). Returns
     instructions for the target agent."""
-    from .auto import get_continuation_context, discover_continuity
-    from .budget import parse_budget, auto_budget
+    from .auto import discover_continuity
+    from .continuity import handoff_thread
     store = Store()
     disc = discover_continuity(store, cwd=cwd or None)
     if not disc["continuity_available"]:
         store.close()
         return "no active WorkThread — nothing to switch"
     tid = disc["active_thread"]["id"]
-    members = store.thread_members(tid)
+    t = store.thread_get(tid)
+    
+    res = handoff_thread(
+        store=store,
+        thread=t,
+        target=target,
+        goal=goal or None,
+        budget=budget or None,
+        launch=False,  # MCP returns text, doesn't launch
+        mode="bundle",
+        steal=steal,
+        no_launch=True,
+    )
     store.close()
-    if target in ("codex", "claude", "grok") and any(
-            m["provider"] == target and m["can_resume"] for m in members):
-        return ("same provider ({0}) — use native resume instead: "
-                "`voyager continue --launch`".format(target))
-    bundle_res = get_continuation_context(store=store, cwd=cwd or None,
-                                          goal=goal or None,
-                                          budget=budget or None,
-                                          target=target)
-    if "error" in bundle_res:
-        return bundle_res["error"]
-    return ("Continuation bundle ready ({0} tokens estimated). "
-            "Target agent ({1}) should read the bundle and continue.".format(
-                bundle_res["estimated_tokens"], target))
+    
+    if res["action"] == "refused":
+        return "refused: {0}".format(res.get("error", "unknown"))
+    if res["warnings"]:
+        warnings = "\n".join(["warning: {0}".format(w) for w in res["warnings"]])
+    else:
+        warnings = ""
+    
+    if res["action"] == "native-resume":
+        return ("same provider ({0}) — native resume ready:\n\n{1}".format(
+            target, "\n".join(res["argv"]))) + ("\n\n" + warnings if warnings else "")
+    elif res["action"] == "transcript":
+        return ("transplant written; session id {0}.\n\n{1}".format(
+            res.get("native_session_id", "unknown"), warnings))
+    elif res["action"] == "bundle":
+        return ("Continuation bundle ready: {0}\n\n{1}{2} Target agent ({3}) should "
+                "read the bundle and continue.".format(
+                    res["bundle_path"],
+                    warnings,
+                    "\nestimated_tokens is available in the bundle," if "context" in locals() else "",
+                    target))
+    else:
+        return "unexpected action: {0}".format(res["action"])
 
 
 def main() -> None:

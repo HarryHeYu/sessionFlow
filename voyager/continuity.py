@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -388,3 +389,153 @@ def bundle_command(target: str, bundle_path: Path) -> Optional[List[str]]:
         exe,
         f"{CONTINUATION_INSTRUCTION}\n\nContinuation bundle: {bundle_path.resolve()}",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Unified handoff orchestration (Phase G) — the ONE function all entry
+# points (CLI switch/continue, MCP, Skill) call for thread-level continuity.
+# ---------------------------------------------------------------------------
+
+def handoff_thread(
+    store: Store,
+    thread: Any,
+    target: str,
+    goal: Optional[str] = None,
+    budget: Optional[str] = None,
+    launch: bool = True,
+    mode: str = "bundle",
+    steal: bool = False,
+    output: Optional[Path] = None,
+    no_launch: bool = False,
+) -> Dict[str, Any]:
+    """ONE unified orchestration for handing a WorkThread to an agent.
+
+    Executes: lease (D13) → same-provider native resume (D7) XOR
+    Continuation Bundle (D11) XOR transcript (#10) → git dirty warning →
+    launch. Returns a result dict; the caller decides how to present it.
+
+    Never raises for expected paths — errors are in the result dict.
+    """
+    from .budget import apply_budget, auto_budget, parse_budget
+
+    tid = thread["id"]
+    res: Dict[str, Any] = {
+        "action": None, "argv": None, "thread_id": tid,
+        "target": target, "lease_token": None, "lease_holder": None,
+        "bundle_path": None, "pending_recorded": False,
+        "warnings": [], "error": None, "exit_code": None,
+    }
+
+    # -- lease (D13) -------------------------------------------------------
+    ok, lease = store.thread_lease_acquire(
+        tid, target, steal=steal)
+    if not ok:
+        res["action"] = "refused"
+        res["error"] = ("thread {0} is leased to {1} pid={2}, "
+                        "heartbeat {3:.0f}s ago".format(
+                            tid, lease["holder"], lease["pid"],
+                            time.time() - (lease["heartbeat_at"] or 0)))
+        res["lease_holder"] = lease["holder"]
+        res["warnings"].append(
+            "pass --steal or run `voyager thread unlock {0} --steal`".format(tid))
+        return res
+    res["lease_token"] = lease["lease_token"]
+    res["lease_holder"] = target
+
+    members = store.thread_members(tid)
+    if not members:
+        store.thread_lease_release(tid, lease["lease_token"], reason="empty")
+        res["action"] = "refused"
+        res["error"] = "thread has no live member sessions"
+        return res
+
+    # -- git dirty warning (never stash/reset) -----------------------------
+    repo_hint = thread["repo_root"] or (members[0]["cwd"] if members else None)
+    snap = get_git_snapshot(repo_hint)
+    if snap["is_git"] and snap["dirty_count"]:
+        res["warnings"].append(
+            "working tree has {0} uncommitted change(s) in {1}".format(
+                snap["dirty_count"], repo_hint))
+
+    # -- same-provider native resume (D7 priority) -------------------------
+    resumable = [m for m in members
+                 if m["provider"] == target and m["can_resume"] and m["resume_cmd"]]
+    if resumable and mode == "bundle":
+        cand = max(resumable, key=lambda x: x["updated_at"] or 0)
+        _, lease = store.thread_lease_acquire(
+            tid, target, native_session_id=cand["native_id"],
+            pid=os.getpid(), steal=True)   # transfer rotates the token
+        res["lease_token"] = lease["lease_token"]
+        res["action"] = "native-resume"
+        res["argv"] = cand["resume_cmd"].split()
+        return res
+
+    # -- opt-in transcript transplant (#10, gated) -------------------------
+    if mode == "transcript":
+        from .writers import write_transcript, writer_supported
+        if not writer_supported(target):
+            reason = UNSUPPORTED_REASON_SHORT.get(target, "unverified")
+            store.thread_lease_release(tid, lease["lease_token"],
+                                       reason="transcript-unsupported")
+            res["action"] = "refused"
+            res["error"] = ("transcript transplant unsupported for "
+                            "{0}: {1}".format(target, reason))
+            return res
+        from .writers import write_transcript as _wt
+        w = _wt(store, tid, target)
+        res["action"] = "transcript"
+        res["argv"] = w["resume_cmd"].split()
+        res["native_session_id"] = w["native_session_id"]
+        return res
+
+    # -- cross-provider: compile Continuation Bundle (D11 default) ---------
+    from .budget import apply_budget as _ab, parse_budget as _pb, auto_budget as _abud
+    tokens = _pb(budget)
+    if tokens is None and budget and budget.strip().lower() == "auto":
+        tokens = _abud(target)
+    bundle = build_continuation_bundle(store, members, goal=goal)
+    packed, info = _ab(bundle, tokens, target=target)
+    out_dir = get_bundles_dir()
+    out = Path(output) if output else out_dir / default_bundle_name(members)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(packed, encoding="utf-8")
+    
+    # Record pending attach so the next scan can auto-resolve
+    store.pending_record(
+        tid, target,
+        note="switch continuation: " + out.name,
+        repo_root=thread["repo_root"],
+        cwd=members[0]["cwd"] if members else None,
+        source_provider=(members[-1]["provider"] if members else None),
+        source_session=(members[-1]["id"] if members else None),
+        goal=goal,
+        lease_token=lease["lease_token"])
+    res["pending_recorded"] = True
+    
+    res["action"] = "bundle"
+    res["argv"] = bundle_command(target, out)
+    res["bundle_path"] = str(out.resolve())
+    return res
+
+
+UNSUPPORTED_REASON_SHORT = {
+    "claude": "headless resume probe TIMEOUT",
+    "dsh": "synthetic-session resume unverified",
+    "zcode": "private SQLite format",
+    "cursor": "undocumented KV format",
+    "antigravity": "protobuf format",
+    "kiro": "no native session CLI",
+}
+
+
+# ---------------------------------------------------------------------------
+# Entry point wrappers for legacy CLI/MCP/Skill code — migrate them
+# to call handoff_thread() directly instead of duplicating logic.
+# TODO: delete cmd_switch, cmd_continue, MCP voyager_switch when all
+# callers use handoff_thread() result dict uniformly.
+# ---------------------------------------------------------------------------
+def _legacy_cli_switch(store, thread, target, args) -> Dict[str, Any]:
+    """Legacy wrapper — delete once cmd_switch fully migrated."""
+    # This exists so we can incrementally replace cli.py without
+    # refactoring the entire file at once. Current status: NOT DONE.
+    raise NotImplementedError("migrate cmd_switch to call handoff_thread()")
