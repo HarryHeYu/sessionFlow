@@ -6,8 +6,8 @@
 
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
 **Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；两项 #3 范围内容显式延期——见 Deferred）。**
-**Phase 3 shipped（`d931b02`）。下一步：Phase 4 Context Budget（#5），随后 Skill（#6）/ switch（#7）。**
-Phase 5–7 仍是规划。
+**Phase 3 shipped（`d931b02`）；Phase 4 Context Budget 已落地。下一步：Phase 5 Skill（#6），随后 switch（#7）/ VS Code sidebar（#8）。**
+Phase 6–7 仍是规划。
 
 **Phase 2 close-out audit（2026-09-18，对照代码逐条核实）：**
 
@@ -680,7 +680,7 @@ voyager continue --repo voyager --goal "fix CI"
 
 **本阶段不做：** 调 LLM 去「理解」目标。
 
-### Phase 4 — Context Budget / 自适应打包
+### Phase 4 — Context Budget / 自适应打包 **（已落地，见 CHANGELOG）**
 
 ```
 voyager continue --budget auto
@@ -759,7 +759,7 @@ voyager switch codex
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（2a 核心已落地；--repo 自动聚类与 MCP voyager_thread 延期，见 Deferred）* |
 | [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 *（已落地 `c41f99b`）* |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 *（已落地 `d931b02`）* |
-| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 |
+| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 *（已落地 Phase 4）* |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
 | [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |
 | [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11**，合成 JSONL 的原生 resume 已证实 |

@@ -4,8 +4,8 @@
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
 **Phase 1b shipped (`5e8271c`); Phase 2 landed (2a WorkThread `b580001`/`934dfd5`; 2b lease `c41f99b`; two #3 scope items deferred — see Deferred). **
-**Phase 3 shipped (`d931b02`). Next: Phase 4 Context Budget (#5), then Skill (#6) / switch (#7).**
-Phases 5–7 remain planning.
+**Phase 3 shipped (`d931b02`); Phase 4 Context Budget shipped (`<budget-commit>`). Next: Phase 5 Skill (#6), then switch (#7) / VS Code sidebar (#8).**
+Phases 6–7 remain planning.
 
 **Phase 2 close-out audit (2026-09-18, checked against the code):**
 
@@ -723,7 +723,7 @@ voyager continue --repo voyager --goal "fix CI"
 
 **Out of scope:** calling an LLM to "understand" the goal.
 
-### Phase 4 — Context Budget / adaptive packing
+### Phase 4 — Context Budget / adaptive packing **(shipped, see CHANGELOG)**
 
 ```
 voyager continue --budget auto
@@ -808,7 +808,7 @@ Treat the checkboxes as the implementation contract.
 | [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 *(2a core shipped; --repo auto-cluster + MCP voyager_thread deferred — see Deferred)* |
 | [#11](https://github.com/HarryHeYu/voyager/issues/11) | Single-writer lease on a WorkThread | 2 | #3 *(shipped `c41f99b`)* |
 | [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 *(shipped `d931b02`)* |
-| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 |
+| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 *(shipped Phase 4)* |
 | [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
 | [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** |
 | [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11**, proven resume of synthetic JSONL |

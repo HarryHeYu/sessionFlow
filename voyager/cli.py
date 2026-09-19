@@ -427,6 +427,24 @@ def cmd_diff(args) -> int:
     return 0
 
 
+def _render_budgeted(text: str, args, target: Optional[str] = None) -> str:
+    """Phase 4: apply --budget to a rendered bundle/package and print the
+    token estimate. Shared by handoff / merge / continue pipelines."""
+    from .budget import apply_budget, auto_budget, parse_budget
+    spec = getattr(args, "budget", None)
+    try:
+        tokens = parse_budget(spec)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(2)
+    if tokens is None and spec and spec.strip().lower() == "auto":
+        tokens = auto_budget(target)
+    packed, info = apply_budget(text, tokens, target=target)
+    print("estimated tokens: ~{0}".format(info["estimated_tokens"])
+          + ("  (budget {0})".format(info["budget"]) if info["budget"] else ""))
+    return packed
+
+
 def cmd_stats(args) -> int:
     store = Store(args.db)
     stats = store.stats()
@@ -799,15 +817,19 @@ def _merge_and_handoff(store: Store, rows: list, args) -> int:
     out = Path(args.output) if getattr(args, "output", None) else (out_dir / default_bundle_name(rows))
     out.parent.mkdir(parents=True, exist_ok=True)
     bundle = build_continuation_bundle(store, rows, goal=getattr(args, "goal", None))
+
+    target = getattr(args, "to", None)
+    if not target and getattr(args, "cmd", "") == "continue":
+        target = "claude"
+        print("defaulting continuation target to 'claude' (override with --to)")
+
+    # Phase 4: ranking happened in the compiler; budgeting runs after it
+    bundle = _render_budgeted(bundle, args, target=target)
     out.write_text(bundle, encoding="utf-8")
     print(f"continuation bundle: {out.resolve()} ({len(bundle)} chars)")
 
-    target = getattr(args, "to", None)
     if not target:
-        if getattr(args, "cmd", "") == "continue":
-            target = "claude"
-            print("defaulting continuation target to 'claude' (override with --to)")
-        else:
+        if getattr(args, "cmd", "") != "continue":
             print(f"next: pick a target agent, e.g. "
                   f"`voyager merge {' '.join(r['native_id'][:8] for r in rows)} --to claude` "
                   f"(targets with direct launch: {', '.join(sorted(PROMPT_TARGETS))})")
@@ -836,6 +858,7 @@ def _handoff_from_row(store: Store, row, args) -> int:
     from .handoff import PROMPT_TARGETS, build_context_package, default_package_name, handoff_command
     out = Path(args.output) if getattr(args, "output", None) else Path(default_package_name(row))
     package = build_context_package(store, row, goal=getattr(args, "goal", None))
+    package = _render_budgeted(package, args, target=getattr(args, "to", None))
     out.write_text(package, encoding="utf-8")
     print(f"context package: {out.resolve()} ({len(package)} chars)")
 
@@ -941,6 +964,7 @@ def main(argv=None) -> int:
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
     sp.add_argument("--goal", help="rank the evidence against this goal")
     sp.add_argument("--output", "-o", help="package file path (default ~/.voyager/bundles/...)")
+    sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the package")
     sp.set_defaults(func=cmd_handoff)
 
@@ -952,6 +976,7 @@ def main(argv=None) -> int:
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
     sp.add_argument("--output", "-o", help="bundle file path (default ~/.voyager/bundles/...)")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the bundle")
+    sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.set_defaults(func=cmd_merge)
 
     sp = sub.add_parser("watch", help="keep the index in sync automatically",
@@ -1003,6 +1028,7 @@ def main(argv=None) -> int:
     sp.add_argument("--thread", help="continue from a WorkThread's members")
     sp.add_argument("--to", help="force cross-agent handoff to this target")
     sp.add_argument("--output", "-o", help="bundle file path (when continuing via handoff/merge)")
+    sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
     sp.set_defaults(func=cmd_continue)
 

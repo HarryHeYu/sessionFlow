@@ -5,6 +5,17 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Context Budget (roadmap Phase 4, issue #5)** — `--budget
+  compact|balanced|full|auto|Nk|<int>` on `handoff`, `merge` and
+  `continue`. Ranking (Phase 3) runs first, then deterministic packing
+  keeps sections by priority (goal > current state > ranked evidence >
+  prior conclusions > failures > files > commands > conversation); the
+  Evidence & Provenance header always survives and every drop/trim is
+  named in a trailing "## Budget notes" section. Token estimate is
+  chars/4 (no tokenizer dep); the CLI prints the estimate. No `--budget`
+  = byte-identical output. Shared pipeline across single-session and
+  multi-session paths.
+
 - **Goal-conditioned extraction (roadmap Phase 3, issue #4 / D10)** —
   `--goal` now ranks evidence on `handoff`, `merge`, `continue --repo`
   and `continue --thread` through ONE shared deterministic pipeline
