@@ -25,6 +25,12 @@ def _resolve_home_path(home: Optional[Path] = None) -> Path:
     """Resolve home directory - runtime resolution for testability."""
     if home is not None:
         return home
+    
+    # Prefer explicit HOME env var for cross-platform test consistency
+    env_home = os.environ.get("HOME")
+    if env_home:
+        return Path(env_home)
+    
     return Path.home()
 
 
@@ -34,11 +40,12 @@ DB_PATH = Path.home() / ".zcode" / "cli" / "db" / "db.sqlite"
 # Expected ZCode database schema columns for validation
 EXPECTED_ZCODE_COLUMNS = {
     "session": {"id", "directory", "title", "parent_id", "project_id", 
-                "time_created", "time_updated"},
+                "time_created", "time_updated", "summary_additions",
+                "summary_deletions", "summary_files"},
     "message": {"id", "session_id", "time_created", "data"},
     "part": {"message_id", "data"},
-    "tool_usage": {"tool_call_id", "exit_code", "error_message", "stdout_bytes", "stderr_bytes"},
-    "model_usage": {"model_id", "provider_id", "input_tokens", "output_tokens"},
+    "tool_usage": {"tool_call_id", "exit_code", "error_message", "stdout_bytes", "stderr_bytes", "session_id"},
+    "model_usage": {"model_id", "provider_id", "input_tokens", "output_tokens", "reasoning_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "session_id"},
 }
 
 
@@ -67,7 +74,7 @@ def _validate_zcode_schema(con):
         
         for table, expected_cols in EXPECTED_ZCODE_COLUMNS.items():
             cols = set(
-                row[0] for row in con.execute(
+                row[1] for row in con.execute(
                     f"PRAGMA table_info({table})"
                 ).fetchall()
             )
@@ -117,7 +124,6 @@ def discover_zcode_db(home: Optional[Path] = None) -> List[Path]:
     # Platform-specific paths (using resolved HOME)
     candidates.extend([
         HOME / ".zcode" / "cli" / "db" / "db.sqlite",
-        Path("C:/Users/") / os.environ.get("USERNAME", "user") / ".zcode/cli/db/db.sqlite".replace("/", "\\"),
         HOME / "AppData" / "Roaming" / ".zcode" / "cli" / "db" / "db.sqlite",
         HOME / ".local" / "share" / "zcode" / "cli" / "db" / "db.sqlite",
     ])
@@ -175,8 +181,9 @@ class ZCodeAdapter(Adapter):
         # session per artifact, so we override scan() instead of using parse().
         raise NotImplementedError
 
-    def scan(self, source_changed) -> List[dict]:
-        con = _open_ro(DB_PATH)
+    def _scan_db(self, db_path: Path) -> List[dict]:
+        """Parse a single ZCode database and return all sessions from it."""
+        con = _open_ro(db_path)
         if not con:
             return []
         try:
@@ -326,6 +333,16 @@ class ZCodeAdapter(Adapter):
             return sessions
         finally:
             con.close()
+
+    def scan(self, source_changed) -> List[dict]:
+        """Scan all discovered ZCode databases."""
+        all_sessions = []
+        
+        for db_path in self.discover():
+            sessions = self._scan_db(db_path)
+            all_sessions.extend(sessions)
+        
+        return all_sessions
 
 
 register(ZCodeAdapter())
