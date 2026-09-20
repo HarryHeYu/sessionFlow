@@ -121,12 +121,12 @@ def startup_handler(
     thread_id = active_thread.get("id")
     repo_root = disc.get("repo_root", cwd)
     
-    # Compile continuation context using existing build_continuation_bundle
+    # Compile continuation context using build_continuation_bundle
     try:
         # Extract member sessions from thread
         member_sessions = store.thread_member_sessions(thread_id)
         
-        # Build bundle using the canonical function
+        # Build bundle (already returns formatted markdown string)
         bundle = build_continuation_bundle(
             store=store,
             session_rows=member_sessions,
@@ -134,8 +134,8 @@ def startup_handler(
             live_git=True,
         )
         
-        # Format output
-        context = format_voyager_continuation(bundle, active_thread, disc)
+        # Return the bundle directly (it's already formatted as markdown)
+        context = bundle
         
         return {
             "status": "success",
@@ -251,7 +251,16 @@ def cmd_hook_startup(args) -> int:
     )
     
     # Output context to stdout (for injection)
-    print(result["context"])
+    try:
+        import sys
+        # Use Windows-compatible stdout handling
+        if sys.platform == "win32":
+            import io
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="ignore")
+        print(result["context"])
+    except Exception as e:
+        # Last resort: write to stderr and exit
+        print(f"[Voyager Continuity WARNING] Could not output context: {e}", file=sys.stderr)
     
     # Exit code based on status
     status_map = {

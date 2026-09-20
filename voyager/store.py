@@ -527,6 +527,14 @@ class Store:
         return [r["session_id"] for r in self.q(
             "SELECT session_id FROM thread_sessions WHERE thread_id=? ORDER BY ord",
             (tid,))]
+    
+    def thread_member_sessions(self, tid: str) -> List[dict]:
+        """Return member sessions as dicts with metadata."""
+        rows = self.q(
+            """SELECT s.* FROM thread_sessions ts
+               JOIN sessions s ON s.id = ts.session_id
+               WHERE ts.thread_id=? ORDER BY ts.ord""", (tid,))
+        return [dict(r) for r in rows]
 
     def thread_find_by_members(self, sids: set) -> Optional[str]:
         """Return the active thread whose member set is exactly `sids`."""
