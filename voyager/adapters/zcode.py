@@ -12,6 +12,7 @@ search/repo views work uniformly.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,8 +21,25 @@ from urllib.parse import quote
 from .base import Adapter, finish_session, git_info, register
 from ..model import new_event, new_session, text_of
 
-HOME = Path.home()
-DB_PATH = HOME / ".zcode" / "cli" / "db" / "db.sqlite"
+def _resolve_home_path(home: Optional[Path] = None) -> Path:
+    """Resolve home directory - runtime resolution for testability."""
+    if home is not None:
+        return home
+    return Path.home()
+
+
+# Legacy hardcoded path for backward compat (tests use this)
+DB_PATH = Path.home() / ".zcode" / "cli" / "db" / "db.sqlite"
+
+# Expected ZCode database schema columns for validation
+EXPECTED_ZCODE_COLUMNS = {
+    "session": {"id", "directory", "title", "parent_id", "project_id", 
+                "time_created", "time_updated"},
+    "message": {"id", "session_id", "time_created", "data"},
+    "part": {"message_id", "data"},
+    "tool_usage": {"tool_call_id", "exit_code", "error_message", "stdout_bytes", "stderr_bytes"},
+    "model_usage": {"model_id", "provider_id", "input_tokens", "output_tokens"},
+}
 
 
 def _open_ro(path: Path) -> Optional[sqlite3.Connection]:
@@ -32,6 +50,107 @@ def _open_ro(path: Path) -> Optional[sqlite3.Connection]:
         return sqlite3.connect(uri, uri=True)
     except sqlite3.Error:
         return None
+
+
+def _validate_zcode_schema(con):
+    """Validate ZCode database schema."""
+    try:
+        tables = set(
+            row[0] for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        )
+        
+        required_tables = set(EXPECTED_ZCODE_COLUMNS.keys())
+        if not required_tables.issubset(tables):
+            return False
+        
+        for table, expected_cols in EXPECTED_ZCODE_COLUMNS.items():
+            cols = set(
+                row[0] for row in con.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()
+            )
+            if not expected_cols.issubset(cols):
+                return False
+        
+        return True
+    
+    except sqlite3.Error:
+        return False
+
+
+def discover_zcode_db(home: Optional[Path] = None) -> List[Path]:
+    """Discover ZCode databases with priority-based search.
+    
+    Args:
+        home: Override home directory (for testing). If None, resolves at runtime.
+    
+    Returns:
+        List of valid candidate databases. Strategy:
+          1. VOYAGER_ZCODE_DB environment variable override (highest priority)
+          2. Known platform paths  
+          3. Bounded recursive search in HOME/.zcode
+          4. Each candidate validated with SQLite schema check
+        
+        Policy on multiple candidates: return ALL valid found databases.
+        scan() will process each independently.
+    """
+    # Runtime resolve HOME - supports monkeypatching in tests
+    HOME = _resolve_home_path(home)
+    
+    # Priority 1: Environment variable override - exact match, stop searching
+    env_db = os.environ.get("VOYAGER_ZCODE_DB")
+    if env_db:
+        env_path = Path(env_db)
+        con = _open_ro(env_path)
+        if con and _validate_zcode_schema(con):
+            con.close()
+            return [env_path]
+        elif con:
+            # Valid file but wrong schema - don't silently fall back
+            con.close()
+    
+    # Collect all candidates from known locations + bounded search
+    candidates: List[Path] = []
+    
+    # Platform-specific paths (using resolved HOME)
+    candidates.extend([
+        HOME / ".zcode" / "cli" / "db" / "db.sqlite",
+        Path("C:/Users/") / os.environ.get("USERNAME", "user") / ".zcode/cli/db/db.sqlite".replace("/", "\\"),
+        HOME / "AppData" / "Roaming" / ".zcode" / "cli" / "db" / "db.sqlite",
+        HOME / ".local" / "share" / "zcode" / "cli" / "db" / "db.sqlite",
+    ])
+    
+    # Add dynamic search in HOME/.zcode directory (depth-limited)
+    zcode_dir = HOME / ".zcode"
+    if zcode_dir.exists() and zcode_dir.is_dir():
+        # Recursively find all .sqlite files within .zcode/
+        for db_file in zcode_dir.rglob("*.sqlite"):
+            # Limit depth to prevent scanning too deep
+            if len(db_file.relative_to(zcode_dir).parts) <= 4:
+                candidates.append(db_file)
+    
+    # Deduplicate
+    seen = set()
+    unique_candidates = []
+    for c in candidates:
+        if str(c) not in seen:
+            seen.add(str(c))
+            unique_candidates.append(c)
+    candidates = unique_candidates
+    
+    # Validate each candidate
+    valid_dbs: List[Path] = []
+    for db_path in candidates:
+        if db_path.exists():
+            con = _open_ro(db_path)
+            if con:
+                if _validate_zcode_schema(con):
+                    con.close()
+                    valid_dbs.append(db_path)
+    
+    return valid_dbs
 
 
 def _json(s: Any) -> Any:
@@ -49,7 +168,7 @@ class ZCodeAdapter(Adapter):
     can_fork = False
 
     def discover(self) -> List[Path]:
-        return [DB_PATH] if DB_PATH.is_file() else []
+        return discover_zcode_db()
 
     def parse(self, source: Path) -> Optional[dict]:
         # One source file holds many sessions; the base scanner expects one

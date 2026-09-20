@@ -226,7 +226,7 @@ def test_safe_attach_needs_exact_repo_and_active_thread(store):
 
 def test_no_silent_clustering_same_repo_two_threads(store):
     """Two active threads in the same repo: a session must NOT be silently
-    attached to either — discovery reports it, attach stays explicit."""
+    attached to either — discovery reports AMBIGUOUS, attach stays explicit."""
     tid_a = _mk_thread(store, repo="E:/shared", title="A")
     store.thread_attach(tid_a, "codex:a1")
     tid_b = _mk_thread(store, repo="E:/shared", title="B")
@@ -235,8 +235,11 @@ def test_no_silent_clustering_same_repo_two_threads(store):
 
     disc = discover_continuity(store, cwd="E:/shared", provider="claude",
                                native_session_id="loose")
-    # ambiguous which thread → continuity is found but attach is not done
-    assert disc["continuity_available"] is True
+    # SECURITY: two active threads → AMBIGUOUS, not continuity available
+    assert disc["continuity_available"] is False
+    assert disc.get("status") == "ambiguous"
+    assert len(disc.get("candidate_threads", [])) == 2
+    # Session not attached to either thread (ambiguity prevents auto-attach)
     assert "claude:loose" not in store.thread_member_ids(tid_a)
     assert "claude:loose" not in store.thread_member_ids(tid_b)
 

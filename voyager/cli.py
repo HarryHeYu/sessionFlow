@@ -661,6 +661,13 @@ def cmd_stats(args) -> int:
     return 0
 
 
+def _run_launcher_prelaunch(args) -> int:
+    """Wrapper for launcher prelaunch command."""
+    from .launcher import main as launcher_main
+    sys.exit(launcher_main(["prelaunch", f"--provider={args.provider}",
+                           f"--cwd={args.cwd}"] + (["--json"] if args.json else [])))
+
+
 def _watch_sleep(args, store) -> float:
     """Interval for the watch loop. Active thread leases pull it well under
     the D13 heartbeat expiry (120s) so holder leases never go stale between
@@ -1529,7 +1536,18 @@ def main(argv=None) -> int:
     sp.add_argument("--repo", help="resolve by repo instead of cwd")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_status)
-
+    
+    # voyager launcher prelaunch
+    sp = sub.add_parser("launcher", help="Voyager launcher hook utilities")
+    lsub = sp.add_subparsers(dest="launcher_cmd", required=True)
+    
+    lsp = lsub.add_parser("prelaunch", help="run prelaunch hook for wrapper scripts")
+    lsp.add_argument("--provider", required=True, help="target provider")
+    lsp.add_argument("--cwd", required=True, help="current working directory")
+    lsp.add_argument("--db", help="index db path")
+    lsp.add_argument("--json", action="store_true")
+    lsp.set_defaults(func=lambda args: _run_launcher_prelaunch(args))
+    
     sp = sub.add_parser("stats", help="index statistics", parents=[common])
     sp.set_defaults(func=cmd_stats)
 

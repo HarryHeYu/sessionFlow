@@ -45,36 +45,63 @@ class ZeroTouchLevel(Enum):
 
 
 @dataclass
+class ProviderCapabilityStatus:
+    """Separate platform capability from local configuration."""
+    
+    platform_supported: bool = False  # Does the provider support this?
+    locally_configured: bool = False  # Is it installed on this machine?
+    live_verified: bool = False       # Has it been tested end-to-end?
+
+
+@dataclass
+class ZeroTouchCapability:
+    """Complete capability profile per zero-touch level."""
+    
+    session_start_zero_touch: ProviderCapabilityStatus = field(
+        default_factory=ProviderCapabilityStatus
+    )
+    first_turn_zero_touch: ProviderCapabilityStatus = field(
+        default_factory=ProviderCapabilityStatus
+    )
+    launcher_zero_touch: ProviderCapabilityStatus = field(
+        default_factory=ProviderCapabilityStatus
+    )
+    watcher_attach_only: ProviderCapabilityStatus = field(
+        default_factory=ProviderCapabilityStatus
+    )
+
+
+@dataclass
 class ProviderCapabilities:
     """Capability profile for a single provider."""
     
     provider: str
     name: str
     
-    # Native lifecycle hooks
+    # Native lifecycle hooks (platform capability)
     has_session_start_hook: bool = False
     has_agent_spawn_hook: bool = False
     has_prompt_submit_hook: bool = False
     
-    # Instruction surfaces
+    # Instruction surfaces (platform capability)
     global_instruction_supported: bool = False
     project_instruction_supported: bool = False
     skill_system_supported: bool = False
     
-    # Integration protocols
+    # Integration protocols (platform capability)
     mcp_supported: bool = False
     plugin_surface: bool = False
     extension_api: bool = False
     
-    # CLI & launcher
+    # CLI & launcher (platform capability)
     cli_launcher: bool = False
     launcher_available: bool = False
     
     # Session management
     native_session_id_at_start: bool = False
-    session_file_creation_timing: Optional[str] = None  # "before_first_turn", "after_first_turn"
+    session_file_creation_timing: Optional[str] = None
     
-    # Context injection
+    # Context injection (platform capability)
     stdout_context_injection: bool = False
     stdin_context_injection: bool = False
     env_variable_injection: bool = False
@@ -83,11 +110,15 @@ class ProviderCapabilities:
     workspace_field_available: bool = False
     repo_field_available: bool = False
     
-    # Additional notes for documentation
-    source_format_known: bool = False  # For Antigravity-like black-box storage
+    # Additional notes
+    source_format_known: bool = False
     max_zero_touch_level: ZeroTouchLevel = ZeroTouchLevel.UNSUPPORTED
     
-    # Additional notes for documentation
+    # Current installation state (separate from platform capability)
+    installed: bool = False
+    config_valid: bool = False
+    hook_invoked: bool = False
+    
     notes: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:

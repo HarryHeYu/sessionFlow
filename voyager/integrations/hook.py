@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..store import Store, default_db_path
+from ..continuity import build_continuation_bundle
 
 
 def startup_handler(
@@ -72,6 +73,22 @@ def startup_handler(
     
     # Check for active WorkThread
     if not disc.get("continuity_available"):
+        status = disc.get("status", "no_thread")
+        
+        if status == "ambiguous":
+            # SECURITY: multiple active threads in same repo
+            candidate_threads = disc.get("candidate_threads", [])
+            thread_info = "\n  - ".join(
+                f"{t['id']}: {t['title']} (updated: {t['updated_at']})"
+                for t in candidate_threads
+            )
+            return {
+                "status": "ambiguous",
+                "context": "[Voyager Continuity WARNING]\n\nAmbiguous WorkThread resolution.\n\nMultiple active threads found in this repository:\n\n  - " + thread_info + "\n\nResolve by explicitly specifying thread ID:\n  voyager continue --thread <thread-id>\nOr close other active threads first.",
+                "thread": None,
+                "warnings": ["Multiple active WorkThreads detected - using explicit selection"],
+            }
+        
         return {
             "status": "no_thread",
             "context": "[Voyager Continuity]\n\nNo active WorkThread found for this repository.\n\nCreate one first:\n  voyager thread create --repo " + cwd,
@@ -79,7 +96,7 @@ def startup_handler(
             "warnings": [],
         }
     
-    # Check for ambiguity
+    # Check for ambiguity (should be caught above, but double-check)
     pend = disc.get("pending_attach") or []
     if any(p.get("status") == "ambiguous" for p in pend):
         ambiguous_threads = [p for p in pend if p.get("status") == "ambiguous"]
@@ -104,19 +121,17 @@ def startup_handler(
     thread_id = active_thread.get("id")
     repo_root = disc.get("repo_root", cwd)
     
-    # Compile continuation context
+    # Compile continuation context using existing build_continuation_bundle
     try:
-        from ..continuity import compile_continuation_bundle
-        
         # Extract member sessions from thread
         member_sessions = store.thread_member_sessions(thread_id)
         
-        # Compile bundle
-        bundle = compile_continuation_bundle(
-            sessions=member_sessions,
+        # Build bundle using the canonical function
+        bundle = build_continuation_bundle(
+            store=store,
+            session_rows=member_sessions,
             goal=goal,
-            budget="compact" if compact else "balanced",
-            output_format="markdown",
+            live_git=True,
         )
         
         # Format output
@@ -136,9 +151,10 @@ def startup_handler(
         }
         
     except Exception as e:
+        import traceback
         return {
             "status": "error",
-            "context": f"[Voyager Continuity ERROR]\n\nFailed to compile context: {e}",
+            "context": f"[Voyager Continuity ERROR]\n\nFailed to compile context: {e}\n\nTraceback:\n{traceback.format_exc()}",
             "thread": active_thread,
             "warnings": ["Context compilation failed"],
         }

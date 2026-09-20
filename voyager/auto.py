@@ -143,24 +143,33 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
     WorkThread (via cwd git toplevel) → cwd fallback. No silent
     multi-signal clustering: if there is no persisted WorkThread, the
     answer is continuity_available=False.
+
+    SECURITY INVARIANT: multiple active WorkThreads in same repo → AMBIGUOUS.
+    Never silently pick one by updated_at. This prevents accidentally resuming
+    wrong context which could overwrite work or cause data loss.
     """
     from .adapters.base import git_info
     from .store import lease_state
 
     repo = repo or (git_info(cwd or os.getcwd()).get("repo_root")
                     or (cwd or os.getcwd()).replace("\\", "/"))
-    threads = [t for t in store.thread_list("active")
-               if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+    
+    # Filter active threads for this repo
+    active_threads = [t for t in store.thread_list("active")
+                     if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+    
     if thread_id:
+        # Explicit thread override - single thread mode
         t = store.thread_get(thread_id)
-        threads = [t] if t else []
-    thread = max(threads, key=lambda x: x["updated_at"] or 0) if threads else None
-
+        active_threads = [t] if t else []
+    
     result: Dict[str, Any] = {
         "repo_root": repo,
-        "continuity_available": thread is not None,
+        "continuity_available": False,
+        "status": "no_thread",  # default
         "active_thread": None,
         "current_goal": None,
+        "candidate_threads": [],  # for ambiguity diagnostics
         "latest_holder": None,
         "latest_session": None,
         "lease_state": {"held": False, "expired": False, "why": "free",
@@ -168,11 +177,34 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
         "pending_attach": [],
         "recommended_action": "none",
     }
-    if thread is None:
+    
+    # SECURITY CHECK: multiple active threads = ambiguous
+    if len(active_threads) == 0:
         return result
-
+    
+    if len(active_threads) > 1:
+        # AMBIGUOUS - do not auto-select
+        result["status"] = "ambiguous"
+        result["candidate_threads"] = [
+            {
+                "id": t["id"],
+                "title": t["title"],
+                "updated_at": t["updated_at"],
+                "goal": t["goal"],
+            }
+            for t in active_threads
+        ]
+        result["continuity_available"] = False
+        result["recommended_action"] = "resolve-ambiguity"
+        return result
+    
+    # Exactly one active thread - safe to use
+    thread = active_threads[0]
+    result["status"] = "success"
+    result["continuity_available"] = True
     result["active_thread"] = dict(thread)
     result["current_goal"] = thread["goal"] or thread["title"]
+    
     lease = store.thread_lease_get(thread["id"])
     lst = lease_state(lease)
     result["lease_state"] = {"held": lst["held"], "expired": lst["expired"],
