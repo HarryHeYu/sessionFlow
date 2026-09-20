@@ -144,7 +144,7 @@ Voyager 在同一个仓库里切换 Agent 时会自动接续工作：
 **产品状态**（最终测试结论，2026-09-20）：
 
 **Core functionality**: Complete and operational.  
-**Runtime auto-trigger**: Not verified on any provider (STARTUP_ASSISTED).
+**Runtime auto-trigger**: Tested on Codex and Claude; neither auto-invokes `voyager_startup`.
 
 Real-provider testing confirmed: neither Codex nor Claude invokes `voyager_startup` automatically at session start without explicit user instruction.
 

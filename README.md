@@ -160,7 +160,7 @@ explicitly instead of pretending.
 ## Startup Continuity — product status
 
 **Core functionality**: Complete and operational.  
-**Runtime auto-trigger**: Not verified on any provider (STARTUP_ASSISTED).
+**Runtime auto-trigger**: Tested on Codex and Claude; neither auto-invokes `voyager_startup`.
 
 The `startup_continuity()` function correctly discovers WorkThreads, auto-attaches sessions, and compiles continuation context. Real-provider testing confirmed: neither Codex nor Claude invokes `voyager_startup` automatically at session start without explicit user instruction.
 
@@ -227,7 +227,7 @@ To register Voyager as an MCP server so agents can query it with native tools:
 
 ```sh
 voyager integrate codex    # writes ~/.codex/config.toml automatically
-voyager integrate claude   # writes ~/.claude/mcp.json via CLI or manual config
+voyager integrate claude   # writes ~/.claude/mcp.json automatically
 voyager integrate remove <provider>  # undo all three steps (skill + mcp + bootstrap)
 ```
 

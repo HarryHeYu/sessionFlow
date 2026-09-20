@@ -4,20 +4,20 @@
 
 ## Testing Boundary
 
-### Automated Hermetic Tests (188 total)
+### Automated Hermetic Tests (208 total)
 All pytest tests use **synthetic fixtures** — no real agent data, no external dependencies:
 
 - `test_adapters.py` — Parse synthetic JSON/SQL for all 8 providers
 - `test_*.py` — Store, continuity, budget, leases, switch, thread operations
 - All tests verify correctness without touching real agent sessions
 
-### NOT Verified in This Environment (Requires Installed Agents)
-These flows need actual Claude/Codex/Grok installations and cannot be automated via pytest:
+### Real-Provider Runtime Tested (Requires Installed Agents)
+These flows were tested on actual Claude/Codex installations:
 
-1. **Claude → Codex automatic attach**
-2. **Codex → Grok → Codex chain**
-3. **Real provider startup discovery**
-4. **Target agent actually reads continuation context**
+1. **Codex startup discovery** → STARTUP_ASSISTED (no auto-invocation of `voyager_startup`)
+2. **Claude startup discovery** → STARTUP_ASSISTED (no auto-invocation of `voyager_startup`)
+3. **Neither provider auto-triggers Voyager at session start** — explicit invocation required via `voyager switch`, MCP tool call, or Skill guidance
+4. **Target agent continuation context** — verified via explicit workflows (`switch`/`continue`)
 
 This document provides a repeatable manual verification procedure.
 
