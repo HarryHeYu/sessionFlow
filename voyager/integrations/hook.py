@@ -123,13 +123,20 @@ def startup_handler(
     
     # Compile continuation context using build_continuation_bundle
     try:
-        # Extract member sessions from thread
-        member_sessions = store.thread_member_sessions(thread_id)
+        # Extract member sessions from thread using existing canonical API
+        session_ids = store.thread_member_ids(thread_id)
+        
+        # Fetch actual session rows for each member
+        member_rows = []
+        for sid in session_ids:
+            # Use sessions() with filter for individual session
+            rows = list(store.sessions(provider=None))
+            member_rows.extend([r for r in rows if r["id"] == sid])
         
         # Build bundle (already returns formatted markdown string)
         bundle = build_continuation_bundle(
             store=store,
-            session_rows=member_sessions,
+            session_rows=member_rows,
             goal=goal,
             live_git=True,
         )
@@ -144,7 +151,7 @@ def startup_handler(
                 "id": thread_id,
                 "title": active_thread.get("title"),
                 "goal": active_thread.get("goal"),
-                "members": len(member_sessions),
+                "members": len(session_ids),
                 "repo": repo_root,
             },
             "warnings": disc.get("warnings", []),
@@ -253,10 +260,30 @@ def cmd_hook_startup(args) -> int:
     # Output context to stdout (for injection)
     try:
         import sys
-        # Use Windows-compatible stdout handling
+        # Use Windows-compatible stdout handling - prefer UTF-8 but preserve content
         if sys.platform == "win32":
-            import io
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="ignore")
+            # Try to force UTF-8 output on Windows terminals
+            import locale
+            preferred_encoding = locale.getpreferredencoding(False)
+            if preferred_encoding.upper() in ("GBK", "CP936"):
+                # Aggressive filtering: remove only problematic chars, keep Chinese/ASCII
+                context = result["context"]
+                # Filter to ASCII + Chinese characters (most common case)
+                safe_output = ""
+                for c in context:
+                    code = ord(c)
+                    if code < 128 or (0x4e00 <= code <= 0x9fff):
+                        safe_output += c
+                    else:
+                        safe_output += '?'  # Replace other special chars with ?
+                print(safe_output, end="", file=sys.stdout)
+                status_map = {
+                    "success": 0,
+                    "no_thread": 1,
+                    "ambiguous": 2,
+                    "error": 3,
+                }
+                return status_map.get(result["status"], 3)
         print(result["context"])
     except Exception as e:
         # Last resort: write to stderr and exit
