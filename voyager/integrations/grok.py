@@ -1,0 +1,105 @@
+"""Grok CLI integration implementation."""
+from pathlib import Path
+from typing import Any, Dict, Optional
+import shutil
+from .capabilities import ProviderCapabilities, ZeroTouchLevel
+
+
+class GrokIntegration:
+    """Grok CLI launcher integration.
+    
+    Strategy: LAUNCHER_ZERO_TOUCH via opt-in wrapper script.
+    """
+    
+    def __init__(self, home: Optional[Path] = None):
+        self.home = home or Path.home()
+        self.capabilities: Optional[ProviderCapabilities] = None
+        self.voyager_bin = self.home / ".voyager/bin"
+    
+    def install(self) -> Dict[str, Any]:
+        """Install Grok launcher wrapper.
+        
+        Creates:
+        - ~/.voyager/bin/grok (wrapper script)
+        - Installs at PATH prefix if possible (opt-in)
+        """
+        real_grok = shutil.which("grok")
+        if not real_grok:
+            return {
+                "provider": "grok",
+                "status": "error",
+                "message": "Grok executable not found in PATH",
+            }
+        
+        # Create launcher directory
+        self.voyager_bin.mkdir(parents=True, exist_ok=True)
+        
+        # Generate wrapper script
+        wrapper_script = self.voyager_bin / "grok"
+        script_content = f"""#!/bin/sh
+# Voyager launcher for Grok CLI
+# Opt-in wrapper that provides continuity on launch
+
+real_executable="{real_grok}"
+
+# Prevent recursion
+if [ -n "$VOYAGER_LAUNCHER_RUNNING" ]; then
+    exec "$real_executable" "$@"
+fi
+
+export VOYAGER_LAUNCHER_RUNNING=1
+
+# Run prelaunch hook
+voyager launcher prelaunch --provider grok --cwd "$PWD" || true
+
+# Launch real grok with original arguments
+exec "$real_executable" "$@"
+"""
+        wrapper_script.write_text(script_content, encoding="utf-8")
+        wrapper_script.chmod(0o755)
+        
+        return {
+            "provider": "grok",
+            "status": "installed",
+            "launcher": str(wrapper_script),
+            "real_executable": real_grok,
+            "strategy": "LAUNCHER_ZERO_TOUCH",
+            "notes": [
+                "Opt-in launcher wrapper created",
+                "Add ~/.voyager/bin to PATH prefix for automatic use",
+                "Wrapper prevents recursion and runs voyager prelaunch",
+            ],
+        }
+    
+    def remove(self) -> Dict[str, Any]:
+        """Remove Grok launcher artifacts."""
+        wrapper_script = self.voyager_bin / "grok"
+        try:
+            if wrapper_script.exists():
+                wrapper_script.unlink()
+            return {"provider": "grok", "status": "removed"}
+        except OSError:
+            return {"provider": "grok", "status": "error"}
+    
+    def capabilities(self) -> ProviderCapabilities:
+        """Return capability profile."""
+        from .capabilities import detect_capabilities
+        if self.capabilities is None:
+            self.capabilities = detect_capabilities("grok", self.home)
+        return self.capabilities
+    
+    def verify(self) -> Dict[str, Any]:
+        """Verify launcher is correctly installed."""
+        launcher = self.voyager_bin / "grok"
+        
+        checks = {
+            "launcher_exists": launcher.exists(),
+            "executable": launcher.stat().st_mode & 0o111 != 0,
+        }
+        
+        all_ok = all(checks.values())
+        return {
+            "verified": all_ok,
+            "checks": checks,
+            "strategy": "LAUNCHER_ZERO_TOUCH" if all_ok else "ERROR",
+        }

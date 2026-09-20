@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import List, Optional
 
 # Import provider config for integrate command output
-from .skill import PROVIDER_CONFIG
+from .skill import PROVIDER_CONFIG, uninstall_integration, check_integration_status
 from .adapters import load_all
 from .adapters.base import enabled_adapters, git_info
 from .store import Store, default_db_path, lease_state
+from .integrations.hook import cmd_hook_startup
 
 
 # ---------------------------------------------------------------------------
@@ -1493,6 +1494,19 @@ def main(argv=None) -> int:
                       help="provider to remove integration for")
     irmp.add_argument("--home", help="override HOME for paths (testing)")
     irmp.set_defaults(func=cmd_integrate_remove)
+    
+    # voyager hook startup - provider lifecycle hook handler
+    sp = sub.add_parser("hook", help="Voyager lifecycle hooks for native provider integration")
+    hksub = sp.add_subparsers(dest="hook_cmd", required=True)
+    
+    hks = hksub.add_parser("startup", help="handle startup continuity for a provider session")
+    hks.add_argument("--provider", required=True,
+                     help="target provider (claude|codex|grok|...)")
+    hks.add_argument("--cwd", required=True, help="current working directory")
+    hks.add_argument("--session-id", help="native session ID (if available at startup)")
+    hks.add_argument("--goal", help="primary goal for context ranking")
+    hks.add_argument("--compact", action="store_true", help="use compact budget")
+    hks.set_defaults(func=cmd_hook_startup)
     
     # Legacy skill install still supported
     sp = sub.add_parser("skill", help="(legacy) install the voyager skill into known agents",
