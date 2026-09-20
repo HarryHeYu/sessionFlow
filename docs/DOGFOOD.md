@@ -180,10 +180,12 @@ The **automated tests** guarantee that all core logic is correct. This manual pr
 ## Summary
 
 - **Automated core verified**: 208 pytest tests pass (all logic paths covered)
-- **Real-provider verified**: Codex/Claude/Grok via `voyager switch` + manual paste
+- **Real-provider runtime tested**: 
+  * Codex = STARTUP_ASSISTED, live startup tested, no automatic `voyager_startup` invocation
+  * Claude = STARTUP_ASSISTED, live startup tested, no automatic `voyager_startup` invocation  
+  * Grok = BEST_EFFORT, no hook support
+  * DSH = BEST_EFFORT, CLI available but real env not verified
 - **Provider-limited**: ZCode desktop, Cursor/Kiro IDE-only
-- **Not verified in this environment**: True zero-touch auto-startup without any manual intervention
+- **MCP registration**: Fully automated, no manual setup required
 
-The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`). Runtime auto-trigger (`voyager_startup` called automatically at agent startup) has been tested on both Codex and Claude and confirmed as NOT occurring — classification: **STARTUP_ASSISTED**.
-
-True invisible continuity (agent discovers and attaches itself without any user command) remains a future enhancement dependent on agent platform capabilities.
+The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`) or MCP tool calls. True invisible auto-startup (agent discovers and attaches itself without any user command) requires provider-specific hooks that do not exist on tested platforms.

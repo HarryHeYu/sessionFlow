@@ -192,16 +192,23 @@ Recommended workflows:
 2. **MCP-assisted**: In agent, call tool `voyager_startup(provider="codex", cwd="$PWD")`
 3. **Skill guidance**: Read `SKILL.md` in agent's skill directory for routing instructions
 
-Manual one-time setup required:
+**STARTUP_ASSISTED means**: Runtime trigger requires explicit invocation.  
+Codex and Claude do NOT automatically call `voyager_startup` at session start — you must explicitly invoke it via one of the workflows above. MCP registration is fully automated (no manual config needed), but startup invocation remains manual.
 
 ```sh
-# Install integration
+# MCP registration is auto-configured
 voyager integrate codex    # writes ~/.codex/config.toml automatically
-voyager integrate claude   # writes ~/.claude/mcp.json via manual config
+voyager integrate claude   # writes ~/.claude/mcp.json automatically
 
-# Then start agents normally - they can query Voyager via MCP tools
-codex
-claude-code
+# Then use one of the workflows above to start with context
+# Option 1: Explicit command
+voyager switch codex
+
+# Option 2: MCP tool call (after restarting agent)
+# In agent prompt: "call voyager_startup"
+
+# Option 3: Skill guidance
+# Read SKILL.md and follow manual paste instructions
 ```
 
 See [docs/DOGFOOD.md](docs/DOGFOOD.md) for detailed verification procedure.
