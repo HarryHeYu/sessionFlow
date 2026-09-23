@@ -561,7 +561,7 @@ def cmd_integrate_status(args) -> int:
     for r in results:
         skill_y = "Y" if r.get("skill", {}).get("installed") else "N"
         mcp_reg = "R" if r.get("mcp", {}).get("registered") else ("A" if r.get("mcp", {}).get("available") else "N")
-        start_stat = r.get("startup_status", "N")  # Y=AUTO, A=ASSISTED, N=NONE
+        start_stat = r.get("startup_status", "N")  # Y=verified live, H=hook registered (unverified), A=assisted, N=none
         auto = "Y" if r.get("auto_attach") else "N"
         
         print(f"{r['installed']:<15} {skill_y:<8} {mcp_reg:<10} {start_stat:<10} {auto:<6}")

@@ -106,13 +106,19 @@ def _find_executable(name: str) -> Optional[Path]:
     return None
 
 
-def _check_mcp_support(provider: str) -> Tuple[bool, str]:
-    """Check if provider supports MCP integration."""
+def _check_mcp_support(provider: str, home: Optional[Path] = None) -> Tuple[bool, str]:
+    """Check if provider supports MCP integration.
+
+    `home` must be threaded through from the caller.  This used to hardcode
+    `Path.home()`, which silently ignored the CLI's `--home` flag, so every
+    `--home`-scoped run reported on the *real* user profile instead of the one
+    it was pointed at.
+    """
     if not PROVIDER_CONFIG[provider]["mcp_enabled"]:
         return False, PROVIDER_CONFIG[provider]["name"] + " does not support MCP"
     
     # For Codex/Claude, check if Voyager MCP is actually registered
-    home = Path.home()
+    home = home or Path.home()
     
     if provider == "codex":
         mcp_config = home / ".codex/config.toml"
@@ -487,23 +493,27 @@ def install_integration(provider: str, force: bool = False,
         bs_status, bs_path = bootstrap_func(target.parent)
         result["bootstrap"] = {"status": bs_status, "path": bs_path}
     
-    # Step 4: Determine startup status
+    # Step 4: Determine startup status.
     #   Y = platform fires the hook automatically AND that was verified live
     #   H = native hook registered; the live trigger is not verified yet
-    #   A = no hook; assisted via instruction following / MCP
+    #   A = no hook, but MCP-assisted startup is available
     #   N = no mechanism
+    #
+    # This MUST agree with `check_integration_status()`.  The two used to key off
+    # different fields -- install off `has_startup_hook`, status off `mcp_enabled`
+    # -- so `voyager integrate install codex` reported `N` while
+    # `voyager integrate status` reported `A` for the very same machine.
     hook_ok = result.get("hook", {}).get("status") == "installed"
     if hook_ok:
         # Registration is proven; the trigger firing is not, so this is
         # deliberately not "Y".
         result["startup_status"] = "H"
-    elif PROVIDER_CONFIG[provider]["has_startup_hook"]:
-        if mcp_result["status"] == "registered":
-            result["startup_status"] = "A"  # Assisted via instruction following
-        else:
-            result["startup_status"] = "N"  # No reliable hook
+    elif not has_mcp:
+        result["startup_status"] = "N"  # No hook and no MCP surface
+    elif mcp_result["status"] == "registered":
+        result["startup_status"] = "A"  # Assisted via instruction following
     else:
-        result["startup_status"] = "N"  # Platform doesn't support hooks
+        result["startup_status"] = "N"  # Not registered
     
     # Step 5: Auto-attach capability (core always supports this)
     result["auto_attach"] = True
@@ -649,7 +659,7 @@ def check_integration_status(providers: Optional[List[str]] = None,
             "mcp": {"available": False, "registered": False, "message": ""},
             "bootstrap": {"available": False, "status": None},
             "auto_attach": False,
-            "startup_status": "N",  # Y=AUTO, A=ASSISTED, N=NONE
+            "startup_status": "N",  # Y=verified live, H=hook registered (unverified), A=assisted, N=none
             "verified": "not_tested",
         }
         
@@ -666,7 +676,7 @@ def check_integration_status(providers: Optional[List[str]] = None,
         has_mcp = PROVIDER_CONFIG[provider]["mcp_enabled"]
         if has_mcp:
             status["mcp"]["available"] = True
-            mcp_support, mcp_msg = _check_mcp_support(provider)
+            mcp_support, mcp_msg = _check_mcp_support(provider, home)
             
             if provider == "codex":
                 mcp_config = home / ".codex/config.toml"

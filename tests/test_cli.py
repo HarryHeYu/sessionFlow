@@ -331,3 +331,107 @@ def test_integrate_subcommands_accept_json(tmp_path, capsys):
     ):
         assert main(argv) == 0, argv
         assert json.loads(capsys.readouterr().out), argv
+
+
+def test_install_and_status_agree_on_startup_status(tmp_path):
+    """Regression: `install_integration` and `check_integration_status` computed
+    `startup_status` from *different* fields -- install off `has_startup_hook`,
+    status off `mcp_enabled`.  For Codex that meant `integrate install codex`
+    printed `N` while `integrate status` printed `A` on the very same machine.
+    The two paths must agree for every provider.
+    """
+    from voyager.skill import (
+        PROVIDER_CONFIG,
+        check_integration_status,
+        install_integration,
+    )
+
+    home = tmp_path / "home"
+    for provider in PROVIDER_CONFIG:
+        (home / f".{provider}").mkdir(parents=True, exist_ok=True)
+
+    for provider in PROVIDER_CONFIG:
+        install_result = install_integration(provider, force=True, home=home)
+        reported = {
+            entry["provider"]: entry
+            for entry in check_integration_status(providers=[provider], home=home)
+        }[provider]
+        assert install_result["startup_status"] == reported["startup_status"], (
+            f"{provider}: install said {install_result['startup_status']!r} "
+            f"but status said {reported['startup_status']!r}"
+        )
+
+
+def test_startup_status_letters_match_the_legend(tmp_path):
+    """Pin the legend so a refactor cannot silently reshuffle it.
+
+    `H` is reserved for a registered native hook; a provider with no hook surface
+    must never report `H`.  Only Claude Code currently has such a surface.
+    """
+    from voyager.skill import (
+        PROVIDER_CONFIG,
+        check_integration_status,
+        install_integration,
+    )
+
+    home = tmp_path / "home"
+    for provider in PROVIDER_CONFIG:
+        (home / f".{provider}").mkdir(parents=True, exist_ok=True)
+
+    seen = {}
+    for provider in PROVIDER_CONFIG:
+        install_integration(provider, force=True, home=home)
+        entry = {
+            s["provider"]: s
+            for s in check_integration_status(providers=[provider], home=home)
+        }[provider]
+        seen[provider] = entry["startup_status"]
+
+    # Claude Code registers a real hook, so it reports `H` -- never `Y`, because
+    # nothing has observed the provider firing it.
+    assert seen["claude"] == "H"
+    # No hook surface => cannot be `H` or `Y`.
+    for provider in ("grok", "dsh"):
+        assert seen[provider] == "N", (provider, seen[provider])
+    assert seen["codex"] in {"A", "N"}, seen["codex"]
+
+
+def test_already_registered_mcp_reports_assisted_on_both_paths(tmp_path):
+    """Regression: re-running `integrate install` on a machine whose MCP was
+    *already* registered reported `N`, because the code only set the MCP status
+    to `registered` on the branch where it had just performed the registration.
+    `integrate status` meanwhile reported `A`.  Both must say `A`.
+    """
+    from voyager.skill import check_integration_status, install_integration
+
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex/config.toml").write_text(
+        '[mcp_servers.voyager]\ncommand = "voyager"\n', encoding="utf-8"
+    )
+
+    install_result = install_integration("codex", force=True, home=home)
+    status_entry = {
+        s["provider"]: s
+        for s in check_integration_status(providers=["codex"], home=home)
+    }["codex"]
+
+    assert install_result["mcp"]["status"] == "registered"
+    assert install_result["startup_status"] == "A"
+    assert status_entry["startup_status"] == "A"
+
+
+def test_check_mcp_support_honours_the_home_argument(tmp_path):
+    """Regression: `_check_mcp_support` hardcoded `Path.home()`, so `--home`
+    runs silently inspected the real user profile instead of the one given."""
+    from voyager.skill import _check_mcp_support
+
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".codex/config.toml").write_text(
+        '[mcp_servers.voyager]\ncommand = "voyager"\n', encoding="utf-8"
+    )
+
+    supported, message = _check_mcp_support("codex", home)
+    assert supported is True
+    assert "already registered" in message.lower()
