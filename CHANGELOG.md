@@ -120,6 +120,17 @@ All notable changes to Voyager are documented here. Format loosely follows
   died with a traceback instead of a verdict. The guard and the invocation now
   agree on the path, and `OSError` is caught so a provider that refuses to start
   is reported as a failed check rather than crashing the probe.
+- **`voyager resume` — and every other launch — was broken on Windows** — each
+  `resume_cmd` is built as a friendly string with a bare provider name
+  (`claude --resume <id>`, `codex resume <id>`, …), and that string was handed
+  straight to `subprocess.call()`. On Windows these CLIs are npm `.cmd` shims,
+  and `subprocess` does not consult `PATHEXT` the way a shell does, so the
+  launch raised `FileNotFoundError` / WinError 2 for a CLI that
+  `integrations/capabilities.py` had just located with `shutil.which()` —
+  detection and launch disagreed on the same executable. `resume`,
+  `continue --launch`, `handoff --launch` and `switch` now go through one
+  `_launch()` helper that resolves `argv[0]` first, while the printed and
+  exported command stays the readable bare form.
 
 ### Added
 - `H` startup status: **native hook registered, live trigger not yet verified**.

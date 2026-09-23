@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -42,6 +43,39 @@ def _expand_path_args(args) -> None:
         value = getattr(args, name, None)
         if isinstance(value, str) and value:
             setattr(args, name, os.path.expanduser(value))
+
+
+def _spawn_argv(argv):
+    """Return `argv` with `argv[0]` replaced by the path it resolves to.
+
+    Every `resume_cmd` is built as a friendly string with a *bare* provider
+    name (`claude --resume <id>`, `codex resume <id>`, ...), and that string is
+    also what gets printed and exported, so it has to stay readable.  But a
+    bare name is not always launchable: on Windows these providers are usually
+    installed by npm as `claude.CMD` shims, and `subprocess` does not consult
+    `PATHEXT` the way a shell does, so spawning the bare name raises
+    `FileNotFoundError` / WinError 2 even though the CLI is plainly on PATH.
+    Detection already used `shutil.which()`; the launch has to agree with it.
+
+    A name that cannot be resolved is passed through unchanged, so the
+    existing `OSError` handling still reports it rather than hiding it.
+    """
+    if not argv:
+        return argv
+    resolved = shutil.which(argv[0])
+    if resolved and resolved != argv[0]:
+        return [resolved, *argv[1:]]
+    return list(argv)
+
+
+def _launch(argv):
+    """Run a provider CLI, resolving `argv[0]` first (see `_spawn_argv`).
+
+    Centralised so the resolution cannot be forgotten at one of the launch
+    sites -- "remember to convert it at every call site" is exactly the
+    convention that was missed for path expansion.
+    """
+    return subprocess.call(_spawn_argv(argv))
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +437,7 @@ def cmd_resume(args) -> int:
     parts = cmd.split()
     print(f"$ {cmd}")
     try:
-        return subprocess.call(parts)
+        return _launch(parts)
     except KeyboardInterrupt:
         return 130
     except OSError as e:
@@ -774,7 +808,7 @@ def _continue_from_thread(store: Store, t, args) -> int:
                     print("add --launch to start it now")
                     return 0
                 try:
-                    return subprocess.call(argv)
+                    return _launch(argv)
                 except KeyboardInterrupt:
                     return 130
         args.to = "claude"
@@ -851,7 +885,7 @@ def cmd_continue(args) -> int:
                   else "(--no-launch: not launching)")
             return 0
         try:
-            return subprocess.call(argv)
+            return _launch(argv)
         except KeyboardInterrupt:
             return 130
     # native resume unsupported (e.g. ZCode): fall back to a handoff package
@@ -933,7 +967,7 @@ def cmd_switch(args) -> int:
             output_lines.append("native resume ready")
         else:
             try:
-                rc = subprocess.call(res["argv"])
+                rc = _launch(res["argv"])
                 if rc != 0:
                     # Launch failed - release lease
                     if thread_id and lease_token:
@@ -971,7 +1005,7 @@ def cmd_switch(args) -> int:
             output_lines.append("transplant ready")
         else:
             try:
-                rc = subprocess.call(res["argv"])
+                rc = _launch(res["argv"])
                 if rc != 0:
                     if thread_id and lease_token:
                         from .store import Store as _Store
@@ -1005,7 +1039,7 @@ def cmd_switch(args) -> int:
                   "resolves the pending attach".format(t["id"]))
         else:
             try:
-                rc = subprocess.call(res["argv"])
+                rc = _launch(res["argv"])
                 if rc == 0:
                     output_lines.append("switch complete: after the target agent starts, run "
                           "`voyager thread attach {0} <new-session-id>` to link the "
@@ -1291,7 +1325,7 @@ def _merge_and_handoff(store: Store, rows: list, args) -> int:
     print(f"$ {argv[0]} \"<continuation prompt>\"")
     if getattr(args, "launch", False):
         try:
-            return subprocess.call(argv)
+            return _launch(argv)
         except KeyboardInterrupt:
             return 130
         except OSError as e:
@@ -1325,7 +1359,7 @@ def _handoff_from_row(store: Store, row, args) -> int:
     print(f"$ {argv[0]} \"<handoff prompt>\"")
     if getattr(args, "launch", False):
         try:
-            return subprocess.call(argv)
+            return _launch(argv)
         except KeyboardInterrupt:
             return 130
         except OSError as e:

@@ -3,17 +3,23 @@ export, continue, brief and the guards around session resolution.
 
 Everything runs through ``voyager.cli.main`` with an explicit ``--db`` in
 tmp_path — the real index at ~/.voyager/index.db is never touched, and no
-agent process is ever launched.
+agent process is ever launched (the launch-resolution tests below run a fake
+CLI of their own, never a real provider).
 """
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from voyager import cli as cli_mod
 from voyager.cli import main
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 CODEX_NATIVE = "11111111-2222-3333-4444-555555555555"
 ZCODE_NATIVE = "sess_z9"
@@ -641,3 +647,96 @@ def test_cwd_flag_expands_tilde_for_hook_startup(monkeypatch):
 
     assert main(["hook", "startup", "--provider", "grok", "--cwd", "~"]) == 0
     assert seen["cwd"] == str(Path.home())
+
+
+# --- launching a provider CLI ----------------------------------------------
+#
+# `resume_cmd` is a friendly string with a bare provider name (`claude --resume
+# <id>`), and that string is printed and exported, so it must stay readable.
+# But a bare name is not always launchable: on Windows these CLIs are npm
+# `.cmd` shims and `subprocess` does not consult PATHEXT the way a shell does,
+# so spawning the bare name raised FileNotFoundError / WinError 2 even though
+# `shutil.which()` found it. `_spawn_argv`/`_launch` resolve it first.
+
+FAKE_CLI = "voyager_fakecli_xyz"
+
+
+def _install_fake_cli(bin_dir: Path, name: str = FAKE_CLI) -> Path:
+    """Put a runnable `name` on PATH and return the file it resolves to."""
+    if os.name == "nt":
+        path = bin_dir / f"{name}.cmd"
+        path.write_text("@echo off\r\nexit /b 0\r\n", encoding="ascii")
+    else:
+        path = bin_dir / name
+        path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        path.chmod(0o755)
+    return path
+
+
+def _prepend_to_path(monkeypatch, bin_dir: Path) -> None:
+    monkeypatch.setenv(
+        "PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+
+
+def test_spawn_argv_resolves_a_cli_on_path(tmp_path, monkeypatch):
+    """The bug: the bare name is not launchable, the resolved path is."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    real = _install_fake_cli(bin_dir)
+    _prepend_to_path(monkeypatch, bin_dir)
+
+    argv = cli_mod._spawn_argv([FAKE_CLI, "resume", "abc"])
+    assert Path(argv[0]) == real
+    assert argv[1:] == ["resume", "abc"]
+
+
+def test_spawn_argv_leaves_an_unresolvable_name_untouched():
+    """Unknown names pass through, so the existing OSError handling reports them."""
+    argv = [FAKE_CLI, "resume", "abc"]
+    assert cli_mod._spawn_argv(argv) == argv
+
+
+def test_spawn_argv_tolerates_an_empty_argv():
+    assert cli_mod._spawn_argv([]) == []
+
+
+def test_spawn_argv_does_not_mangle_an_absolute_path(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    real = _install_fake_cli(bin_dir)
+
+    argv = cli_mod._spawn_argv([str(real), "resume"])
+    assert Path(argv[0]) == real
+    assert argv[1:] == ["resume"]
+
+
+@pytest.mark.skipif(
+    os.name != "nt", reason=".cmd shims are Windows-specific")
+def test_launch_starts_a_cmd_shim(tmp_path, monkeypatch):
+    """Regression guard for the Windows failure, premise included.
+
+    The premise assertion pins *why* `_launch` exists: spawning the bare name
+    raises WinError 2. If that ever stops being true, this test says so and
+    the helper can be reconsidered.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _install_fake_cli(bin_dir)
+    _prepend_to_path(monkeypatch, bin_dir)
+
+    with pytest.raises(FileNotFoundError):
+        subprocess.call([FAKE_CLI])
+
+    assert cli_mod._launch([FAKE_CLI, "--version"]) == 0
+
+
+def test_provider_launches_go_through_the_resolving_helper():
+    """Guard: no launch site may call `subprocess` directly again.
+
+    Same reasoning as `_expand_path_args` -- a transformation that has to be
+    repeated at every call site is one that will eventually be missed.
+    """
+    source = (REPO_ROOT / "voyager" / "cli.py").read_text(encoding="utf-8")
+    assert source.count("subprocess.call(") == 1, (
+        "a provider launch site bypasses _launch()")
+    assert "return subprocess.call(_spawn_argv(argv))" in source
