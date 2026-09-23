@@ -75,7 +75,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 339 collected: 321 passed, 18 skipped (synthetic fixtures, no provider data)
+python -m pytest tests/ -q     # 352 collected: 334 passed, 18 skipped (synthetic fixtures, no provider data)
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -294,7 +294,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 339 collected: 321 passed, 18 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration
+python -m pytest tests/ -q                # 352 collected: 334 passed, 18 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration
 python scripts/run_tests_core_only.py     # same suite with no optional deps (skips extras)
 ```
 

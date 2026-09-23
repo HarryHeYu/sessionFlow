@@ -99,6 +99,18 @@ All notable changes to Voyager are documented here. Format loosely follows
   For the writers that is the identical failure to the one above: the session
   file is written to `./~/.codex/sessions/...` inside the working directory.
   All five sites now expand.
+- **The `--e2e` probe accepted an exit code as proof the hook fired** —
+  `scripts/verify_claude_sessionstart.py` is the check that is supposed to settle
+  whether Claude Code really invokes the `SessionStart` hook, and its docstring
+  called it "the authoritative end-to-end probe". But it only asserted that
+  `claude --init-only` exited `0`, which proves Claude started and quit — not
+  that the hook ran. It now reads the hook's own trace log
+  (`~/.voyager/logs/provider-hooks.jsonl`) and requires a `SessionStart_parsed`
+  record whose `session_id` is not the synthetic one its own check 4 uses;
+  "hook ran but got no stdin" is reported separately from "hook never ran".
+  Freshness is judged from each record's `ts`, not its file offset, because
+  `_append_jsonl()` trims the log to its last ~200 KB past 1 MB — an offset could
+  otherwise shift mid-probe and drop the very record being looked for.
 
 ### Added
 - `H` startup status: **native hook registered, live trigger not yet verified**.
@@ -151,7 +163,7 @@ All notable changes to Voyager are documented here. Format loosely follows
     `Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home))` line fixed above.
 
 ### Notes
-- Test suite: `339 collected → 321 passed, 18 skipped, 0 failed`.
+- Test suite: `352 collected → 334 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.
