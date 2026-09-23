@@ -10,6 +10,21 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Fixed
+- **A native `SessionStart` could never auto-attach (dead end)** —
+  `startup_continuity()` reported `attach_status="pending_resolve"` from the
+  "native session not yet indexed" branch but wrote nothing at all.
+  `resolve_pending_attaches()` only walks *open pending rows*, and the sole other
+  production writer was the explicit switch flow — so the state the primitive
+  reported was unreachable, and a natively started session was never attached to
+  its WorkThread. That is precisely the zero-manual-command path the whole design
+  exists for. The branch now records the intent through the existing
+  `pending_record()` API (`thread_pending` gains a `native_session_id` column, DDL
+  plus additive migration); the resolver narrows to the named session when the
+  pending carries one and keeps the uniqueness rule for switch-created pendings,
+  which do not. No second mechanism and no fake session row — the flow stays
+  "native id known → pending → scanner indexes the real session → resolver
+  attaches it". Six regression tests in `tests/test_auto.py` cover the chain,
+  mutation-verified against both halves of the fix.
 - **Native `SessionStart` hook registration (RC6)** — `ClaudeIntegration.install()`
   emitted an invented *flat* schema (`hooks.SessionStart[] = {command, ...}`) that
   Claude Code does not read, and the CLI's `integrate install` never called it at
@@ -183,7 +198,7 @@ All notable changes to Voyager are documented here. Format loosely follows
     `Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home))` line fixed above.
 
 ### Notes
-- Test suite: `363 collected → 345 passed, 18 skipped, 0 failed`.
+- Test suite: `369 collected → 351 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.
