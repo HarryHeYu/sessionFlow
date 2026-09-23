@@ -76,7 +76,10 @@ def test_hook_output_filtering():
         result = filter_for_gbk(input_str)
         # Verify Chinese characters preserved
         for c in input_str:
-            if "\u4e00" <= ord(c) <= "\u9fff":
+            # ord() returns an int, so the bounds must be ints. Comparing against
+            # the *string* "\u4e00" raised TypeError on every run — this
+            # assertion never actually executed.
+            if 0x4E00 <= ord(c) <= 0x9FFF:
                 assert c in result, f"Chinese '{c}' should be preserved in '{result}'"
         
         # Verify no UnicodeEncodeError would occur
