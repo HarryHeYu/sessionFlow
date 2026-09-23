@@ -91,6 +91,14 @@ All notable changes to Voyager are documented here. Format loosely follows
   boundary (`_expand_path_args`), because these values are consumed in three
   different modules (`cli`, `integrations.hook`, `launcher`) and "convert it at
   every call site" is precisely the convention that was missed.
+- **Environment-supplied directories did not expand `~` either** — the same
+  defect one layer down. `VOYAGER_HOME_OVERRIDE` (which redirects the
+  transcript writers), `VOYAGER_LOG_DIR`, `VOYAGER_CONTEXT_DIR`,
+  `VOYAGER_ZCODE_DB` and ZCode's `HOME` lookup were all read as
+  `Path(os.environ.get(...))`, so a value like `~` became a *relative* path.
+  For the writers that is the identical failure to the one above: the session
+  file is written to `./~/.codex/sessions/...` inside the working directory.
+  All five sites now expand.
 
 ### Added
 - `H` startup status: **native hook registered, live trigger not yet verified**.
@@ -131,7 +139,7 @@ All notable changes to Voyager are documented here. Format loosely follows
   `hook`.
 
 ### Notes
-- Test suite: `332 collected → 314 passed, 18 skipped, 0 failed`.
+- Test suite: `336 collected → 318 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.

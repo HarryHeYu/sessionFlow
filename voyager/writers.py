@@ -85,7 +85,7 @@ def _require_lease(store: Store, thread_id: str, holder: str) -> Dict[str, Any]:
 
 def _codex_writer(store: Store, thread_id: str, members: List[Any],
                   home: Path) -> Dict[str, Any]:
-    home = Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home))
+    home = Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home)).expanduser()
     new_native = str(uuid.uuid4())
     sid = f"codex:{new_native}"
     events = []
@@ -129,7 +129,7 @@ def _codex_writer(store: Store, thread_id: str, members: List[Any],
 
 def _grok_writer(store: Store, thread_id: str, members: List[Any],
                  home: Path) -> Dict[str, Any]:
-    home = Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home))
+    home = Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home)).expanduser()
     new_native = str(uuid.uuid4())
     cwd = members[0]["cwd"] if members else None
     encoded = quote(cwd or "unknown")

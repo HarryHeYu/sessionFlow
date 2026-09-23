@@ -49,3 +49,25 @@ def test_zcode_scan(adapter_of, patch_paths, zcode_fixture):
             os.environ['VOYAGER_ZCODE_DB'] = original_env
         elif 'VOYAGER_ZCODE_DB' in os.environ:
             del os.environ['VOYAGER_ZCODE_DB']
+
+
+def test_zcode_db_env_override_expands_tilde(monkeypatch, tmp_path):
+    """`VOYAGER_ZCODE_DB=~/x` must resolve against HOME, not the cwd.
+
+    Left literal, `Path("~")` is *relative*, so the override pointed at a
+    directory inside whatever the process working directory happened to be.
+    """
+    from voyager.adapters import zcode
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("VOYAGER_ZCODE_DB", "~/z/db.sqlite")
+
+    class _Con:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(zcode, "_open_ro", lambda p: _Con())
+    monkeypatch.setattr(zcode, "_validate_zcode_schema", lambda con: True)
+
+    assert zcode.discover_zcode_db() == [tmp_path / "z/db.sqlite"]

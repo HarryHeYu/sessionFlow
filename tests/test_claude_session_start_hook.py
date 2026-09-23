@@ -414,5 +414,53 @@ class TestHardening(HookTestCase):
             sys.stdin = original
 
 
+class TestEnvDirOverrides(unittest.TestCase):
+    """`VOYAGER_LOG_DIR` / `VOYAGER_CONTEXT_DIR` name directories and come from
+    the environment, so `~` has to be expanded.  Left literal, `Path("~")` is
+    *relative*, and the directory is created inside whatever the process cwd
+    happens to be instead of under HOME.
+
+    Deliberately NOT a ``HookTestCase``: its ``setUp`` rewrites
+    ``VOYAGER_CONTEXT_DIR``, which is one of the variables under test here.
+    """
+
+    _VARS = ("HOME", "USERPROFILE", "VOYAGER_LOG_DIR", "VOYAGER_CONTEXT_DIR")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+        self._saved = {k: os.environ.get(k) for k in self._VARS}
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _point_home_at_tmp(self):
+        # expanduser() reads USERPROFILE on Windows and HOME elsewhere.
+        os.environ["HOME"] = str(self.home)
+        os.environ["USERPROFILE"] = str(self.home)
+
+    def test_log_dir_expands_tilde(self):
+        self._point_home_at_tmp()
+        os.environ["VOYAGER_LOG_DIR"] = "~/voy-logs"
+
+        d = hook._log_dir()
+        self.assertTrue(d.is_absolute(), f"not absolute: {d}")
+        self.assertEqual(d, self.home / "voy-logs")
+
+    def test_spill_dir_expands_tilde(self):
+        self._point_home_at_tmp()
+        os.environ["VOYAGER_CONTEXT_DIR"] = "~/voy-ctx"
+
+        d = hook._spill_dir()
+        self.assertTrue(d.is_absolute(), f"not absolute: {d}")
+        self.assertEqual(d, self.home / "voy-ctx")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

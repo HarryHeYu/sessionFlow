@@ -51,7 +51,7 @@ def _log_dir() -> Path:
     """Directory for hook traces. Override with VOYAGER_LOG_DIR."""
     override = os.environ.get("VOYAGER_LOG_DIR")
     if override:
-        return Path(override)
+        return Path(override).expanduser()
     return Path.home() / ".voyager" / "logs"
 
 
@@ -348,7 +348,7 @@ def _spill_dir() -> Path:
     """Directory for spilled bundles. Override with VOYAGER_CONTEXT_DIR."""
     override = os.environ.get("VOYAGER_CONTEXT_DIR")
     if override:
-        return Path(override)
+        return Path(override).expanduser()
     return Path.home() / ".voyager" / "context"
 
 

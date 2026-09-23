@@ -187,3 +187,29 @@ def test_switch_mode_transcript_unsupported(tmp_path, leased_thread, capsys):
     cap = capsys.readouterr()
     combined = cap.out + cap.err
     assert "unsupported" in combined or "TIMEOUT" in combined
+
+
+def test_codex_writer_expands_tilde_in_home_override(leased_thread, monkeypatch,
+                                                     tmp_path):
+    """`VOYAGER_HOME_OVERRIDE=~` must resolve against HOME, not the cwd.
+
+    Left literal it is a *relative* path, so the transplanted session file went
+    to `./~/.codex/sessions/...` inside the working directory -- the same
+    failure mode that put a stray `~/` directory in this repo's root.
+
+    The assertion pins the *expanded home*, not merely "an absolute path": a
+    writer that honoured the override but resolved it somewhere else would pass
+    an absolute-path check while still being wrong.
+    """
+    store, tid, home = leased_thread
+    ok, _ = store.thread_lease_acquire(tid, "codex", pid=os.getpid())
+    assert ok
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOYAGER_HOME_OVERRIDE", "~/override-home")
+
+    result = write_transcript(store, tid, "codex", home=home)
+
+    written = Path(result["path"])
+    assert written.is_absolute(), written
+    assert home / "override-home" in written.parents, written
+    assert not (tmp_path / "~").exists(), "session file landed in the cwd"

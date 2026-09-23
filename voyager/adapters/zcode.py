@@ -29,7 +29,7 @@ def _resolve_home_path(home: Optional[Path] = None) -> Path:
     # Prefer explicit HOME env var for cross-platform test consistency
     env_home = os.environ.get("HOME")
     if env_home:
-        return Path(env_home)
+        return Path(env_home).expanduser()
     
     return Path.home()
 
@@ -109,7 +109,7 @@ def discover_zcode_db(home: Optional[Path] = None) -> List[Path]:
     # Priority 1: Environment variable override - exact match, stop searching
     env_db = os.environ.get("VOYAGER_ZCODE_DB")
     if env_db:
-        env_path = Path(env_db)
+        env_path = Path(env_db).expanduser()
         con = _open_ro(env_path)
         if con and _validate_zcode_schema(con):
             con.close()
