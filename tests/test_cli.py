@@ -278,3 +278,56 @@ def test_brief_digest(indexed_store, capsys):
     empty = _run(capsys, ["--db", str(indexed_store.db_path), "brief",
                           "--hours", "0.000001"])
     assert "no sessions updated in the last" in empty
+
+
+# --- integrate -------------------------------------------------------------
+
+def _fake_home(tmp_path):
+    """A throwaway HOME that already has `.claude`.
+
+    `install_integration` bails out with "provider not installed" when the
+    provider's config directory is absent, so it must exist for the hook path
+    to be exercised.  Using `--home` also guarantees the real `~/.claude` is
+    never touched by the suite.
+    """
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    return home
+
+
+def test_integrate_install_registers_native_hook(tmp_path, capsys):
+    home = _fake_home(tmp_path)
+    assert main(["integrate", "install", "claude", "--home", str(home)]) == 0
+    assert "hook: installed" in capsys.readouterr().out
+
+    cfg = json.loads((home / ".claude/settings.json").read_text(encoding="utf-8"))
+    entries = cfg["hooks"]["SessionStart"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "startup"
+    assert entries[0]["hooks"][0]["type"] == "command"
+
+
+def test_integrate_remove_does_not_crash(tmp_path, capsys):
+    """Regression: `integrate remove` read `args.json` while its subparser
+    never defined `--json`, so *every* removal died with AttributeError before
+    removing anything."""
+    home = _fake_home(tmp_path)
+    assert main(["integrate", "install", "claude", "--home", str(home)]) == 0
+    capsys.readouterr()
+
+    assert main(["integrate", "remove", "claude", "--home", str(home)]) == 0
+    assert "hook: removed" in capsys.readouterr().out
+
+    cfg = json.loads((home / ".claude/settings.json").read_text(encoding="utf-8"))
+    assert "SessionStart" not in cfg.get("hooks", {})
+
+
+def test_integrate_subcommands_accept_json(tmp_path, capsys):
+    home = _fake_home(tmp_path)
+    for argv in (
+        ["integrate", "install", "claude", "--home", str(home), "--json"],
+        ["integrate", "status", "claude", "--home", str(home), "--json"],
+        ["integrate", "remove", "claude", "--home", str(home), "--json"],
+    ):
+        assert main(argv) == 0, argv
+        assert json.loads(capsys.readouterr().out), argv

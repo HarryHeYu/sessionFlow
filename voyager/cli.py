@@ -525,6 +525,13 @@ def cmd_integrate(args) -> int:
         print(f"             {bootstrap.get('path')}")
     elif bootstrap.get("status") == "error":
         print(f"  bootstrap: error - {bootstrap.get('error')}")
+
+    hook = result.get("hook") or {}
+    if hook.get("status") == "installed":
+        print(f"  hook: installed (matcher={hook.get('matcher')})")
+        print(f"        {hook.get('command')}")
+    elif hook:
+        print(f"  hook: {hook.get('status')} - {hook.get('message', '')}")
     
     if result.get("warnings"):
         print("  warnings:")
@@ -563,10 +570,11 @@ def cmd_integrate_status(args) -> int:
     print("\nLegend:")
     print("  Skill: Y=installed, N=not found")
     print("  MCP:   R=registered, A=available(unsupported), N=no support")
-    print("  Start: Y=verified zero-touch, A=startup-assisted, N=no hook")
+    print("  Start: Y=zero-touch verified live, H=native hook registered (trigger unverified),")
+    print("         A=startup-assisted, N=no hook")
     print("  Auto:  Y=core supports auto-attach")
-    print("\nNote: No provider yet has 'Y' for startup - all are STARTUP_ASSISTED or BEST_EFFORT")
-    print("      Real provider dogfood tests pending.")
+    print("\nNote: 'H' means the hook is registered in the provider's config and the handler is")
+    print("      verified, but nothing has yet observed the provider firing it. Only 'Y' claims that.")
     return 0
 
 
@@ -603,7 +611,12 @@ def cmd_integrate_remove(args) -> int:
         if boot.get("paths"):
             for p in boot["paths"]:
                 print(f"             {p}")
-    
+
+    hook = result.get("hook") or {}
+    if hook:
+        removed = hook.get("removed", 0)
+        print(f"  hook: {hook.get('status')} ({removed} entr{'y' if removed == 1 else 'ies'} removed)")
+
     return 0 if result["status"] != "error" else 1
 
 
@@ -1500,6 +1513,8 @@ def main(argv=None) -> int:
     irmp.add_argument("provider", choices=["codex", "claude", "grok", "dsh"],
                       help="provider to remove integration for")
     irmp.add_argument("--home", help="override HOME for paths (testing)")
+    irmp.add_argument("--json", action="store_true",
+                      help="output results as JSON")
     irmp.set_defaults(func=cmd_integrate_remove)
     
     # voyager hook startup - provider lifecycle hook handler
