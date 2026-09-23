@@ -194,10 +194,46 @@ pip install -e ".[mcp]"
 
 # Run manual procedure above
 voyager --help
-python -m pytest tests/ -v  # For hermetic verification
+python -m pytest tests/ -q  # For hermetic verification
 ```
 
 The **automated tests** guarantee that all core logic is correct. This manual procedure validates that real agents can actually consume the output.
+
+---
+
+## Closing the remaining gap (the only open item)
+
+Everything except one thing is already machine-verified. You can confirm the
+whole chain yourself, without touching your real profile:
+
+```bash
+# 1. Point the verifier at a scratch home and let it install + run the hook.
+voyager integrate install claude --home "$SCRATCH"
+python scripts/verify_claude_sessionstart.py --home "$SCRATCH"
+```
+
+That checks settings.json, the matcher, path resolution, the shell invocation,
+exit code, the `hookSpecificOutput` protocol, and the 10 000-char cap. It
+proves the handler works **when called** — it cannot prove Claude Code *calls*
+it, because that is the provider's behaviour, not ours.
+
+The last mile is therefore a single observation, and only you can make it:
+
+```bash
+# 2. Ask Claude Code itself to run SessionStart headlessly, then inspect it.
+claude --debug hooks --init-only
+python scripts/verify_claude_sessionstart.py --e2e
+```
+
+When `claude --init-only` exits 0 **and** the hook's own log shows an entry
+whose `session_id` is a real Claude Code session (not the synthetic
+`voyager-verify-0001`), set `SESSIONSTART_TRIGGER_LIVE_VERIFIED = true` and
+promote Claude Code from `H` to `Y`. Until that happens the honest answer stays
+`H`, and Zero-Touch Final Acceptance stays **OPEN**.
+
+> Do not promote on the strength of a green test suite or a passing simulation.
+> pytest uses synthetic fixtures; the simulation above uses a synthetic
+> `session_id`. Neither observes the provider.
 
 ---
 

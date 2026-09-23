@@ -18,7 +18,12 @@ nothing. This script checks the whole chain:
 Usage:
     python scripts/verify_claude_sessionstart.py
     python scripts/verify_claude_sessionstart.py --expect-context
+    python scripts/verify_claude_sessionstart.py --home /tmp/scratch-home
     python scripts/verify_claude_sessionstart.py --e2e
+
+`--home` scopes checks 1-5 to a scratch profile, which is how the chain is
+exercised in CI. The `--e2e` probe (`claude --init-only`) always reads the real
+profile and therefore cannot be home-scoped.
 
 Exit code 0 only if every check that was requested passed. `[SKIP]` lines are
 reported as failures when the corresponding flag asked for them.
@@ -58,8 +63,15 @@ def _configure_stdout() -> None:
             pass
 
 
-def settings_path() -> Path:
-    return Path.home() / ".claude" / "settings.json"
+def settings_path(home=None) -> Path:
+    """Path to the settings file being verified.
+
+    `home` exists so the chain can be exercised against a scratch profile
+    (`voyager integrate install claude --home <dir>`) without touching the
+    real one. It used to hardcode `Path.home()`, which made the whole script
+    untestable on a machine whose real profile had no Voyager hook.
+    """
+    return (Path(home) if home is not None else Path.home()) / ".claude" / "settings.json"
 
 
 def load_settings(path: Path):
@@ -164,17 +176,26 @@ def main() -> int:
     parser.add_argument("--probe-file",
                         help="path the hook is expected to touch (only meaningful "
                              "when the hook is a native probe command)")
+    parser.add_argument("--home",
+                        help="profile to verify instead of the real one (checks "
+                             "1-5 only; `--e2e` always exercises the real profile)")
     parser.add_argument("--timeout", type=int, default=180,
                         help="seconds to wait for the hook command")
     args = parser.parse_args()
+
+    home = Path(args.home).expanduser() if args.home else Path.home()
 
     failures = 0
     print("=" * 66)
     print("Claude Code native SessionStart hook verification")
     print("=" * 66)
+    print(f"{INFO} home={home}")
+    if args.home and args.e2e:
+        print(f"{INFO} note: --home scopes checks 1-5. `claude --init-only` always "
+              f"reads the real profile, so the --e2e probe is NOT home-scoped.")
 
     # ---- 1. settings.json -------------------------------------------------
-    path = settings_path()
+    path = settings_path(home)
     if not path.exists():
         print(f"{FAIL} {path} does not exist")
         return 1
@@ -213,7 +234,7 @@ def main() -> int:
     # ---- 4. run it exactly like Claude does ------------------------------
     payload = {
         "session_id": "voyager-verify-0001",
-        "transcript_path": str(Path.home() / ".claude" / "projects" / "verify.jsonl"),
+        "transcript_path": str(home / ".claude" / "projects" / "verify.jsonl"),
         "cwd": str(Path.cwd()),
         "hook_event_name": "SessionStart",
         "source": "startup",

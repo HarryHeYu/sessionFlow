@@ -470,6 +470,48 @@ which exercises the handler but proves nothing about the trigger. The payloads
 used here carry a synthetic `session_id`, and that is what shows up in the logs
 below — not Claude Code.
 
+### Reproducible against a scratch profile
+
+The verifier used to hardcode `Path.home()`, so the chain could only ever be
+checked against the real profile — and on a machine whose real profile has no
+Voyager hook (i.e. every fresh machine) it stopped at "settings.json does not
+exist" and proved nothing. It now takes `--home`, so the chain is reproducible
+without touching the real profile:
+
+```text
+$ voyager integrate install claude --home C:\Windows\TEMP\voyager-verify-home
+$ python scripts/verify_claude_sessionstart.py --home C:\Windows\TEMP\voyager-verify-home
+[INFO] home=C:\Windows\TEMP\voyager-verify-home
+[PASS] settings.json parsed (BOM present: False)
+[INFO] matcher='startup' timeout=120
+[INFO] command="...python.exe" "E:\code\voyager\voyager\integrations\claude_session_start.py"
+[PASS] matcher 'startup' is one Claude Code will match
+[PASS] interpreter and script paths resolve
+[INFO] exit=0 elapsed=16.6s stdout=13255B stderr=0B
+[PASS] hook exited 0
+[PASS] hookSpecificOutput.hookEventName = SessionStart
+[PASS] additionalContext 9000 chars (under the 10000 cap)
+context delivered: yes, 9000 chars
+RESULT: all requested checks passed
+```
+
+(The `16.6s` is sandbox process-spawn overhead, same caveat as above.)
+
+Two things this re-run establishes that the earlier block did not:
+
+- **The command adapts to the installing interpreter.** The block above shows
+  `C:\Python314\python.exe`; this one shows the managed 3.13.12. Both forms
+  resolve and run, so nothing in the handler depends on which interpreter the
+  user happened to run `voyager` with.
+- **The chain survives a home that has never seen Voyager.** Install writes the
+  schema, the verifier reads it back and executes it. That is exactly the path a
+  new user takes, and it is now a command anyone can re-run rather than a
+  hand-performed procedure.
+
+`--home` deliberately does **not** scope the `--e2e` probe: `claude --init-only`
+reads the real profile, so that flag cannot be home-scoped and the script says
+so when both are passed.
+
 ### Evidence that the context cache (P1-4) now works
 
 Three consecutive simulated invocations from `E:\code\voyager`, read back from

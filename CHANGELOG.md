@@ -69,7 +69,10 @@ All notable changes to Voyager are documented here. Format loosely follows
 - `tests/test_context_cache.py` (39 tests) — cache helpers, hostile input,
   end-to-end persistence, static guards.
 - `scripts/verify_claude_sessionstart.py` — end-to-end hook verifier that fails
-  loudly instead of passing on skips.
+  loudly instead of passing on skips. It now accepts `--home`, so the whole
+  install → settings.json → shell → hook-JSON chain can be exercised against a
+  scratch profile instead of only the real one. (`--home` deliberately does not
+  scope the `--e2e` probe, which always reads the real profile.)
 - `tests/test_cli.py` — four regression tests pinning the lifecycle invariants
   above: install/status must agree per provider, the `Y`/`H`/`A`/`N` legend must
   hold, an already-registered MCP must still report assisted, and

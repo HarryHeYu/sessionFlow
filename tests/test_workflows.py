@@ -105,3 +105,23 @@ def test_failure_reporting_script_exists():
             assert "ci_report_failures.py" in body, (
                 f"{wf.name} runs pytest but does not report failures as annotations"
             )
+
+
+def test_sessionstart_verifier_can_be_pointed_at_a_scratch_home():
+    """Guard: the verifier must not hardcode the real profile.
+
+    `settings_path()` used to bake in `Path.home()`, so on any machine whose
+    real profile has no Voyager hook -- that is, every fresh machine -- the
+    script stopped at "settings.json does not exist" and proved nothing.
+    `--home` is what makes the install -> settings.json -> shell -> hook-JSON
+    chain reproducible, so losing it is a regression worth failing on.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    source = (repo_root / "scripts" / "verify_claude_sessionstart.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"--home"' in source, "verifier lost its --home flag"
+    assert "def settings_path(home" in source, (
+        "settings_path must accept a home argument rather than hardcoding "
+        "Path.home()"
+    )
