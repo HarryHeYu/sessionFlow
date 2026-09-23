@@ -208,8 +208,10 @@ class TestClaudeIntegration:
         result = claude.install()
         
         assert result["status"] == "installed"
-        assert "SESSION_START_ZERO_TOUCH" in result["strategy"]
-        assert (tmp_path / ".claude/voyager_session_start.sh").exists()
+        assert result["strategy"] == "NATIVE_SESSIONSTART_HOOK"
+        assert result["matcher"] == "startup"
+        # The obsolete bash wrapper must NOT be created any more.
+        assert not (tmp_path / ".claude/voyager_session_start.sh").exists()
     
     def test_install_additive_merge(self, tmp_path):
         """Test that existing hooks are preserved."""
@@ -237,7 +239,12 @@ class TestClaudeIntegration:
         
         assert len(hooks) == 2
         assert any(h.get("name") == "existing-hook" for h in hooks)
-        assert any(h.get("name") == "voyager-session-start" for h in hooks)
+        voyager = [h for h in hooks if h.get("matcher") == "startup"]
+        assert len(voyager) == 1
+        inner = voyager[0]["hooks"]
+        assert inner[0]["type"] == "command"
+        assert "claude_session_start.py" in inner[0]["command"]
+        assert isinstance(inner[0]["timeout"], int) and inner[0]["timeout"] > 0
     
     def test_remove_only_voyager_entry(self, tmp_path):
         """Test remove preserves user hooks."""
@@ -282,7 +289,8 @@ class TestClaudeIntegration:
         result = claude.install()
         
         assert result["status"] == "error"
-        assert "Malformed" in result.get("message", "")
+        assert result["strategy"] == "FAILED_MALFORMED_CONFIG"
+        assert "malformed" in result.get("message", "").lower()
     
     def test_verify_installed_status(self, tmp_path):
         """Test verify() correctly reports installed state."""
@@ -295,6 +303,124 @@ class TestClaudeIntegration:
         
         assert verify_result["verified"] is True
         assert verify_result["checks"]["voyager_entry_present"] is True
+
+    def test_install_writes_claude_code_schema(self, tmp_path):
+        """The entry must use Claude Code's documented SessionStart shape.
+
+        An earlier revision emitted a flat entry
+        ({"name", "event", "command", "priority", "timeout_ms"}), which Claude
+        Code ignores because it looks for `hooks[].hooks[].type == "command"`.
+        """
+        from voyager.integrations.claude import ClaudeIntegration
+
+        claude = ClaudeIntegration(home=tmp_path)
+        claude.install()
+
+        config = json.loads((tmp_path / ".claude/settings.json").read_text())
+        matchers = config["hooks"]["SessionStart"]
+        assert len(matchers) == 1
+
+        matcher = matchers[0]
+        assert matcher["matcher"] == "startup"
+        assert set(matcher) == {"matcher", "hooks"}
+
+        inner = matcher["hooks"]
+        assert len(inner) == 1
+        assert inner[0]["type"] == "command"
+        assert "claude_session_start.py" in inner[0]["command"]
+        # `timeout` is seconds in Claude Code; the old shape used `timeout_ms`.
+        assert inner[0]["timeout"] == 120
+        assert "timeout_ms" not in inner[0]
+
+    def test_install_command_is_absolute_and_quoted(self, tmp_path):
+        from voyager.integrations.claude import ClaudeIntegration
+
+        claude = ClaudeIntegration(home=tmp_path)
+        command = claude.hook_command(interpreter="/usr/bin/python3")
+
+        assert command == f'"/usr/bin/python3" "{claude.entrypoint}"'
+        assert command.count('"') == 4
+
+    def test_install_upgrades_legacy_flat_entry(self, tmp_path):
+        """A pre-2026-09-21 Voyager entry is replaced, never duplicated."""
+        from voyager.integrations.claude import ClaudeIntegration
+
+        settings_file = tmp_path / ".claude/settings.json"
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        settings_file.write_text(json.dumps({
+            "hooks": {
+                "SessionStart": [
+                    {"name": "voyager-session-start",
+                     "event": "sessionStart",
+                     "command": str(tmp_path / ".claude/voyager_session_start.sh"),
+                     "timeout_ms": 30000},
+                ]
+            }
+        }))
+
+        ClaudeIntegration(home=tmp_path).install()
+
+        matchers = json.loads(settings_file.read_text())["hooks"]["SessionStart"]
+        assert len(matchers) == 1
+        assert matchers[0]["matcher"] == "startup"
+        assert "claude_session_start.py" in matchers[0]["hooks"][0]["command"]
+
+    def test_install_preserves_unrelated_settings_and_backs_up(self, tmp_path):
+        from voyager.integrations.claude import ClaudeIntegration
+
+        settings_file = tmp_path / ".claude/settings.json"
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        settings_file.write_text(json.dumps({
+            "env": {"ANTHROPIC_MODEL": "x"},
+            "permissions": {"allow": ["Bash(cat)"]},
+            "theme": "dark-ansi",
+        }))
+
+        result = ClaudeIntegration(home=tmp_path).install()
+
+        config = json.loads(settings_file.read_text())
+        assert config["env"] == {"ANTHROPIC_MODEL": "x"}
+        assert config["permissions"] == {"allow": ["Bash(cat)"]}
+        assert config["theme"] == "dark-ansi"
+        # A backup of the pre-install file must exist and hold the original.
+        assert result["backup"] and Path(result["backup"]).exists()
+        assert "hooks" not in json.loads(Path(result["backup"]).read_text())
+
+    def test_verify_rejects_legacy_flat_entry(self, tmp_path):
+        """Present-but-inert is not the same as verified."""
+        from voyager.integrations.claude import ClaudeIntegration
+
+        settings_file = tmp_path / ".claude/settings.json"
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        settings_file.write_text(json.dumps({
+            "hooks": {"SessionStart": [{"name": "voyager-session-start",
+                                        "command": "/old/voyager"}]}
+        }))
+
+        checks = ClaudeIntegration(home=tmp_path).verify()["checks"]
+        assert checks["voyager_entry_present"] is False
+        assert checks["command_uses_entrypoint"] is False
+
+    def test_remove_leaves_no_empty_containers(self, tmp_path):
+        from voyager.integrations.claude import ClaudeIntegration
+
+        claude = ClaudeIntegration(home=tmp_path)
+        claude.install()
+        result = claude.remove()
+
+        assert result["removed"] == 1
+        config = json.loads((tmp_path / ".claude/settings.json").read_text())
+        assert "hooks" not in config
+
+    def test_install_errors_when_entrypoint_missing(self, tmp_path):
+        from voyager.integrations.claude import ClaudeIntegration
+
+        claude = ClaudeIntegration(home=tmp_path)
+        claude.entrypoint = tmp_path / "not_there.py"
+        result = claude.install()
+
+        assert result["status"] == "error"
+        assert result["strategy"] == "FAILED_MISSING_ENTRYPOINT"
 
 
 class TestCursorIntegration:
@@ -486,8 +612,9 @@ class TestIdempotency:
         import json
         config = json.loads((tmp_path / ".claude/settings.json").read_text())
         hooks = config["hooks"]["SessionStart"]
-        assert len(hooks) == 1  # Only voyager hook (no duplicates)
-        assert any(h.get("name") == "voyager-session-start" for h in hooks)
+        assert len(hooks) == 1  # Only the voyager matcher (no duplicates)
+        assert hooks[0]["matcher"] == "startup"
+        assert "claude_session_start.py" in hooks[0]["hooks"][0]["command"]
     
     def test_claude_remove_twice_safe(self, tmp_path):
         """Removing twice should be safe."""

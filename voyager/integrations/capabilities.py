@@ -287,38 +287,29 @@ def _detect_claude_capabilities(home: Path) -> ProviderCapabilities:
     mcp_cli_exists = cli_launcher and _has_claude_mcp_command(cli_launcher)
     mcp_supported = mcp_config.exists() or mcp_cli_exists
     
-    # IMPORTANT: Verify session-start hook presence
-    # Search official docs or check for hook configuration files
-    # Current evidence: NO native session-start callback in Claude Code
-    
-    # Check for any hook configuration
-    settings_file = home / ".claude/settings.json"
-    has_hook_config = False
-    if settings_file.exists():
-        try:
-            import json
-            settings = json.loads(settings_file.read_text(encoding="utf-8"))
-            # Look for hook-related fields
-            has_hook_config = any(k.startswith("hook") or k.startswith("on_")
-                                 for k in settings.keys())
-        except (json.JSONDecodeError, OSError):
-            pass
-    
-    # Determine max level based on REAL evidence
-    if global_instruction_supported and skill_system_supported:
-        max_level = ZeroTouchLevel.FIRST_TURN_ZERO_TOUCH
-        notes = [
-            "Relies on CLAUDE.md + Skill for first-turn invocation",
-            "No verified native session-start hook in current version",
-            "Requires agent to follow instruction pattern",
-        ]
-    elif mcp_supported:
-        max_level = ZeroTouchLevel.STARTUP_ASSISTED
-        notes = ["MCP available but requires explicit tool call"]
-    else:
-        max_level = ZeroTouchLevel.STARTUP_ASSISTED
-        notes = ["Best effort via Skill guidance"]
-    
+    # SessionStart hooks: Claude Code DOES support them — the CLI bundle's event
+    # list contains `SessionStart`, and `--init-only` exists specifically to run
+    # Setup + SessionStart:startup headlessly.  What varies per machine is
+    # whether a hook is *registered*, so that is what gets detected here.  An
+    # earlier revision hardcoded "no hook" and stayed wrong after the
+    # integration shipped.
+    from .claude import ClaudeIntegration
+
+    hook_status = ClaudeIntegration(home=home).verify()
+    hook_registered = bool(hook_status["verified"])
+
+    # The platform ceiling is a native session-start hook.  Whether one is
+    # configured here, and whether it has been observed firing, are separate
+    # facts carried by `config_valid` / `hook_invoked` below.
+    max_level = ZeroTouchLevel.SESSION_START_ZERO_TOUCH
+    notes = [
+        "Native SessionStart hooks are supported and Voyager ships a handler",
+        ("Voyager hook registered in ~/.claude/settings.json"
+         if hook_registered else
+         "No Voyager hook registered - run `voyager integrate install claude`"),
+        "Claude Code firing the trigger has NOT been observed yet",
+    ]
+
     return ProviderCapabilities(
         provider="claude",
         name="Claude Code",
@@ -326,11 +317,14 @@ def _detect_claude_capabilities(home: Path) -> ProviderCapabilities:
         global_instruction_supported=global_instruction_supported,
         skill_system_supported=skill_system_supported,
         mcp_supported=mcp_supported,
-        has_session_start_hook=False,
+        has_session_start_hook=True,
         has_agent_spawn_hook=False,
         native_session_id_at_start=False,
         session_file_creation_timing="after_first_turn",
+        stdout_context_injection=True,
         max_zero_touch_level=max_level,
+        config_valid=hook_registered,
+        hook_invoked=False,
         notes=notes,
     )
 

@@ -295,23 +295,27 @@ def _install_claude_bootstrap(target_dir: Path) -> Tuple[str, Optional[str]]:
     # Fall back to manual instruction file
     bootstrap_content = """# Voyager Startup Continuity for Claude Code
 
-Status: STARTUP_ASSISTED (requires manual MCP configuration)
+Status: NATIVE_SESSIONSTART_HOOK (registered; live trigger not yet observed)
 
-Claude Code does not provide verified zero-touch startup hooks.
+Claude Code reads `SessionStart` hooks from ~/.claude/settings.json, and
+Voyager registers one there. It fires without the model having to follow an
+instruction. The handler is verified end-to-end; what is NOT yet verified is
+Claude Code itself firing the hook, so treat the trigger as unproven until you
+have seen it in `claude --debug hooks --init-only`.
 
-Registration steps:
+Install or repair the hook:
+   voyager integrate install claude
 
-1. Register Voyager MCP server:
+Verify the trigger:
+   claude --debug hooks --init-only
+   # expect: Found 1 hook matchers in settings
+
+MCP registration is still useful for in-session tool calls:
    claude mcp add voyager python -m voyager.mcp_server
 
-2. Verify registration:
-   cat ~/.claude/mcp.json | jq '.MCP_SERVERS'
+Restart Claude Code after changing settings.json.
 
-3. Restart Claude Code for changes to take effect
-
-The Skill.md file contains exact invocation instructions for within sessions.
-
-Note: This requires manual one-time setup; not fully automatic at runtime.
+Note: registration is automatic; confirming the trigger is a one-time manual step.
 """
     try:
         bootstrap_file = target_dir / "voyager_claude_bootstrap.md"
@@ -381,7 +385,7 @@ def install_integration(provider: str, force: bool = False,
     
     Returns status dict with fields:
       {provider, skill:installed|up-to-date|error, mcp:registered|available/manual, 
-       bootstrap:installed|generated, startup_status:Y/A/N, auto_attach:bool,
+       bootstrap:installed|generated, startup_status:Y/H/A/N, auto_attach:bool,
        verified:string}
     """
     home = home or Path.home()
@@ -453,7 +457,23 @@ def install_integration(provider: str, force: bool = False,
             mcp_result = {"status": "available", "message": mcp_msg}
     
     result["mcp"] = mcp_result
-    
+
+    # Step 2b: Native lifecycle hook.  Claude Code reads `SessionStart` hooks
+    # from ~/.claude/settings.json, which is the only mechanism that fires
+    # without the model having to follow an instruction.  Registration here
+    # used to be skipped entirely, which is why the hook had to be added by
+    # hand and the CLI's own install looked like it had done nothing.
+    if provider == "claude":
+        from .integrations.claude import ClaudeIntegration
+
+        hook_result = ClaudeIntegration(home=home).install()
+        result["hook"] = hook_result
+        if hook_result.get("status") != "installed":
+            result.setdefault("warnings", []).append(
+                "native SessionStart hook not installed: "
+                + str(hook_result.get("message") or hook_result.get("status"))
+            )
+
     # Step 3: Generate startup instructions
     bootstrap_funcs = {
         "codex": _install_codex_bootstrap,
@@ -467,8 +487,17 @@ def install_integration(provider: str, force: bool = False,
         bs_status, bs_path = bootstrap_func(target.parent)
         result["bootstrap"] = {"status": bs_status, "path": bs_path}
     
-    # Step 4: Determine startup status (Y=AUTO, A=ASSISTED, N=NONE)
-    if PROVIDER_CONFIG[provider]["has_startup_hook"]:
+    # Step 4: Determine startup status
+    #   Y = platform fires the hook automatically AND that was verified live
+    #   H = native hook registered; the live trigger is not verified yet
+    #   A = no hook; assisted via instruction following / MCP
+    #   N = no mechanism
+    hook_ok = result.get("hook", {}).get("status") == "installed"
+    if hook_ok:
+        # Registration is proven; the trigger firing is not, so this is
+        # deliberately not "Y".
+        result["startup_status"] = "H"
+    elif PROVIDER_CONFIG[provider]["has_startup_hook"]:
         if mcp_result["status"] == "registered":
             result["startup_status"] = "A"  # Assisted via instruction following
         else:
@@ -579,6 +608,12 @@ def uninstall_integration(provider: str, home: Optional[Path] = None) -> Dict[st
             else:
                 result["mcp"] = {"status": "not-found", "path": str(mcp_file)}
     
+    # Step 2b: Remove the native lifecycle hook (Claude Code).
+    if provider == "claude":
+        from .integrations.claude import ClaudeIntegration
+
+        result["hook"] = ClaudeIntegration(home=home).remove()
+
     # Step 3: Remove bootstrap files
     boot_marker = target.parent / f"voyager_{provider}_bootstrap.*"
     if boot_marker.parent.exists():
@@ -672,8 +707,19 @@ def check_integration_status(providers: Optional[List[str]] = None,
                 status["bootstrap"]["available"] = True
                 status["bootstrap"]["status"] = "instructions_generated"
         
+        # Native lifecycle hook registration (Claude Code only, so far).
+        status["hook"] = {"registered": False, "command": None}
+        if provider == "claude":
+            from .integrations.claude import ClaudeIntegration
+
+            hook_verify = ClaudeIntegration(home=home).verify()
+            status["hook"]["registered"] = bool(hook_verify["verified"])
+            status["hook"]["command"] = hook_verify.get("command")
+
         # Determine startup_status based on platform capabilities
-        if not has_mcp:
+        if status["hook"]["registered"]:
+            status["startup_status"] = "H"  # registered; live trigger unverified
+        elif not has_mcp:
             status["startup_status"] = "N"  # No hook support
         elif status["mcp"]["registered"]:
             status["startup_status"] = "A"  # Assisted via instruction following
