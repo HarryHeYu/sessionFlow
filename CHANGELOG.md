@@ -82,6 +82,15 @@ All notable changes to Voyager are documented here. Format loosely follows
   string to an int and would have raised had it ever run; corrected to a range
   check. It had been silently masked.
 - **`voyager integrate status` legend** did not mention the new `H` state.
+- **`--home`, `--db`, `--output` and `--cwd` did not expand `~`** — the CLI built
+  `Path(args.home)` straight from argv, so the `~` stayed literal and the result
+  was a *relative* path. `voyager integrate install grok --home ~` therefore
+  wrote its launcher to `./~/.voyager/bin/grok` inside the current working
+  directory instead of `$HOME/.voyager/bin`; a stray `~/` directory in this
+  repo's root is that artefact. Expansion now happens once, at the argv
+  boundary (`_expand_path_args`), because these values are consumed in three
+  different modules (`cli`, `integrations.hook`, `launcher`) and "convert it at
+  every call site" is precisely the convention that was missed.
 
 ### Added
 - `H` startup status: **native hook registered, live trigger not yet verified**.
@@ -122,7 +131,7 @@ All notable changes to Voyager are documented here. Format loosely follows
   `hook`.
 
 ### Notes
-- Test suite: `325 collected → 307 passed, 18 skipped, 0 failed`.
+- Test suite: `332 collected → 314 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.

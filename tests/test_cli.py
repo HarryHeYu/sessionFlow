@@ -532,3 +532,112 @@ def test_install_does_not_spawn_a_provider_cli_for_a_scratch_home(tmp_path, monk
     assert spawned == [], f"a provider process was spawned: {spawned}"
     assert result["mcp"]["status"] == "registered"
     assert (home / ".claude/mcp.json").exists()
+
+
+# --- path arguments from argv ----------------------------------------------
+#
+# `--home`, `--db` and `--output` receive what a shell would normally expand
+# first, and people write `--home ~`.  Without `expanduser()` the `~` stays
+# literal, `Path("~")` is *relative*, and the override resolves against the
+# current working directory instead of the home directory.  That is how a
+# stray `~/` directory appeared in this repo's root, holding a provider
+# launcher that should have gone to `$HOME/.voyager/bin`.
+
+def test_expand_path_args_expands_tilde():
+    from argparse import Namespace
+    from voyager.cli import _expand_path_args
+
+    args = Namespace(db="~/index.db", home="~", output=None, cwd="~/repo")
+    _expand_path_args(args)
+
+    # compare via Path(): expanduser() substitutes the home prefix but keeps
+    # whatever separator the input used ("~/x" -> "C:\\...\\isolated0/x").
+    assert Path(args.db) == Path.home() / "index.db"
+    assert Path(args.home) == Path.home()
+    assert Path(args.cwd) == Path.home() / "repo"
+    assert args.output is None                 # absent values are left alone
+
+
+def test_expand_path_args_leaves_ordinary_values_untouched():
+    from argparse import Namespace
+    from voyager.cli import _expand_path_args
+
+    args = Namespace(db="rel/index.db", home="", output="C:/abs/out.md")
+    _expand_path_args(args)
+
+    assert args.db == "rel/index.db"
+    assert args.home == ""                     # empty stays empty, not None
+    assert args.output == "C:/abs/out.md"
+
+
+def test_expand_path_args_tolerates_missing_attributes():
+    """`--db` may be absent entirely (the subparser copy uses SUPPRESS)."""
+    from argparse import Namespace
+    from voyager.cli import _expand_path_args
+
+    args = Namespace(cmd="stats")
+    _expand_path_args(args)                    # must not raise
+    assert not hasattr(args, "db")
+
+
+def test_home_flag_expands_tilde_for_status(monkeypatch, tmp_path):
+    from voyager import skill
+
+    seen = {}
+
+    def spy(providers=None, home=None):
+        seen["home"] = home
+        return []
+
+    monkeypatch.setattr(skill, "check_integration_status", spy)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["integrate", "status", "--home", "~"]) == 0
+    assert seen["home"] == Path.home()
+
+
+def test_home_flag_expands_tilde_for_install(monkeypatch, tmp_path):
+    from voyager import skill
+
+    seen = {}
+
+    def spy(provider=None, force=False, home=None):
+        seen["home"] = home
+        return {"status": "ok"}
+
+    monkeypatch.setattr(skill, "install_integration", spy)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["integrate", "install", "grok", "--home", "~"]) == 0
+    assert seen["home"] == Path.home()
+
+
+def test_db_flag_expands_tilde(monkeypatch):
+    from voyager import api
+
+    seen = {}
+
+    def spy(db=None):
+        seen["db"] = db
+
+    monkeypatch.setattr(api, "serve", spy)
+
+    assert main(["--db", "~/index.db", "api"]) == 0
+    assert seen["db"] == Path.home() / "index.db"
+
+
+def test_cwd_flag_expands_tilde_for_hook_startup(monkeypatch):
+    """`--cwd` is consumed in `integrations/hook`, a different module from the
+    one that parses it -- so the expansion has to happen before dispatch."""
+    from voyager.integrations import hook as hook_mod
+
+    seen = {}
+
+    def spy(provider=None, cwd=None, **kwargs):
+        seen["cwd"] = cwd
+        return {"context": "", "status": "success"}
+
+    monkeypatch.setattr(hook_mod, "startup_handler", spy)
+
+    assert main(["hook", "startup", "--provider", "grok", "--cwd", "~"]) == 0
+    assert seen["cwd"] == str(Path.home())

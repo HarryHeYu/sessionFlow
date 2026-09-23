@@ -18,6 +18,32 @@ from .store import Store, default_db_path, lease_state
 from .integrations.hook import cmd_hook_startup
 
 
+# Argument names that carry a filesystem path.  They are expanded once, at the
+# argv boundary, instead of at each call site.
+_PATH_ARGS = ("db", "home", "output", "cwd")
+
+
+def _expand_path_args(args) -> None:
+    """Expand `~` in every path-ish argument, in place.
+
+    These flags receive what a shell would normally have expanded already, and
+    people do write `--home ~`.  Without `expanduser()` the `~` stays literal,
+    `Path("~")` is *relative*, and the value silently resolves against the
+    current working directory instead of the home directory -- so
+    `voyager integrate install grok --home ~` wrote its launcher to
+    `./~/.voyager/bin/grok` rather than `$HOME/.voyager/bin`.  A stray `~/`
+    directory in a repo root is what that looks like.
+
+    Done centrally because these values are consumed in three different
+    modules (`cli`, `integrations.hook`, `launcher`), and "remember to convert
+    it at every call site" is precisely the convention that was missed.
+    """
+    for name in _PATH_ARGS:
+        value = getattr(args, name, None)
+        if isinstance(value, str) and value:
+            setattr(args, name, os.path.expanduser(value))
+
+
 # ---------------------------------------------------------------------------
 # scan
 # ---------------------------------------------------------------------------
@@ -1567,6 +1593,7 @@ def main(argv=None) -> int:
     sp.set_defaults(func=cmd_stats)
 
     args = p.parse_args(argv)
+    _expand_path_args(args)
     return args.func(args)
 
 
