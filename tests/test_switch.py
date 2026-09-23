@@ -13,14 +13,16 @@ Contracts (D7/D11/D12/D13):
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+from datetime import datetime, timezone
 
 import pytest
 
 from pathlib import Path
 
-from voyager.cli import main
+from voyager.cli import main, run_scan
 from voyager.store import LEASE_HEARTBEAT_TIMEOUT, Store
 
 
@@ -113,6 +115,54 @@ def test_switch_cross_provider_compiles_bundle_and_pending(
     assert lease["holder"] == "claude"
     pend = store.thread_pending_list(tid)
     assert len(pend) == 1 and pend[0]["provider"] == "claude"
+
+
+def test_switch_then_scan_joins_the_target_session_to_the_same_thread(
+        tmp_path, thread_db, monkeypatch):
+    """Claude -> Grok cross-provider continuity, as one chain.
+
+    The two halves are already covered separately: the test above proves
+    `switch` writes a pending attach, and `tests/test_auto.py` proves a pending
+    can be resolved by a later scan. Nothing joined them, which is exactly the
+    gap the native-start bug lived in — both halves sound, the chain unproven.
+    This drives it end to end: switch to Grok, the Grok session appears on disk
+    afterwards, the next scan attaches it to the *same* WorkThread.
+    """
+    db, tid, store = thread_db
+
+    assert main(["--db", db, "switch", "grok", "--thread", tid,
+                 "--no-launch"]) == 0
+    pend = store.thread_pending_list(tid)
+    assert len(pend) == 1 and pend[0]["provider"] == "grok"
+
+    # Grok's own session, written after the switch launched it
+    grok_root = tmp_path / "grok-sessions"
+    sdir = grok_root / "E--proj--demo" / "groklive-0001"
+    sdir.mkdir(parents=True)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    (sdir / "summary.json").write_text(json.dumps({
+        "info": {"id": "groklive-0001", "cwd": "E:/proj/demo"},
+        "session_summary": "continue the work",
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "git_root_dir": "E:/proj/demo",
+        "current_model_id": "grok-4.6",
+    }), encoding="utf-8")
+    (sdir / "chat_history.jsonl").write_text("\n".join(json.dumps(row) for row in (
+        {"type": "user", "content": [{"type": "text", "text": "continue"}]},
+        {"type": "assistant", "content": "on it", "model_id": "grok-4.6"},
+    )) + "\n", encoding="utf-8")
+
+    import voyager.adapters.grok as grok_mod
+    monkeypatch.setattr(grok_mod, "SESSIONS_DIR", grok_root)
+
+    run_scan(store, providers=["grok"], quiet=True)
+
+    assert "grok:groklive-0001" in store.thread_member_ids(tid)
+    row = store.q("SELECT status, resolved_sid FROM thread_pending "
+                  "WHERE thread_id=? AND provider=?", (tid, "grok"))[0]
+    assert row["status"] == "resolved"
+    assert row["resolved_sid"] == "grok:groklive-0001"
 
 
 def test_switch_launch_failure_releases_lease(tmp_path, thread_db, capsys):

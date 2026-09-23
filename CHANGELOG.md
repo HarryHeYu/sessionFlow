@@ -148,6 +148,15 @@ All notable changes to Voyager are documented here. Format loosely follows
   exported command stays the readable bare form.
 
 ### Added
+- **`tests/test_switch.py`: Claude → Grok cross-provider continuity, end to end.**
+  The two halves were already covered but never joined: one test proved `switch`
+  writes a pending attach, and `tests/test_auto.py` proved a pending can be
+  resolved by a later scan. That is the same gap the native-start bug lived in —
+  both halves sound, the chain unproven. This one drives it: switch to Grok, the
+  Grok session appears on disk afterwards, the next scan attaches it to the
+  *same* WorkThread and closes the pending. Mutation-verified against both
+  halves (removing the switch's pending record, and removing the resolver call
+  from the scan, each turn the test red).
 - **`tests/test_claude_session_start_hook.py`: the native-start chain, end to end.**
   Claude Code firing `SessionStart` is the one part of the live verification that
   cannot run in this environment, but every step below it is real code and is now
