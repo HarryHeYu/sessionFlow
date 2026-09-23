@@ -148,6 +148,15 @@ All notable changes to Voyager are documented here. Format loosely follows
   exported command stays the readable bare form.
 
 ### Added
+- **`tests/test_claude_session_start_hook.py`: the native-start chain, end to end.**
+  Claude Code firing `SessionStart` is the one part of the live verification that
+  cannot run in this environment, but every step below it is real code and is now
+  driven with real code: hook stdin `{session_id}` → a pending attach record → the
+  Claude adapter indexing the transcript → `resolve_pending_attaches` matching by
+  identity → the session becoming a WorkThread member. This also pins the
+  invariant the identity match rests on — the `session_id` the hook reads from
+  stdin must equal the adapter's `native_id` (the transcript's filename stem).
+  Verified by mutating the adapter's `native_id`, which turns the test red.
 - `H` startup status: **native hook registered, live trigger not yet verified**.
   Only `Y` claims that a provider fires the hook by itself, and nothing claims `Y`.
 - `tests/test_claude_session_start_hook.py` (29 tests) — output protocol, payload
@@ -198,7 +207,7 @@ All notable changes to Voyager are documented here. Format loosely follows
     `Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home))` line fixed above.
 
 ### Notes
-- Test suite: `369 collected → 351 passed, 18 skipped, 0 failed`.
+- Test suite: `370 collected → 352 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.
