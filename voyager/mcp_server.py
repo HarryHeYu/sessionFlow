@@ -455,7 +455,12 @@ def voyager_startup(provider: str, cwd: str = "", native_session_id: str = "",
         - previous_provider/session: Last worked on this task
         - attach_status: already_attached/auto_attached/no_auto_attach/pending_resolve
         - context: Compiled continuation context (if available)
-        - context_stale: Should this be recompiled?
+        - context_stale: True when the returned context came from a cache that
+          was known-stale (a fresh recompile happened, or a recompile failed and
+          the previous bundle was reused); False when served from a cache still
+          inside its TTL. Stale does not mean unusable.
+        - context_source: fresh_compile / cached / none
+        - compiled_at: Timestamp of the compile, or None when no context exists
         - recommended_action: none/use_context/continue/pick_thread
         - ambiguity_error: Present if multiple threads exist (error)
     """

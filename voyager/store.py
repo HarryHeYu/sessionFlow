@@ -742,6 +742,18 @@ class Store:
         return bool(self.q(
             "SELECT 1 FROM thread_sessions WHERE session_id=?", (sid,)))
 
+    def attached_to_thread(self, tid: str, sid: str) -> bool:
+        """Is `sid` a member of `tid`?
+
+        This method did not exist, yet `startup.py` called it on the
+        already-attached path — so that path raised AttributeError the moment a
+        session was genuinely already attached, instead of returning the state
+        it was written to return.
+        """
+        return bool(self.q(
+            "SELECT 1 FROM thread_sessions WHERE thread_id=? AND session_id=?",
+            (tid, sid)))
+
     # -- continuity audit log (metadata only, never session content) -------
 
     def _continuity_log(self, event: str, **meta) -> None:
@@ -775,6 +787,46 @@ class Store:
 
     def q(self, sql: str, args: tuple = ()) -> List[sqlite3.Row]:
         return self.con.execute(sql, args).fetchall()
+
+    # -- meta key/value ----------------------------------------------------
+    # Small persistent state that must outlive a single Store instance. The
+    # startup-continuity cache lives here because callers such as the Claude
+    # SessionStart hook construct a fresh Store per invocation, so an
+    # in-memory cache on the instance can never be read back.
+
+    def meta_get(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Read a meta value. Never raises — returns `default` on any error."""
+        try:
+            rows = self.q("SELECT value FROM meta WHERE key=?", (key,))
+        except Exception:
+            return default
+        return rows[0]["value"] if rows else default
+
+    def meta_set(self, key: str, value: str) -> bool:
+        """Write a meta value (upsert). Returns False if it could not be stored.
+
+        Never raises. The return value matters: a silently dropped write would
+        make a permanently-broken cache indistinguishable from a cold one.
+        """
+        try:
+            self.con.execute(
+                "INSERT INTO meta(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+            self.con.commit()
+        except Exception:
+            return False
+        return True
+
+    def meta_delete(self, key: str) -> bool:
+        """Delete a meta value. Returns False on failure. Never raises."""
+        try:
+            self.con.execute("DELETE FROM meta WHERE key=?", (key,))
+            self.con.commit()
+        except Exception:
+            return False
+        return True
 
     def sessions(self, provider: Optional[str] = None) -> List[sqlite3.Row]:
         if provider:
