@@ -551,6 +551,14 @@ def test_native_start_hook_chains_into_a_thread_membership(tmp_path, monkeypatch
 
     result = hook.handle_claude_session_start()
 
+    # What the caller (and the live verification) actually observes: the
+    # continuation context is still emitted this session, and the pending state
+    # is surfaced as an explicit next step rather than being reported as
+    # "no_thread" — which would read as a failure and hide the pending.
+    assert result["status"] == "context_ready", result
+    assert result["next_step"] == "session_discovery_pending", result
+    assert result["context"], "the bundle must still reach the model"
+
     # The hook cannot attach a session it cannot resolve to a Voyager id, so it
     # records the intent — and that record must actually exist.
     assert result["attach_status"] == "pending_resolve", result
