@@ -139,6 +139,11 @@ CREATE TABLE IF NOT EXISTS sources (
 CREATE TABLE IF NOT EXISTS thread_pending (
     thread_id  TEXT NOT NULL,
     provider   TEXT NOT NULL,
+    -- The provider-native session id this pending expects to attach, when the
+    -- recorder already knows it (a native session start does; a switch launch
+    -- does not). Lets the resolver match by identity instead of by the
+    -- "exactly one candidate" heuristic.
+    native_session_id TEXT,
     note       TEXT,
     created_at REAL,
     repo_root  TEXT,
@@ -277,7 +282,8 @@ class Store:
         # lack the metadata columns the pending auto-resolution matches on
         pend_cols = [r[1] for r in self.con.execute("PRAGMA table_info(thread_pending)")]
         if pend_cols:
-            for col, decl in (("repo_root", "TEXT"), ("cwd", "TEXT"),
+            for col, decl in (("native_session_id", "TEXT"),
+                              ("repo_root", "TEXT"), ("cwd", "TEXT"),
                               ("source_provider", "TEXT"),
                               ("source_session", "TEXT"), ("goal", "TEXT"),
                               ("lease_token", "TEXT"), ("launch_cmd", "TEXT"),
@@ -679,8 +685,8 @@ class Store:
 
     # -- pending attach records (Automatic Continuity) ---------------------
 
-    PENDING_COLUMNS = ("thread_id", "provider", "note", "created_at",
-                       "repo_root", "cwd", "source_provider",
+    PENDING_COLUMNS = ("thread_id", "provider", "native_session_id", "note",
+                       "created_at", "repo_root", "cwd", "source_provider",
                        "source_session", "goal", "lease_token",
                        "launch_cmd", "pid", "status", "resolved_at",
                        "resolved_sid")

@@ -273,7 +273,32 @@ def startup_continuity(
                 if _check_same_repo_two_threads(store, cwd):
                     auto_attach_reason = "two_active_threads_detected"
                 elif not _session_exists_in_index(store, provider, native_session_id):
-                    # Session might be brand new - could be a pending attach candidate
+                    # A session that has only just started is normally not in the
+                    # index yet, so this is the *common* SessionStart path, not an
+                    # edge case. The hook cannot attach a session it cannot resolve
+                    # to a Voyager id, so record the intent now and let the next
+                    # scan finish the job once the session has been indexed.
+                    #
+                    # Without this write the branch was a dead end. The status said
+                    # "pending_resolve", and both the docstring above and
+                    # `_check_auto_attach_safety` promised the scan would catch it
+                    # later -- but `resolve_pending_attaches()` only walks *open
+                    # pending rows*, and the only other writer was the explicit
+                    # switch flow. So a natively started session was never attached
+                    # to its WorkThread, which is precisely the zero-manual-command
+                    # case this design exists for.
+                    #
+                    # `source_provider`/`source_session` are deliberately left
+                    # unset: they describe the session a switch handed off *from*,
+                    # and there is no such session here.
+                    store.pending_record(
+                        tid, provider,
+                        native_session_id=native_session_id,
+                        note="native session start: awaiting index",
+                        repo_root=git_root,
+                        cwd=cwd,
+                        goal=dict(thread).get("goal"),
+                    )
                     attach_status = "pending_resolve"
                     auto_attach_reason = "session_not_yet_indexed_or_no_safe_match"
                 else:

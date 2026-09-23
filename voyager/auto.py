@@ -66,11 +66,16 @@ def resolve_pending_attaches(store: Store, now: Optional[float] = None,
     - provider matches the pending's target provider
     - the session is not attached to ANY thread (no silent swallowing)
     - session repo_root/cwd matches the pending's repo/cwd
-    - the session was born after the switch launched (with slack)
+    - the session was born after the pending was recorded (with slack)
+    - if the pending carries a `native_session_id`, the session's native id must
+      equal it (identity match)
     - exactly one such candidate exists (0 → keep waiting; >1 → AMBIGUOUS)
 
-    A pending past its TTL is marked stale. Returns a stats dict; every
-    auto-attach is written to the continuity audit log.
+    A pending recorded by a native session start carries a native id, so it
+    matches by identity; one recorded by a switch launch does not, and falls
+    back to the uniqueness rule. A pending past its TTL is marked stale.
+    Returns a stats dict; every auto-attach is written to the continuity audit
+    log.
     """
     now = _now() if now is None else now
     stats: Dict[str, Any] = {"checked": 0, "attached": [], "ambiguous": [],
@@ -90,6 +95,12 @@ def resolve_pending_attaches(store: Store, now: Optional[float] = None,
                                    "provider": pend["provider"]})
             continue
         repo_ref = pend["repo_root"] or pend["cwd"]
+        # A recorder that already knew the native session id (a native session
+        # start does; a switch launch does not) narrows the match to that exact
+        # session. `provider` + `native_id` is unique, so this removes the
+        # reliance on the "exactly one candidate" heuristic without loosening
+        # any of the safety conditions below.
+        expected_native = pend["native_session_id"]
         cands = []
         for s in store.q(
             """SELECT * FROM sessions
@@ -98,6 +109,8 @@ def resolve_pending_attaches(store: Store, now: Optional[float] = None,
                  AND COALESCE(started_at, updated_at, 0) >= ?""",
             (pend["provider"], launched - LAUNCH_TIME_SLACK),
         ):
+            if expected_native and s["native_id"] != expected_native:
+                continue
             if repo_ref and _same_repo(
                     s["repo_root"] or s["cwd"] or "", repo_ref):
                 cands.append(s)
