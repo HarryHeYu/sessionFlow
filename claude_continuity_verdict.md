@@ -640,7 +640,7 @@ Test status: `tests/test_claude_session_start_hook.py` 29/29 and
 pytest against Python 3.13 — neither file is affected by the changes, but the
 `startup_continuity` control flow was restructured, so they were re-run).
 
-**Full suite (2026-09-23): `336 collected → 318 passed, 18 skipped, 0 failed`,
+**Full suite (2026-09-23): `339 collected → 321 passed, 18 skipped, 0 failed`,
 exit 0**, run under pytest 9.1.1 against the managed Python 3.13.12. The 18
 skips are all "optional extra not installed" / "no Chinese-content session in
 the synthetic index", unchanged from the pre-existing baseline.
