@@ -68,7 +68,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # 
 ```sh
 git clone https://github.com/HarryHeYu/voyager && cd voyager
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # 208 个测试，全合成 fixture，不碰你的真实会话
+python -m pytest tests/ -q     # 317 collected：299 passed / 18 skipped（全合成 fixture，不碰你的真实会话）
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -141,46 +141,72 @@ Voyager 在同一个仓库里切换 Agent 时会自动接续工作：
 4. **Continuation bundle 已编译**（有 `--goal` 则条件压缩，有 `--budget` 则打包到预算内）
 5. **上下文被立即加载** —— 不需要重新解释你正在做什么
 
-**产品状态**（最终测试结论，2026-09-20）：
+**产品状态**：
 
-**Core functionality**: Complete and operational.  
-**Runtime auto-trigger**: Tested on Codex and Claude; neither auto-invokes `voyager_startup`.
+**核心功能**：完整可用。  
+**运行时自动触发**：Claude Code 有原生 `SessionStart` hook，Voyager 会注册它。但 Claude Code 是否真的会触发，**尚未在真机上验证过**。
 
-Real-provider testing confirmed: neither Codex nor Claude invokes `voyager_startup` automatically at session start without explicit user instruction.
+`startup_continuity()` 能正确发现 WorkThread、自动挂接会话、编译接续上下文。各家 provider 的差别在于：会话启动时能不能**在你什么都不做**的前提下走到这个函数。
+
+**Provider classification**：
+
+| Provider | Skill | MCP | Status                | 含义                                   |
+|----------|-------|-----|-----------------------|----------------------------------------|
+| Claude   | Y     | R   | `H` — hook 已注册      | 已安装原生 `SessionStart` hook；触发尚未在真机观察到 |
+| Codex    | Y     | R   | `A` — 启动辅助         | 无原生 hook，需要显式调用               |
+| Grok CLI | Y     | N   | `N` — 无机制           | Best effort                            |
+| DSH      | Y     | N   | `N` — 无机制           | Best effort                            |
+
+Legend：**Y** = ready/installed，**R** = ready/auto-configured，**N** = unsupported。
+
+启动状态：**`Y`** = 零触达已真机验证，**`H`** = 原生 hook 已注册但**实时触发尚未验证**，**`A`** = 启动辅助，**`N`** = 无 hook。只有 `Y` 才宣称 provider 会自己触发；目前没有任何 provider 是 `Y`。在你机器上的实际情况，跑 `voyager integrate status` 即可。
+
+### Claude Code hook 在这里怎么工作
+
+Claude Code 从 `~/.claude/settings.json` 读取 `SessionStart` hook。Voyager 写的是官方文档里的结构：
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {"type": "command", "command": "\"<绝对路径 python>\" \"<绝对路径>/claude_session_start.py\"", "timeout": 120}
+        ]
+      }
+    ]
+  }
+}
+```
+
+`voyager integrate install claude` 会自动写好它（叠加式写入：你自己的 hook 会被保留，且写前会备份原文件）。安装的命令用绝对路径，因此不依赖解释器是否在 `PATH` 里。
+
+**两件事已验证，一件事没有。** Handler 已验证：它输出协议合法的 payload，把注入的上下文限制在 9000 个 UTF-16 码元以内，完整 bundle 落到 `~/.voyager/context/`，并以 0 退出。**注册**已验证：`voyager integrate status` 会把文件读回来核对。**没有**验证的是 Claude Code 自己会不会调用这个 hook —— 这需要手动跑一次：
+
+```sh
+claude --debug hooks --init-only     # 期望看到：Found 1 hook matchers in settings
+```
+
+在看到那一行之前，触发都应视为未证实。完整证据链见 [claude_continuity_verdict.md](claude_continuity_verdict.md)。
 
 **推荐 workflow**（按自动化程度排序）：
 
-1. **Explicit commands**: `voyager switch <agent>` or `voyager continue [id]`
-2. **MCP-assisted**: In agent, call tool `voyager_startup(provider="codex", cwd="$PWD")`
-3. **Skill guidance**: Read `SKILL.md` in agent's skill directory
+1. **原生 hook（Claude Code）**：`voyager integrate install claude`，然后重启 Claude Code。之后不需要任何操作 —— 如果 hook 触发，上下文会在你第一轮输入之前注入。
+2. **Explicit commands**：`voyager switch <agent>` 或 `voyager continue [id]`
+3. **MCP-assisted**：在 agent 内调用工具 `voyager_startup(provider="codex", cwd="$PWD")`
+4. **Skill guidance**：读该 agent skill 目录下的 `SKILL.md`
 
-**Provider classification**（基于真实测试数据）：
+### `A`（启动辅助）的含义
 
-| Provider | Skill | MCP | Status         | Verification      |
-|----------|-------|-----|----------------|-------------------|
-| Codex    | Y     | R   | STARTUP_ASSISTED | Manual startup required |
-| Claude   | Y     | R   | STARTUP_ASSISTED | Manual startup required |
-| Grok CLI | Y     | N   | BEST_EFFORT    | No hook support |
-| DSH      | Y     | N   | BEST_EFFORT    | No hook support |
+Provider 支持 Voyager 集成（Skill 已装、MCP 配置可用），但**运行时不会自己走到 Voyager**。Codex 在会话启动时不会自动调用 `voyager_startup` —— 必须用上面任一 workflow 显式触发。MCP 注册是全自动的，启动调用不是。
 
-Legend: **Y** = ready/installed, **R** = ready/auto-configured, **N** = unsupported
-
-### What "STARTUP_ASSISTED" means
-
-Provider supports Voyager integration (Skill installed, MCP config available), but requires **manual one-time setup**:
-
-1. Run `voyager integrate <provider>` to install Skill and generate instructions
-2. Manually configure MCP connection (e.g., `claude mcp add voyager ...`)
-3. Restart the agent for changes to take effect
-
-After this initial setup, subsequent agent launches will require explicit invocation of `voyager_startup` via MCP tool call or manual prompt.
-
-**Manual startup required**: The pattern that has been verified across both Codex and Claude is that users must either:
-- Explicitly type `voyager switch codex` before launching
-- Use MCP tool calls: `voyager_startup(provider="codex", cwd="$PWD")`
-- Follow Skill guidance by reading and pasting context manually
-
-There is no provider-specific startup hook that triggers `voyager_startup` automatically when the agent starts.
+```sh
+voyager integrate install claude   # skill + MCP + 原生 SessionStart hook
+voyager integrate install codex    # skill + MCP（~/.codex/config.toml）
+voyager integrate status           # 逐 provider 的真实状态，含 hook 是否已注册
+voyager integrate remove claude    # 只删 Voyager 自己的条目，你的 hook 原样保留
+```
 
 运行 `voyager integrate status` 检查本地安装状态。See [docs/DOGFOOD.md](docs/DOGFOOD.md) for detailed verification procedure.
 
@@ -240,7 +266,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 208 个测试：适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
+python -m pytest tests/ -q                # 317 collected：299 passed / 18 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
 python scripts/run_tests_core_only.py     # 模拟"只装核心依赖"，可选依赖相关测试自动跳过
 ```
 
