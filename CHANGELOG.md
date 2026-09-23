@@ -137,9 +137,21 @@ All notable changes to Voyager are documented here. Format loosely follows
   `test_claude_sessionstart.py` *encoded the retracted conclusion* — it declared
   `SESSION_START_ZERO_TOUCH` if any settings key merely contained the substring
   `hook`.
+- Two more one-off scripts, on the same grounds:
+  - `verify_zcode_fix.py` (repo root) — script-style, top-level code, zero
+    `def test_`, so pytest never collected it and CI never ran it. Two of its
+    three cases existed nowhere else and are now real tests in
+    `tests/test_zcode.py`; the third was already covered. It also *could not
+    have passed*: it asserted `_open_ro(corrupt) is None`, but
+    `sqlite3.connect()` is lazy and hands back a connection without reading the
+    file — the rejection actually happens in `_validate_zcode_schema`.
+  - `scripts/patch_writers.py` — a self-described "one-off" that had already
+    been applied. Inert, because its guard short-circuits, but actively
+    misleading: it would re-insert the *unexpanded*
+    `Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home))` line fixed above.
 
 ### Notes
-- Test suite: `336 collected → 318 passed, 18 skipped, 0 failed`.
+- Test suite: `339 collected → 321 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.
