@@ -396,12 +396,61 @@ def test_startup_status_letters_match_the_legend(tmp_path):
     assert seen["codex"] in {"A", "N"}, seen["codex"]
 
 
-def test_already_registered_mcp_reports_assisted_on_both_paths(tmp_path):
-    """Regression: re-running `integrate install` on a machine whose MCP was
-    *already* registered reported `N`, because the code only set the MCP status
-    to `registered` on the branch where it had just performed the registration.
-    `integrate status` meanwhile reported `A`.  Both must say `A`.
+def test_install_threads_home_into_mcp_detection(tmp_path, monkeypatch):
+    """Regression: `install_integration` called `_check_mcp_support(provider)`
+    without `home`, so MCP detection read the *real* user profile even when the
+    caller asked for a different one.
+
+    This test is deliberately a spy rather than an end-to-end assertion, because
+    the end-to-end version passed for the wrong reason: with the real profile
+    consulted, the "not yet registered" branch fired and registered the server,
+    which looks like success while the already-registered branch was never
+    exercised at all.
     """
+    from voyager import skill
+
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+
+    seen = []
+    real = skill._check_mcp_support
+
+    def spy(provider, home=None):
+        seen.append(home)
+        return real(provider, home)
+
+    monkeypatch.setattr(skill, "_check_mcp_support", spy)
+    skill.install_integration("codex", force=True, home=home)
+
+    assert seen, "_check_mcp_support was never called"
+    assert all(h == home for h in seen), (
+        f"install consulted the wrong profile: {seen}"
+    )
+
+
+def test_already_registered_mcp_is_reported_as_registered(tmp_path, monkeypatch):
+    """Regression: an already-registered MCP server was reported as `available`
+    instead of `registered`, which then downgraded `startup_status` to `N` on an
+    idempotent re-run -- while `integrate status` still said `A`."""
+    from voyager import skill
+
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        skill, "_check_mcp_support",
+        lambda provider, home=None: (True, "Voyager MCP already registered"),
+    )
+    result = skill.install_integration("codex", force=True, home=home)
+
+    assert result["mcp"]["status"] == "registered"
+    assert result["startup_status"] == "A"
+
+
+def test_already_registered_mcp_reports_assisted_on_both_paths(tmp_path):
+    """End-to-end form of the above, with real files instead of a stub: a
+    scratch profile whose Codex config already names Voyager must give the same
+    `startup_status` from `install` and from `status`."""
     from voyager.skill import check_integration_status, install_integration
 
     home = tmp_path / "home"
@@ -416,6 +465,9 @@ def test_already_registered_mcp_reports_assisted_on_both_paths(tmp_path):
         for s in check_integration_status(providers=["codex"], home=home)
     }["codex"]
 
+    # The message proves the already-registered branch was the one taken, which
+    # is only possible if `home` reached `_check_mcp_support`.
+    assert "already registered" in install_result["mcp"]["message"].lower()
     assert install_result["mcp"]["status"] == "registered"
     assert install_result["startup_status"] == "A"
     assert status_entry["startup_status"] == "A"
@@ -435,3 +487,48 @@ def test_check_mcp_support_honours_the_home_argument(tmp_path):
     supported, message = _check_mcp_support("codex", home)
     assert supported is True
     assert "already registered" in message.lower()
+
+
+def test_install_does_not_spawn_a_provider_cli_for_a_scratch_home(tmp_path, monkeypatch):
+    """`integrate install --home <scratch>` must not reach outside that home.
+
+    The MCP step prefers the provider CLI (`claude mcp add`), which has no
+    `--home` of its own -- it writes wherever the provider is configured to
+    look, i.e. the real profile.  So with a scratch home the CLI must not be
+    spawned at all and the file must be written directly instead.
+    """
+    from voyager import skill
+
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+
+    spawned = []
+
+    class _Completed:
+        returncode = 1
+        stdout = ""
+        stderr = ""
+
+    class _FakeSubprocess:
+        TimeoutExpired = Exception
+
+        @staticmethod
+        def run(argv, *args, **kwargs):
+            spawned.append(list(argv))
+            return _Completed()
+
+    # Force the registration branch.  Without this the test is environment
+    # dependent: on a machine whose real profile *already* names Voyager, the
+    # old code took its "already registered" branch and never reached
+    # `_register_claude_mcp`, so the spawn would not happen even without a gate.
+    monkeypatch.setattr(
+        skill, "_check_mcp_support",
+        lambda provider, home=None: (
+            True, "Provider supports MCP; Voyager not yet registered"),
+    )
+    monkeypatch.setattr(skill, "subprocess", _FakeSubprocess)
+    result = skill.install_integration("claude", force=True, home=home)
+
+    assert spawned == [], f"a provider process was spawned: {spawned}"
+    assert result["mcp"]["status"] == "registered"
+    assert (home / ".claude/mcp.json").exists()

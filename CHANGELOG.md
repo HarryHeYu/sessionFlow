@@ -34,6 +34,28 @@ All notable changes to Voyager are documented here. Format loosely follows
 - **`_check_mcp_support()` ignored its `home` argument** and read `Path.home()`
   instead, so every `--home`-scoped run silently inspected — and reported on —
   the real user profile rather than the directory it was pointed at.
+- **`--home` leaked into the real profile through the provider CLI** — both
+  `_register_claude_mcp()` and `_install_claude_bootstrap()` shelled out to
+  `claude mcp add`, which has no `--home` of its own and writes wherever the
+  provider is configured to look. So `voyager integrate install claude --home
+  <scratch>` could mutate the real `~/.claude` *and* spawn a provider process as
+  a side effect of a config write. The CLI is now consulted only when `home`
+  really is the real profile; otherwise the file is written directly. This also
+  makes the test suite side-effect free on machines where the provider CLI is on
+  `PATH`.
+- **Spawning a `.cmd`/`.bat` provider shim raised an uncaught `OSError`** —
+  `claude` is commonly installed as `claude.CMD` on Windows, which
+  `CreateProcess` cannot execute directly (WinError 193). Only
+  `FileNotFoundError` and `TimeoutExpired` were caught, so the registration step
+  would abort instead of falling back to writing the config. `OSError` is now
+  caught too.
+- **The bootstrap files Voyager writes into a user's profile carried retracted
+  claims and a retired command** — the Codex bootstrap said
+  `Status: STARTUP_ASSISTED`, the Grok and DSH ones said `BEST_EFFORT`, and the
+  Codex one told the reader to run `voyager integrate codex` (an argparse error,
+  since `integrate` requires a subcommand). These are user-visible files, not
+  internal notes, so they now use the `Y`/`H`/`A`/`N` legend and the correct
+  `voyager integrate install <provider>` form.
 - **SessionStart handler protocol** — the handler now emits a protocol-valid
   `hookSpecificOutput.additionalContext` payload and exits `0`; the context cap is
   measured in **UTF-16 code units** (Claude Code is JavaScript, so `len()` in
@@ -73,11 +95,17 @@ All notable changes to Voyager are documented here. Format loosely follows
   install → settings.json → shell → hook-JSON chain can be exercised against a
   scratch profile instead of only the real one. (`--home` deliberately does not
   scope the `--e2e` probe, which always reads the real profile.)
-- `tests/test_cli.py` — four regression tests pinning the lifecycle invariants
-  above: install/status must agree per provider, the `Y`/`H`/`A`/`N` legend must
-  hold, an already-registered MCP must still report assisted, and
-  `_check_mcp_support` must honour its `home` argument. Each was confirmed to
-  fail against the pre-fix code.
+- `tests/test_cli.py` — regression tests pinning the lifecycle invariants above:
+  install/status must agree per provider, the `Y`/`H`/`A`/`N` legend must hold,
+  an already-registered MCP must report registered, `install` must thread `home`
+  into MCP detection, `_check_mcp_support` must honour its `home` argument, and
+  a scratch-home install must not spawn a provider CLI. Each was checked against
+  the pre-fix code and confirmed to fail there.
+- Note on test design: the first version of the "already registered" test passed
+  against the buggy code because the home leak made it take the *registration*
+  branch, which looks like success while the branch under test was never
+  reached. It is now a spy plus a stub, and the environment-independent
+  failure mode is pinned.
 - `tests/test_workflows.py` — a static guard that the SessionStart verifier keeps
   its `--home` flag and its `settings_path(home)` signature, so the chain stays
   reproducible against a scratch profile.
@@ -94,7 +122,7 @@ All notable changes to Voyager are documented here. Format loosely follows
   `hook`.
 
 ### Notes
-- Test suite: `322 collected → 304 passed, 18 skipped, 0 failed`.
+- Test suite: `325 collected → 307 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.

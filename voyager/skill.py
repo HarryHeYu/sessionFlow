@@ -185,23 +185,46 @@ def _register_codex_mcp(home: Path) -> Tuple[str, Optional[str]]:
     return "up-to-date", str(config_file)
 
 
+def _is_real_home(home: Path) -> bool:
+    """True when `home` is the profile the provider CLIs would write to.
+
+    Provider CLIs (`claude mcp add`, ...) have no `--home` of their own: they
+    write wherever the provider is configured to look, which is the real
+    profile.  So they may only be used when that is what the caller asked for;
+    otherwise `integrate install --home <scratch>` would mutate the real
+    profile and spawn a provider process as a side effect of a config write.
+    """
+    try:
+        return Path(home).resolve() == Path.home().resolve()
+    except OSError:
+        return False
+
+
 def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
-    """Register Voyager MCP in Claude Code via CLI if available."""
+    """Register Voyager MCP for Claude Code.
+    
+    Prefers the provider CLI when operating on the real profile (it produces a
+    validated config), and falls back to writing `mcp.json` directly otherwise.
+    """
     
     mcp_file = home / ".claude/mcp.json"
     
-    # Try direct CLI approach first (preferred - creates validated config)
-    try:
-        result = subprocess.run(
-            ["claude", "mcp", "add", "voyager", "--", "python", "-m", "voyager.mcp_server"],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        if result.returncode == 0:
-            return "registered", str(mcp_file)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    # Only shell out when `home` really is the profile the CLI would write to.
+    if _is_real_home(home):
+        try:
+            result = subprocess.run(
+                ["claude", "mcp", "add", "voyager", "--", "python", "-m", "voyager.mcp_server"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                return "registered", str(mcp_file)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            # OSError also covers Windows' WinError 193, raised when the
+            # provider ships as a `.cmd`/`.bat` shim that CreateProcess cannot
+            # execute directly.
+            pass
     
     # CLI not available or failed - check if we can write directly
     # Create parent directory if it doesn't exist
@@ -245,19 +268,22 @@ def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
     return "manual_required", "Use: claude mcp add voyager -- python -m voyager.mcp_server"
 
 
-def _install_codex_bootstrap(target_dir: Path) -> Tuple[str, Optional[str]]:
+def _install_codex_bootstrap(target_dir: Path,
+                             home: Optional[Path] = None) -> Tuple[str, Optional[str]]:
     """Generate Codex startup bootstrap with actual startup hook instructions."""
     # Codex doesn't have native startup hooks, so provide best-available mechanism
     # The Skill file serves as the primary guidance
     bootstrap_content = """# Voyager Startup Continuity for Codex
 
-Status: STARTUP_ASSISTED (not verified zero-touch)
+Status: N (no native session-start hook; first-turn / Skill guidance)
 
-Codex CLI does not provide a native session-start hook mechanism.
+Codex CLI does not provide a native session-start hook mechanism, so there is
+nothing for Voyager to register. Continuity still works, but it is the agent
+following an instruction rather than the platform firing a hook.
 
 Best available option:
 
-1. Install Voyager Skill (already done by `voyager integrate codex`):
+1. Install Voyager Skill (already done by `voyager integrate install codex`):
    This instructs Codex to call voyager_startup at session start.
 
 2. Configure MCP connection in ~/.codex/config.toml:
@@ -278,25 +304,30 @@ Note: This relies on agent following instruction - not fully automatic at runtim
         return "error", str(e)
 
 
-def _install_claude_bootstrap(target_dir: Path) -> Tuple[str, Optional[str]]:
-    """Install Claude MCP registration for Voyager."""
-    # Attempt to register via Claude's CLI if available
-    home = Path.home()
+def _install_claude_bootstrap(target_dir: Path,
+                              home: Optional[Path] = None) -> Tuple[str, Optional[str]]:
+    """Generate the Claude Code bootstrap doc.
+
+    MCP registration itself belongs to `_register_claude_mcp`; this function
+    only produces the bootstrap file.  The provider CLI is consulted only when
+    we are on the real profile, for the same isolation reason as there: it
+    writes wherever the provider looks, not where the caller asked.
+    """
+    home = home or Path.home()
     mcp_file = home / ".claude/mcp.json"
-    
-    # Try direct CLI approach first
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["claude", "mcp", "add", "voyager", "python", "-m", "voyager.mcp_server"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            return "registered", str(mcp_file)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+
+    if _is_real_home(home):
+        try:
+            result = subprocess.run(
+                ["claude", "mcp", "add", "voyager", "python", "-m", "voyager.mcp_server"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return "registered", str(mcp_file)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
     
     # Fall back to manual instruction file
     bootstrap_content = """# Voyager Startup Continuity for Claude Code
@@ -331,13 +362,16 @@ Note: registration is automatic; confirming the trigger is a one-time manual ste
         return "error", str(e)
 
 
-def _install_grok_bootstrap(target_dir: Path) -> Tuple[str, Optional[str]]:
+def _install_grok_bootstrap(target_dir: Path,
+                            home: Optional[Path] = None) -> Tuple[str, Optional[str]]:
     """Generate Grok CLI bootstrap instructions (best-effort)."""
     bootstrap_content = """# Voyager Startup Continuity for Grok CLI
 
-Status: BEST_EFFORT (no startup hooks available)
+Status: N (no native hook; opt-in launcher shim available)
 
-Grok CLI does not provide session-start hooks or reliable MCP integration.
+Grok CLI does not provide session-start hooks or reliable MCP integration, so
+there is nothing for Voyager to register. The opt-in launcher wrapper is the
+closest thing to automatic startup.
 
 Available options:
 
@@ -359,11 +393,12 @@ Cannot achieve zero-touch due to platform limitations.
         return "error", str(e)
 
 
-def _install_dsh_bootstrap(target_dir: Path) -> Tuple[str, Optional[str]]:
+def _install_dsh_bootstrap(target_dir: Path,
+                           home: Optional[Path] = None) -> Tuple[str, Optional[str]]:
     """Generate DSH bootstrap instructions (best-effort)."""
     bootstrap_content = """# Voyager Startup Continuity for DSH
 
-Status: BEST_EFFORT (platform limitations)
+Status: N (no native hook; launcher + session watcher available)
 
 DSH characteristics:
 - Provides session resume: dsh --resume
@@ -441,9 +476,14 @@ def install_integration(provider: str, force: bool = False,
     mcp_result = {"status": "unsupported"}
     
     if has_mcp:
-        mcp_support, mcp_msg = _check_mcp_support(provider)
-        
-        if mcp_support and "not yet registered" in mcp_msg.lower():
+        mcp_support, mcp_msg = _check_mcp_support(provider, home)
+
+        if mcp_support and "already registered" in mcp_msg.lower():
+            # Idempotent re-run.  This still has to count as *registered*:
+            # otherwise a second `integrate install` reported `N` for a provider
+            # that `integrate status` happily reported as `A`.
+            mcp_result = {"status": "registered", "path": None, "message": mcp_msg}
+        elif mcp_support and "not yet registered" in mcp_msg.lower():
             # Attempt registration based on provider
             if provider == "codex":
                 reg_status, reg_path = _register_codex_mcp(home)
@@ -490,7 +530,7 @@ def install_integration(provider: str, force: bool = False,
     
     bootstrap_func = bootstrap_funcs.get(provider)
     if bootstrap_func:
-        bs_status, bs_path = bootstrap_func(target.parent)
+        bs_status, bs_path = bootstrap_func(target.parent, home)
         result["bootstrap"] = {"status": bs_status, "path": bs_path}
     
     # Step 4: Determine startup status.

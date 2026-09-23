@@ -640,7 +640,7 @@ Test status: `tests/test_claude_session_start_hook.py` 29/29 and
 pytest against Python 3.13 — neither file is affected by the changes, but the
 `startup_continuity` control flow was restructured, so they were re-run).
 
-**Full suite (2026-09-23): `322 collected → 304 passed, 18 skipped, 0 failed`,
+**Full suite (2026-09-23): `325 collected → 307 passed, 18 skipped, 0 failed`,
 exit 0**, run under pytest 9.1.1 against the managed Python 3.13.12. The 18
 skips are all "optional extra not installed" / "no Chinese-content session in
 the synthetic index", unchanged from the pre-existing baseline.
@@ -674,7 +674,7 @@ SENTINEL_CLAUDE_2026_WORK_THREAD_MARKER
 313 lines deleted. The English README is the repository's front door and the
 Chinese one (`README.zh-CN.md`, 14,988 bytes) was untouched, which is how the
 loss was spotted. Restored from `95a1047`, then re-checked against reality: the
-restored text claimed 208 tests where the suite now collects 322 with 304 passing, so the counts and
+restored text claimed 208 tests where the suite now collects 325 with 307 passing, so the counts and
 the capability matrix were refreshed rather than left stale.
 
 **A probe artifact was quarantined.** `C:WindowsTEMPclaude-hook-probe.ps1` sat
