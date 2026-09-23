@@ -1,6 +1,6 @@
 # Voyager 🧭
 
-[![tests](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml)
+[![tests](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
@@ -52,10 +52,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
 
 # or with pip (user-level)
-pip install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
 
 # once the release is on PyPI (tracked in CHANGELOG.md)
 pipx install voyager
@@ -65,15 +65,15 @@ pipx install voyager
 optional and only needed for those features:
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/voyager.git"          # core
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/voyager.git"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git"          # core
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + MCP server
 ```
 
 Working on Voyager itself:
 
 ```sh
-git clone https://github.com/HarryHeYu/voyager && cd voyager
+git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
 python -m pytest tests/ -q     # 370 collected: 352 passed, 18 skipped (synthetic fixtures, no provider data)
 ```

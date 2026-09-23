@@ -808,22 +808,22 @@ Only after Phases 1–4 exist, so the UI is a client of the compiler.
 
 ## GitHub issues
 
-Opened on `HarryHeYu/voyager` (labels `enhancement` + `continuity`).
+Opened on `HarryHeYu/sessionFlow` (labels `enhancement` + `continuity`).
 Treat the checkboxes as the implementation contract.
 
 | Issue | Title | Phase | Blocked by |
 |---|---|---|---|
-| [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine: tracking issue | 0 | — |
-| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — *(shipped `ff13096`)* |
-| [#9](https://github.com/HarryHeYu/voyager/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — *(shipped `5e8271c`)* |
-| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread: project → thread → sessions | 2 | #2 *(complete — see close-out under Deferred; auto-cluster re-scoped)* |
-| [#11](https://github.com/HarryHeYu/voyager/issues/11) | Single-writer lease on a WorkThread | 2 | #3 *(shipped `c41f99b`)* |
-| [#4](https://github.com/HarryHeYu/voyager/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 *(shipped `d931b02`)* |
-| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 *(shipped Phase 4)* |
-| [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
-| [#10](https://github.com/HarryHeYu/voyager/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11** — **stays OPEN**: codex/grok writers shipped (opt-in, lease-gated); claude/dsh unsupported pending probe gates |
-| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 — **partially shipped** (API + bridge + extension scaffold ✅; Composer webview + one-click switch UI pending) |
+| [#1](https://github.com/HarryHeYu/sessionFlow/issues/1) | Continuity Engine: tracking issue | 0 | — |
+| [#2](https://github.com/HarryHeYu/sessionFlow/issues/2) | `voyager merge`: multi-session context synthesis | 1 | — *(shipped `ff13096`)* |
+| [#9](https://github.com/HarryHeYu/sessionFlow/issues/9) | Index freshness / auto-sync (scan-before-compile) | 1b | — *(shipped `5e8271c`)* |
+| [#3](https://github.com/HarryHeYu/sessionFlow/issues/3) | WorkThread: project → thread → sessions | 2 | #2 *(complete — see close-out under Deferred; auto-cluster re-scoped)* |
+| [#11](https://github.com/HarryHeYu/sessionFlow/issues/11) | Single-writer lease on a WorkThread | 2 | #3 *(shipped `c41f99b`)* |
+| [#4](https://github.com/HarryHeYu/sessionFlow/issues/4) | Goal-conditioned extraction (`--goal`) | 3 | #2 *(shipped `d931b02`)* |
+| [#5](https://github.com/HarryHeYu/sessionFlow/issues/5) | Context Budget (`--budget auto\|Nk`) | 4 | #2 *(shipped Phase 4)* |
+| [#6](https://github.com/HarryHeYu/sessionFlow/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
+| [#7](https://github.com/HarryHeYu/sessionFlow/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
+| [#10](https://github.com/HarryHeYu/sessionFlow/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11** — **stays OPEN**: codex/grok writers shipped (opt-in, lease-gated); claude/dsh unsupported pending probe gates |
+| [#8](https://github.com/HarryHeYu/sessionFlow/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 — **partially shipped** (API + bridge + extension scaffold ✅; Composer webview + one-click switch UI pending) |
 
 #1 is the umbrella. Close it when #2–#7, #9 and #11 are done; #8 and
 #10 are post-moat (#10 is now Grok/Codex-shaped, still lease-gated).

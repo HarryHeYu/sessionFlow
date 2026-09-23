@@ -757,22 +757,22 @@ UI 是编译器的客户端，不复制业务逻辑（核心已全部就绪）�
 
 ## GitHub Issue
 
-已在 `HarryHeYu/voyager` 打开（标签 `enhancement` + `continuity`）。
+已在 `HarryHeYu/sessionFlow` 打开（标签 `enhancement` + `continuity`）。
 把勾选用作实现契约。
 
 | Issue | 标题 | Phase | 被谁挡住 |
 |---|---|---|---|
-| [#1](https://github.com/HarryHeYu/voyager/issues/1) | Continuity Engine：总跟踪 issue | 0 | — |
-| [#2](https://github.com/HarryHeYu/voyager/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — *（已落地 `ff13096`）* |
-| [#9](https://github.com/HarryHeYu/voyager/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — *（已落地 `5e8271c`）* |
-| [#3](https://github.com/HarryHeYu/voyager/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（已完成——close-out 见 Deferred；自动聚类重定位为后续增强）* |
-| [#11](https://github.com/HarryHeYu/voyager/issues/11) | WorkThread 单写者租约 | 2 | #3 *（已落地 `c41f99b`）* |
-| [#4](https://github.com/HarryHeYu/voyager/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 *（已落地 `d931b02`）* |
-| [#5](https://github.com/HarryHeYu/voyager/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 *（已落地 Phase 4）* |
-| [#6](https://github.com/HarryHeYu/voyager/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
-| [#7](https://github.com/HarryHeYu/voyager/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *（已落地，见 CHANGELOG）* |
-| [#10](https://github.com/HarryHeYu/voyager/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11** —— **保持 open**：codex/grok writer 已 opt-in 落地；claude/dsh 探测未过暂不支持 |
-| [#8](https://github.com/HarryHeYu/voyager/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 —— **部分落地**（API + bridge + extension scaffold ✅；Composer webview 与一键 switch UI 待补） |
+| [#1](https://github.com/HarryHeYu/sessionFlow/issues/1) | Continuity Engine：总跟踪 issue | 0 | — |
+| [#2](https://github.com/HarryHeYu/sessionFlow/issues/2) | `voyager merge`：多会话上下文合成 | 1 | — *（已落地 `ff13096`）* |
+| [#9](https://github.com/HarryHeYu/sessionFlow/issues/9) | 索引新鲜度 / 自动同步（先扫再编译） | 1b | — *（已落地 `5e8271c`）* |
+| [#3](https://github.com/HarryHeYu/sessionFlow/issues/3) | WorkThread：project → thread → sessions | 2 | #2 *（已完成——close-out 见 Deferred；自动聚类重定位为后续增强）* |
+| [#11](https://github.com/HarryHeYu/sessionFlow/issues/11) | WorkThread 单写者租约 | 2 | #3 *（已落地 `c41f99b`）* |
+| [#4](https://github.com/HarryHeYu/sessionFlow/issues/4) | 面向目标的抽取（`--goal`） | 3 | #2 *（已落地 `d931b02`）* |
+| [#5](https://github.com/HarryHeYu/sessionFlow/issues/5) | Context Budget（`--budget auto\|Nk`） | 4 | #2 *（已落地 Phase 4）* |
+| [#6](https://github.com/HarryHeYu/sessionFlow/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
+| [#7](https://github.com/HarryHeYu/sessionFlow/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *（已落地，见 CHANGELOG）* |
+| [#10](https://github.com/HarryHeYu/sessionFlow/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11** —— **保持 open**：codex/grok writer 已 opt-in 落地；claude/dsh 探测未过暂不支持 |
+| [#8](https://github.com/HarryHeYu/sessionFlow/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 —— **部分落地**（API + bridge + extension scaffold ✅；Composer webview 与一键 switch UI 待补） |
 
 **Issue #1 结项（伞 issue，「Continuity Engine Core 里程碑」）。**
 核心链路已完成并有合约测试覆盖：

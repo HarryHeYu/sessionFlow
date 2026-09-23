@@ -445,7 +445,7 @@ All notable changes to Voyager are documented here. Format loosely follows
   `python -m build` + `twine upload` under the maintainer's account (the
   wheel builds clean: `voyager-0.2.0-py3-none-any.whl`).
 - **GitHub repository metadata**: topics are still empty — set them with
-  `gh repo edit HarryHeYu/voyager --add-topic ai,coding-agent,ai-agent,codex,claude-code,cursor,developer-tools,cli,mcp,sqlite,local-first,python`
+  `gh repo edit HarryHeYu/sessionFlow --add-topic ai,coding-agent,ai-agent,codex,claude-code,cursor,developer-tools,cli,mcp,sqlite,local-first,python`
   (or via the web UI). Homepage is unset as well.
 
 ## [0.2.0] — 2026-09-13

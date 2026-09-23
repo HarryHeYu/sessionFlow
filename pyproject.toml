@@ -36,10 +36,10 @@ all = ["zstandard>=0.22", "mcp>=1.2"]
 dev = ["pytest>=8", "zstandard>=0.22", "mcp>=1.2", "pillow>=10"]
 
 [project.urls]
-Homepage = "https://github.com/HarryHeYu/voyager"
-Repository = "https://github.com/HarryHeYu/voyager"
-Issues = "https://github.com/HarryHeYu/voyager/issues"
-Changelog = "https://github.com/HarryHeYu/voyager/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/HarryHeYu/sessionFlow"
+Repository = "https://github.com/HarryHeYu/sessionFlow"
+Issues = "https://github.com/HarryHeYu/sessionFlow/issues"
+Changelog = "https://github.com/HarryHeYu/sessionFlow/blob/main/CHANGELOG.md"
 
 [project.scripts]
 voyager = "voyager.cli:main"

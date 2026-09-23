@@ -1,6 +1,6 @@
 # Voyager 🧭
 
-[![tests](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/voyager/actions/workflows/test.yml)
+[![tests](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
@@ -46,10 +46,10 @@ JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成*
 
 ```sh
 # 用 pipx 装成独立 CLI（推荐，不用折腾虚拟环境）
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
 
 # 或者用 pip 装到用户目录
-pip install "voyager[all] @ git+https://github.com/HarryHeYu/voyager.git"
+pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
 
 # 等 PyPI 发布后可简化为（进度见 CHANGELOG.md）
 pipx install voyager
@@ -58,15 +58,15 @@ pipx install voyager
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/voyager.git"          # 核心
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/voyager.git"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/voyager.git"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git"          # 核心
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + MCP server
 ```
 
 想改 Voyager 本身：
 
 ```sh
-git clone https://github.com/HarryHeYu/voyager && cd voyager
+git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
 python -m pytest tests/ -q     # 370 collected：352 passed / 18 skipped（全合成 fixture，不碰你的真实会话）
 ```

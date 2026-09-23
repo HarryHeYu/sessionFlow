@@ -187,7 +187,7 @@ Execute manually in your own environment:
 
 ```bash
 # Clone project first
-git clone https://github.com/HarryHeYu/voyager && cd voyager
+git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 
 # Install dependencies
 pip install -e ".[mcp]"
