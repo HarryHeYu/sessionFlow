@@ -111,6 +111,15 @@ All notable changes to Voyager are documented here. Format loosely follows
   Freshness is judged from each record's `ts`, not its file offset, because
   `_append_jsonl()` trims the log to its last ~200 KB past 1 MB — an offset could
   otherwise shift mid-probe and drop the very record being looked for.
+- **That same probe could not start `claude` on Windows at all** — it resolved
+  the executable with `shutil.which("claude")` and then invoked the *bare* name,
+  `subprocess.run(["claude", ...])`. `subprocess` does not consult `PATHEXT` the
+  way a shell does, so on a machine where `claude` is the usual `claude.CMD`
+  shim — which is exactly what `which()` had just resolved — the spawn raised
+  `FileNotFoundError` / WinError 2. Only `TimeoutExpired` was caught, so the run
+  died with a traceback instead of a verdict. The guard and the invocation now
+  agree on the path, and `OSError` is caught so a provider that refuses to start
+  is reported as a failed check rather than crashing the probe.
 
 ### Added
 - `H` startup status: **native hook registered, live trigger not yet verified**.

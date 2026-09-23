@@ -413,7 +413,8 @@ def main() -> int:
         print(f"{INFO} watching hook trace: {log_path}")
         probe_started = time.time()
 
-        if shutil.which("claude") is None:
+        claude_path = shutil.which("claude")
+        if claude_path is None:
             print(f"{FAIL} `claude` is not on PATH, so the trigger was NOT "
                   f"verified (--e2e was requested)")
             failures += 1
@@ -423,8 +424,14 @@ def main() -> int:
                 probe = Path(args.probe_file)
                 before = probe.stat().st_mtime if probe.exists() else None
             try:
+                # Invoke the path `which()` returned, not the bare name. On
+                # Windows `claude` is normally a `claude.CMD` shim, and
+                # `subprocess` does not consult PATHEXT the way a shell does:
+                # `subprocess.run(["claude", ...])` raises FileNotFoundError
+                # (WinError 2) even though `which()` found it a line earlier.
+                # The guard and the invocation have to agree on the path.
                 e2e = subprocess.run(
-                    ["claude", "--init-only"],
+                    [claude_path, "--init-only"],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
                 )
                 if e2e.returncode == 0:
@@ -437,6 +444,12 @@ def main() -> int:
                     failures += 1
             except subprocess.TimeoutExpired:
                 print(f"{FAIL} `claude --init-only` timed out")
+                failures += 1
+            except OSError as exc:
+                # Defence in depth: a .bat shim, or a locked/quarantined file,
+                # can still refuse to start. Report it rather than dying with a
+                # traceback, so the run ends in a verdict either way.
+                print(f"{FAIL} could not start {claude_path}: {exc}")
                 failures += 1
 
             # A clean exit only proves Claude started and quit. What is being

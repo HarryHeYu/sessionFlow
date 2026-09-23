@@ -11,13 +11,27 @@ not proof -- exit 0 only says Claude started and quit. The probe now reads the
 hook's own trace log and demands an invocation whose `session_id` is not the
 synthetic one the script itself uses in check 4, and `find_real_trigger` is
 where that decision lives.
+
+`TestE2EVerdict` runs the probe for real against a fake `claude` and a scratch
+profile, so the whole decision table is covered rather than just the helpers.
+That test also pins a Windows-specific defect it found: `claude` is normally a
+`claude.CMD` shim, and `subprocess` does not consult PATHEXT the way a shell
+does, so invoking the bare name raised `FileNotFoundError` (WinError 2) even
+though `shutil.which()` had just resolved it. The probe now runs the resolved
+path.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = REPO_ROOT / "scripts" / "verify_claude_sessionstart.py"
@@ -133,6 +147,126 @@ def test_saw_hook_without_stdin_honours_since():
     assert verifier.saw_hook_without_stdin(events, since=50.0)
 
 
+# --- the probe's verdict, run for real --------------------------------------
+#
+# These drive `main()` in a subprocess against a fake `claude` and a scratch
+# profile, so they cover the decision the whole script exists to make. The
+# helper tests above cannot catch a wiring mistake between the pieces.
+#
+# Windows-only: the defect they pin is `.cmd` shim resolution, and building a
+# fake `claude` that PATH can find means shipping a `claude.cmd`.
+
+def _scratch_profile(tmp_path: Path) -> Path:
+    """A throwaway profile with a SessionStart hook that does nothing.
+
+    The hook deliberately writes no trace record: the trace log must only ever
+    contain records produced by the fake `claude`, so the assertions cannot be
+    satisfied by check 4's own invocation.
+    """
+    home = tmp_path / "scratch-home"
+    (home / ".claude").mkdir(parents=True)
+    hook = home / "noop_hook.py"
+    hook.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    settings = {"hooks": {"SessionStart": [{
+        "matcher": "startup",
+        "hooks": [{"type": "command",
+                   "command": f'"{sys.executable}" "{hook}"',
+                   "timeout": 120}],
+    }]}}
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps(settings), encoding="utf-8")
+    return home
+
+
+def _install_fake_claude(bin_dir: Path, mode: str) -> None:
+    """Put a `claude.cmd` on PATH that records what it was asked to do.
+
+    `mode` decides what lands in the trace log: "fire" a real invocation,
+    "nostdin" one with no payload, "silent" nothing at all.
+    """
+    body = bin_dir / "fake_claude_body.py"
+    body.write_text(textwrap.dedent(f"""
+        import json, os, sys, time
+        mode = {mode!r}
+        log = os.path.join(os.environ["VOYAGER_LOG_DIR"], "provider-hooks.jsonl")
+        record = None
+        if mode == "fire":
+            record = {{"event": "SessionStart_parsed",
+                      "session_id": "claude-real-0001", "cwd": "E:/proj"}}
+        elif mode == "nostdin":
+            record = {{"event": "SessionStart_no_stdin", "cwd": "E:/proj"}}
+        if record is not None:
+            record["ts"] = time.time()
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record) + "\\n")
+        sys.exit(0)
+    """).lstrip(), encoding="utf-8")
+    (bin_dir / "claude.cmd").write_text(
+        f'@echo off\r\n"{sys.executable}" "{body}" %*\r\n', encoding="ascii")
+
+
+def _run_probe(tmp_path: Path, mode: str):
+    home = _scratch_profile(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _install_fake_claude(bin_dir, mode)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+
+    env = dict(os.environ)
+    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+    env["VOYAGER_LOG_DIR"] = str(logs)
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+
+    return subprocess.run(
+        [sys.executable, str(VERIFIER), "--e2e", "--home", str(home)],
+        capture_output=True, text=True, env=env, timeout=300,
+    )
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="the .cmd shim resolution this covers is Windows-specific")
+@pytest.mark.parametrize("mode, expected_rc, expected", [
+    # The hook fired: only positive evidence turns this into a PASS.
+    ("fire", 0, "fired with Claude's own session_id='claude-real-0001'"),
+    # The trigger works but Claude handed the hook nothing to parse.
+    ("nostdin", 1, "received no stdin payload"),
+    # Nothing fired at all -- and `claude --init-only` still exited 0, which is
+    # exactly why the exit code alone was never proof.
+    ("silent", 1, "no hook invocation recorded"),
+])
+def test_e2e_verdict(tmp_path, mode, expected_rc, expected):
+    proc = _run_probe(tmp_path, mode)
+    assert expected in proc.stdout, (
+        f"mode={mode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
+    # Distinguish "the hook did not fire" from "claude never started" -- the
+    # latter also ends in rc=1, which would let the "silent" case pass for
+    # entirely the wrong reason.
+    assert "could not start" not in proc.stdout, (
+        f"mode={mode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
+    assert proc.returncode == expected_rc, (
+        f"mode={mode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}")
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="the .cmd shim resolution this covers is Windows-specific")
+def test_e2e_verdict_proves_the_resolved_shim_is_runnable(tmp_path):
+    """The probe must be able to *start* a `claude.cmd` shim on Windows.
+
+    Regression guard: invoking the bare name raises FileNotFoundError
+    (WinError 2) because `subprocess` does not do PATHEXT lookup, so the run
+    died with a traceback instead of a verdict. The fake `claude` here is a
+    `.cmd`, so a PASS can only happen if the resolved path was used.
+    """
+    proc = _run_probe(tmp_path, "fire")
+    assert "could not start" not in proc.stdout
+    assert "Traceback" not in proc.stderr, proc.stderr
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+
+
 # --- the probe must not regress to an exit-code-only check ------------------
 
 def test_e2e_probe_requires_positive_evidence_the_hook_ran():
@@ -151,3 +285,16 @@ def test_e2e_probe_requires_positive_evidence_the_hook_ran():
         "the --e2e probe no longer scopes its search to the probe window, so a "
         "self-trimming log can hide the record it is looking for")
     assert "SYNTHETIC_SESSION_ID" in source
+
+
+def test_e2e_probe_invokes_the_resolved_claude_path():
+    """Guard the Windows fix: the bare name cannot be spawned.
+
+    `shutil.which("claude")` resolves to `claude.CMD` on Windows, but
+    `subprocess.run(["claude", ...])` does not do PATHEXT lookup and raises
+    FileNotFoundError (WinError 2). The resolved path must be the one used.
+    """
+    source = VERIFIER.read_text(encoding="utf-8")
+    assert '[claude_path, "--init-only"]' in source, (
+        "the --e2e probe is invoking the bare name again")
+    assert '["claude", "--init-only"]' not in source
