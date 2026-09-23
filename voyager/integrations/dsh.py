@@ -13,7 +13,7 @@ class DSHIntegration:
     
     def __init__(self, home: Optional[Path] = None):
         self.home = home or Path.home()
-        self.capabilities: Optional[ProviderCapabilities] = None
+        self._capabilities: Optional[ProviderCapabilities] = None
         self.voyager_bin = self.home / ".voyager/bin"
         self.session_dir = self.home / ".dsh/sessions"
     
@@ -80,9 +80,9 @@ exec "$real_executable" "$@"
     def capabilities(self) -> ProviderCapabilities:
         """Return capability profile."""
         from .capabilities import detect_capabilities
-        if self.capabilities is None:
-            self.capabilities = detect_capabilities("dsh", self.home)
-        return self.capabilities
+        if self._capabilities is None:
+            self._capabilities = detect_capabilities("dsh", self.home)
+        return self._capabilities
     
     def verify(self) -> Dict[str, Any]:
         """Verify launcher is correctly installed."""

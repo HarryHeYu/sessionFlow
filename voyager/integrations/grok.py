@@ -1,4 +1,5 @@
 """Grok CLI integration implementation."""
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 import shutil
@@ -13,7 +14,7 @@ class GrokIntegration:
     
     def __init__(self, home: Optional[Path] = None):
         self.home = home or Path.home()
-        self.capabilities: Optional[ProviderCapabilities] = None
+        self._capabilities: Optional[ProviderCapabilities] = None
         self.voyager_bin = self.home / ".voyager/bin"
     
     def install(self) -> Dict[str, Any]:
@@ -84,20 +85,35 @@ exec "$real_executable" "$@"
     def capabilities(self) -> ProviderCapabilities:
         """Return capability profile."""
         from .capabilities import detect_capabilities
-        if self.capabilities is None:
-            self.capabilities = detect_capabilities("grok", self.home)
-        return self.capabilities
+        if self._capabilities is None:
+            self._capabilities = detect_capabilities("grok", self.home)
+        return self._capabilities
     
     def verify(self) -> Dict[str, Any]:
-        """Verify launcher is correctly installed."""
+        """Verify launcher is correctly installed.
+
+        Two traps this avoids, both of which made the method unusable:
+
+        * ``stat()`` must not run unconditionally.  It raises
+          ``FileNotFoundError`` when the launcher is missing — which is
+          precisely the situation ``verify()`` exists to report, so the method
+          crashed exactly when it was needed.
+        * The execute bit is a POSIX notion.  On Windows ``chmod(0o755)``
+          leaves ``st_mode`` at ``0o100666``, so testing ``st_mode & 0o111``
+          reported a healthy install as broken and ``verified`` could never be
+          true there.  The bit is only *required* where it means something.
+        """
         launcher = self.voyager_bin / "grok"
-        
+        exists = launcher.exists()
+        executable = bool(launcher.stat().st_mode & 0o111) if exists else False
+
         checks = {
-            "launcher_exists": launcher.exists(),
-            "executable": launcher.stat().st_mode & 0o111 != 0,
+            "launcher_exists": exists,
+            "executable": executable,
         }
-        
-        all_ok = all(checks.values())
+        required = ["launcher_exists"] + (["executable"] if os.name == "posix" else [])
+
+        all_ok = all(checks[k] for k in required)
         return {
             "verified": all_ok,
             "checks": checks,

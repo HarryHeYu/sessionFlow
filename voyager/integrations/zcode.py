@@ -13,7 +13,7 @@ class ZCodeIntegration:
     
     def __init__(self, home: Optional[Path] = None):
         self.home = home or Path.home()
-        self.capabilities: Optional[ProviderCapabilities] = None
+        self._capabilities: Optional[ProviderCapabilities] = None
     
     def install(self) -> Dict[str, Any]:
         return {
@@ -29,9 +29,9 @@ class ZCodeIntegration:
     
     def capabilities(self) -> ProviderCapabilities:
         from .capabilities import detect_capabilities
-        if self.capabilities is None:
-            self.capabilities = detect_capabilities("zcode", self.home)
-        return self.capabilities
+        if self._capabilities is None:
+            self._capabilities = detect_capabilities("zcode", self.home)
+        return self._capabilities
     
     def verify(self) -> Dict[str, Any]:
         return {"verified": False, "checks": {}, "strategy": "WATCHER_ATTACH_ONLY"}

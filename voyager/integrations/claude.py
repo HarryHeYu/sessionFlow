@@ -63,7 +63,7 @@ class ClaudeIntegration:
 
     def __init__(self, home: Optional[Path] = None):
         self.home = home or Path.home()
-        self.capabilities: Optional[ProviderCapabilities] = None
+        self._capabilities: Optional[ProviderCapabilities] = None
         self.settings_file = self.home / ".claude/settings.json"
         self.local_settings = self.home / ".claude/settings.local.json"
         #: Entrypoint the hook command points at.
@@ -326,6 +326,6 @@ class ClaudeIntegration:
 
     def capabilities(self) -> ProviderCapabilities:
         from .capabilities import detect_capabilities
-        if self.capabilities is None:
-            self.capabilities = detect_capabilities("claude", self.home)
-        return self.capabilities
+        if self._capabilities is None:
+            self._capabilities = detect_capabilities("claude", self.home)
+        return self._capabilities

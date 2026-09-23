@@ -591,6 +591,30 @@ class TestCapabilitySeparation:
         assert status.locally_configured is False
         assert status.live_verified is False
 
+    def test_provider_capabilities_method_is_not_shadowed(self, tmp_path):
+        """`capabilities()` must be reachable on every provider class.
+
+        Each class set `self.capabilities = None` in `__init__` while *also*
+        defining `def capabilities(self)`, so the instance attribute shadowed
+        the method and calling it raised
+        `TypeError: 'NoneType' object is not callable`.  Nothing called it, so
+        it went unnoticed; this locks the contract before something does.
+        """
+        from voyager.integrations import (
+            AntigravityIntegration, ClaudeIntegration, CodexIntegration,
+            DSHIntegration, GrokIntegration, ZCodeIntegration,
+        )
+        from voyager.integrations.capabilities import ProviderCapabilities
+
+        classes = [
+            AntigravityIntegration, ClaudeIntegration, CodexIntegration,
+            DSHIntegration, GrokIntegration, ZCodeIntegration,
+        ]
+        for cls in classes:
+            profile = cls(home=tmp_path).capabilities()
+            assert isinstance(profile, ProviderCapabilities), cls.__name__
+            assert profile.provider, cls.__name__
+
 
 class TestIdempotency:
     """Test install/remove idempotency."""
