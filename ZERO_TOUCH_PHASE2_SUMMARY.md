@@ -4,6 +4,16 @@
 **Commit Status**: WIP (continuing from `4100c35`)  
 **Next Target**: Final Acceptance after real dogfood tests
 
+> ⚠️ **Superseded snapshot — not current status.** This phase summary predates the
+> `Unreleased` fixes in [`CHANGELOG.md`](CHANGELOG.md). Specifically: the
+> `~/.claude/voyager_session_start.sh` wrapper it describes **no longer exists**
+> (the entrypoint is now `claude_session_start.py`), the flat hook JSON shown here
+> is **not** the schema Claude Code reads (the real shape is
+> `hooks.SessionStart[].hooks[]` with `type`/`command`/`timeout`), and the
+> Antigravity `BEST_EFFORT` label has been retired in favour of the `Y`/`H`/`A`/`N`
+> startup legend. Current state: **Claude Code = `H`**; **all other providers =
+> `N`**. Final Acceptance is still **OPEN**.
+
 ---
 
 ## What Was Completed

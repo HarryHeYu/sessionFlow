@@ -1,5 +1,15 @@
 # Provider Verification Summary
 
+> ⚠️ **Superseded snapshot — not current status.** A 2026-09-21 verification pass.
+> It reports "Hook wrapper at `~/.claude/voyager_session_start.sh`", which is
+> stale: that wrapper is gone and the entrypoint is now `claude_session_start.py`,
+> registered in `settings.json` with the real nested `SessionStart` schema. The
+> file's own framing ("Correct Classifications (No Exaggeration)") is a fair
+> warning about the earlier docs, but its provider labels have since been replaced
+> by the `Y`/`H`/`A`/`N` legend. Current state: **Claude Code = `H`** (registered,
+> live trigger unverified); **all other providers = `N`**. See
+> [`CHANGELOG.md`](CHANGELOG.md).
+
 **Date**: 2026-09-21  
 **Classification Framework**: Evidence-based, level-by-level progression
 

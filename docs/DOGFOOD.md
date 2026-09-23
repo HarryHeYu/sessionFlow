@@ -1,11 +1,27 @@
 # Voyager Real-World Dogfood Guide
 
+> **Correction notice (2026-09-23).** The startup classifications this document
+> used to assert have been **retracted**. The old conclusion — "Claude Code
+> provides no automatic session-start trigger, therefore `STARTUP_ASSISTED`" —
+> was wrong *in its reasoning*. The real cause was a bug in Voyager's own
+> installer: `ClaudeIntegration.install()` wrote an invented flat schema **and
+> was never wired into `voyager integrate install` at all**, so nothing was ever
+> registered and the absence of a trigger was self-inflicted. Both are fixed
+> (see `fix(claude)` / `fix(cli)` in `CHANGELOG.md`).
+>
+> Claude Code now gets a **real native `SessionStart` hook** written into
+> `~/.claude/settings.json`. What is *still* not established is whether the
+> provider actually fires it on a real machine — that needs a human to run
+> `scripts/verify_claude_sessionstart.py`, and until then
+> `SESSIONSTART_TRIGGER_LIVE_VERIFIED` stays `false`. No provider currently
+> claims `Y`. Full narrative: [`claude_continuity_verdict.md`](../claude_continuity_verdict.md).
+
 **Status**: Automated tests cover all hermetic verification; real-agent end-to-end flows require manual execution with installed agents.
 
 ## Testing Boundary
 
-### Automated Hermetic Tests (208 total)
-All pytest tests use **synthetic fixtures** — no real agent data, no external dependencies:
+### Automated Hermetic Tests (321 collected → 303 passed, 18 skipped)
+All pytest tests use **synthetic fixtures** — no real agent data, no external dependencies. The 18 skips are optional-dependency and platform gates, not failures:
 
 - `test_adapters.py` — Parse synthetic JSON/SQL for all 8 providers
 - `test_*.py` — Store, continuity, budget, leases, switch, thread operations
@@ -14,10 +30,12 @@ All pytest tests use **synthetic fixtures** — no real agent data, no external 
 ### Real-Provider Runtime Tested (Requires Installed Agents)
 These flows were tested on actual Claude/Codex installations:
 
-1. **Codex startup discovery** → STARTUP_ASSISTED (no auto-invocation of `voyager_startup`)
-2. **Claude startup discovery** → STARTUP_ASSISTED (no auto-invocation of `voyager_startup`)
-3. **Neither provider auto-triggers Voyager at session start** — explicit invocation required via `voyager switch`, MCP tool call, or Skill guidance
+1. **Codex startup discovery** → **`N`** — Codex exposes no native session-start hook, so there is nothing to register
+2. **Claude startup discovery** → **`H`** — a real native `SessionStart` hook is now written by the installer, but **no run has yet observed the provider firing it**
+3. **No provider is currently proven to auto-trigger Voyager at session start** — explicit invocation via `voyager switch`, an MCP tool call, or Skill guidance is still required in practice
 4. **Target agent continuation context** — verified via explicit workflows (`switch`/`continue`)
+
+Startup legend (matches `voyager integrate status`): **`Y`** = zero-touch verified live · **`H`** = native hook registered, live trigger unverified · **`A`** = startup-assisted · **`N`** = no hook.
 
 This document provides a repeatable manual verification procedure.
 
@@ -141,19 +159,25 @@ Mark each item as ✅ or ❌ after running:
 
 | Provider | Index Ingest | Native Resume | Startup Discovery | Skill-triggered | MCP-triggered | Auto Attach | Direct Auto Verified? | Transcript Writer | Final Classification |
 |----------|--------------|---------------|-------------------|-----------------|---------------|-------------|----------------------|-------------------|---------------------|
-| **Codex** | ✅ Via adapter | ✅ `codex resume` | ⚠️ Tested → STARTUP_ASSISTED | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **No auto at startup** | ✅ Implemented | **STARTUP_ASSISTED** (manual required) |
-| **Claude Code** | ✅ Via adapter | ✅ `claude --resume` | ⚠️ Tested → STARTUP_ASSISTED | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **No auto at startup** | ⏳ Not yet implemented | **STARTUP_ASSISTED** (manual required) |
-| **Grok** | ✅ Via adapter | ✅ `grok -r` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **BEST_EFFORT** (no hook support) |
-| **DSH** | ✅ Via adapter | ✅ `dsh --resume` | ⚠️ Best-effort poll | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **BEST_EFFORT** (CLI available, real env not verified) |
-| **ZCode** | ✅ Via SQLite | ❌ Desktop only | ❌ No CLI | ❌ No SKILL.md | ❌ No tool | ❌ Manual attach | **No** | ❌ N/A | **Explicit-only** (manual paste required) |
-| **Cursor** | ✅ Via SQLite | ❌ IDE only | ❌ No CLI | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** |
-| **Kiro** | ✅ Via JSON | ❌ IDE only | ❌ No CLI | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** |
+| **Codex** | ✅ Via adapter | ✅ `codex resume` | ❌ No native hook surface → **`N`** | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **No auto at startup** | ✅ Implemented | **`N`** — first-turn/Skill guidance only |
+| **Claude Code** | ✅ Via adapter | ✅ `claude --resume` | ✅ Real native `SessionStart` hook written to `settings.json` → **`H`** | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Registered, firing not yet observed** | ⏳ Not yet implemented | **`H`** — registered; `Y` not claimed |
+| **Grok** | ✅ Via adapter | ✅ `grok -r` | ❌ No native hook → **`N`**; opt-in launcher shim | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **`N`** — launcher-shim path available |
+| **DSH** | ✅ Via adapter | ✅ `dsh --resume` | ❌ No native hook → **`N`**; launcher + session watcher | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **`N`** — launcher path; real env not verified |
+| **ZCode** | ✅ Via SQLite | ❌ Desktop only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No tool | ❌ Manual attach | **No** | ❌ N/A | **Explicit-only** (manual paste required) |
+| **Cursor** | ✅ Via SQLite | ❌ IDE only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** (no CLI surface) |
+| **Kiro** | ✅ Via JSON | ❌ IDE only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** (no CLI surface) |
+
+Only `claude` sets `has_startup_hook = True` in `PROVIDER_CONFIG`; every other provider returns `N` for the startup column because the platform has no hook surface to register into. `H` is deliberately *not* `Y`: registration is proven by the installer, the provider actually firing the trigger is not.
 
 ### Classification Criteria
-- **Verified automatic**: Tested via pytest with real fixture data; orchestration works end-to-end
-- **Best-effort**: Supports continuity via MCP/Skill/switch but direct auto-startup not verified
-- **Explicit-only**: Requires manual paste of bundle; no automation possible
-- **Unsupported**: No external CLI, cannot participate in CLI-based continuity
+- **`Y` (zero-touch verified live)**: a human has observed the provider invoking Voyager at session start with no user command. **Nothing currently claims this.**
+- **`H` (hook registered, trigger unverified)**: the installer wrote a schema-valid hook and `voyager integrate status` reports it; the provider firing it has not been observed.
+- **`N` (no hook)**: the platform exposes no session-start hook surface. Continuity is still available through `voyager switch`, MCP tools, or Skill guidance.
+- **Best-effort**: continuity works via MCP/Skill/launcher, but no startup automation is claimed.
+- **Explicit-only**: requires manual paste of the bundle; no automation possible.
+- **Unsupported**: no external CLI, cannot participate in CLI-based continuity.
+
+> Note: pytest passing is **not** evidence of live zero-touch. Hermetic tests use synthetic fixtures and never touch a real provider; only the manual procedure below can move a provider from `H` to `Y`.
 
 ---
 
@@ -179,13 +203,14 @@ The **automated tests** guarantee that all core logic is correct. This manual pr
 
 ## Summary
 
-- **Automated core verified**: 208 pytest tests pass (all logic paths covered)
-- **Real-provider runtime tested**: 
-  * Codex = STARTUP_ASSISTED, live startup tested, no automatic `voyager_startup` invocation
-  * Claude = STARTUP_ASSISTED, live startup tested, no automatic `voyager_startup` invocation  
-  * Grok = BEST_EFFORT, no hook support
-  * DSH = BEST_EFFORT, CLI available but real env not verified
+- **Automated core verified**: `321 collected → 303 passed, 18 skipped, 0 failed` (all logic paths covered; skips are optional-dependency/platform gates)
+- **Real-provider runtime status** (as of 2026-09-23):
+  * Claude Code = **`H`** — a schema-valid native `SessionStart` hook is registered by the installer; the provider firing it has **not** been observed. `SESSIONSTART_TRIGGER_LIVE_VERIFIED = false`.
+  * Codex = **`N`** — no native hook surface; first-turn/Skill guidance only
+  * Grok = **`N`** — no native hook; opt-in launcher shim is the available path
+  * DSH = **`N`** — launcher + session watcher; real environment not verified
 - **Provider-limited**: ZCode desktop, Cursor/Kiro IDE-only
 - **MCP registration**: Fully automated, no manual setup required
+- **Zero-Touch Final Acceptance: OPEN** — no provider claims `Y` yet.
 
-The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`) or MCP tool calls. True invisible auto-startup (agent discovers and attaches itself without any user command) requires provider-specific hooks that do not exist on tested platforms.
+The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`) or MCP tool calls. Claude Code is now the one provider where an invisible auto-startup path plausibly exists — the hook is registered and the handler is verified — but the last mile, observing the provider actually fire it, remains unproven and is the single open item blocking Zero-Touch Final Acceptance.

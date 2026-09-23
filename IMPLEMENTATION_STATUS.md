@@ -264,6 +264,14 @@ This honest positioning reflects actual current capabilities.
 
 ## 💡 NEXT IMMEDIATE ACTIONS
 
+> **Update (2026-09-23).** These four actions are **done** — but the interesting
+> finding is that the real blocker was elsewhere. The Claude hook *was* being
+> "registered" all along only in the sense that the installer invented a flat
+> schema nothing read, and `voyager integrate install` never called the
+> installer at all. Fixing that (plus the `integrate remove` crash that hit
+> every provider) is what unblocked this section. Details in
+> [`claude_continuity_verdict.md`](claude_continuity_verdict.md).
+
 1. **Fix auto-registration** in `_register_codex_mcp()` / `_register_claude_mcp()`
    - Create default config files if they don't exist
    - Add Voyager entry automatically
@@ -283,5 +291,10 @@ This honest positioning reflects actual current capabilities.
    - Update README with correct claim
 
 Once completed:
-- Status changes from "STARTUP_ASSISTED" to "READY FOR REAL TESTING"
-- Then real-provider dogfood tests can verify actual zero-touch
+- Status is **no longer** "STARTUP_ASSISTED". Claude Code reports **`H`** — a
+  real native `SessionStart` hook is registered, but no run has observed the
+  provider firing it. Every other provider reports **`N`** (no hook surface).
+- The remaining gap is **not code**. It is one manual observation: run
+  `scripts/verify_claude_sessionstart.py` by hand and confirm the trigger fires.
+  Until then `SESSIONSTART_TRIGGER_LIVE_VERIFIED` stays `false` and Zero-Touch
+  Final Acceptance stays **OPEN**.

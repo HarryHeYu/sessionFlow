@@ -1,5 +1,12 @@
 # Provider Dogfood Test Report
 
+> ⚠️ **Superseded snapshot — not current status.** A 2026-09-21 report whose
+> `STARTUP_ASSISTED` / `BEST_EFFORT` strategy labels have been replaced by the
+> `Y`/`H`/`A`/`N` startup legend. Current state: **Claude Code = `H`** (native
+> `SessionStart` hook registered, live trigger unverified); **all other providers
+> = `N`**. See [`CHANGELOG.md`](CHANGELOG.md) and
+> [`claude_continuity_verdict.md`](claude_continuity_verdict.md).
+
 **Date**: 2026-09-21  
 **Environment**: Windows 10, Python 3.14.2
 

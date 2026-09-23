@@ -4,6 +4,18 @@
 **Method**: Real provider capability audit via `voyager/integrations/capabilities.py`  
 **Status**: Complete audit of all 8 supported providers
 
+> ⚠️ **Superseded snapshot — not current status.** The *hierarchy table* below is
+> still the internal `ZeroTouchLevel` enum in
+> `voyager/integrations/capabilities.py`, but the **per-provider classifications**
+> further down are stale. In particular the audit hardcoded
+> `has_session_start_hook = False` for Claude Code and therefore rated it
+> `FIRST_TURN_ZERO_TOUCH`; that hardcode has been removed. Current state:
+> **Claude Code = `H`** (real native `SessionStart` hook registered, live trigger
+> unverified); **all other providers = `N`**. The user-facing legend is now
+> `Y`/`H`/`A`/`N` as printed by `voyager integrate status`. See
+> [`CHANGELOG.md`](CHANGELOG.md) and
+> [`claude_continuity_verdict.md`](claude_continuity_verdict.md).
+
 ---
 
 ## Executive Summary

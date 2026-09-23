@@ -3,6 +3,96 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+> Headline: the "Claude Code has no automatic session-start trigger" conclusion
+> recorded under 0.3.0 was **wrong**, and the cause was in Voyager, not in the
+> provider. Full analysis in `claude_continuity_verdict.md`.
+
+### Fixed
+- **Native `SessionStart` hook registration (RC6)** — `ClaudeIntegration.install()`
+  emitted an invented *flat* schema (`hooks.SessionStart[] = {command, ...}`) that
+  Claude Code does not read, and the CLI's `integrate install` never called it at
+  all. `install()` now writes the real nested shape
+  (`hooks.SessionStart[].hooks[]` with `{"type": "command", "command": …,
+  "timeout": 120}` and a `matcher` selecting the source), upgrades any legacy flat
+  entry in place, preserves unrelated settings, and backs the file up first.
+  Added `hook_command()`, `remove()` and a `verify()` that rejects the legacy shape.
+- **`voyager integrate` lifecycle (RC7)** — `integrate remove` raised
+  `AttributeError: 'NoneType' object has no attribute 'json'` for *every* provider;
+  `remove` now accepts `--json` like the other subcommands. `install` / `status` /
+  `remove` now agree on the same hook state, and `status` prints the hook result.
+- **`integrate install` and `integrate status` disagreed on `startup_status`** —
+  the two code paths keyed off *different* fields (install off
+  `has_startup_hook`, status off `mcp_enabled`), so a machine with Codex MCP
+  registered got `N` from `integrate install codex` and `A` from
+  `integrate status` for the very same state. Both now share one rule.
+- **A re-run of `integrate install` forgot an already-registered MCP server** —
+  the MCP status was only set to `registered` on the branch that had just
+  performed the registration, so idempotent re-runs downgraded the reported
+  startup status.
+- **`_check_mcp_support()` ignored its `home` argument** and read `Path.home()`
+  instead, so every `--home`-scoped run silently inspected — and reported on —
+  the real user profile rather than the directory it was pointed at.
+- **SessionStart handler protocol** — the handler now emits a protocol-valid
+  `hookSpecificOutput.additionalContext` payload and exits `0`; the context cap is
+  measured in **UTF-16 code units** (Claude Code is JavaScript, so `len()` in
+  Python undercounts non-BMP characters), truncation walks character by character,
+  and the reported size is measured *before* truncation.
+- **Context bundle did not survive the hook boundary** — the compiled bundle was
+  cached in process memory, which is useless when every hook invocation is a fresh
+  process. It is now persisted in the SQLite `meta` table, keyed by
+  `ctx_cache:<thread>:<provider>:<budget>`, with hardening against
+  `NaN`/`Infinity`/`OverflowError` inputs that previously passed `float()` and
+  silently froze the cache.
+- **`GrokIntegration.verify()`** — unguarded `stat()` on a possibly-missing
+  launcher, plus a POSIX execute-bit check that can never pass on Windows
+  (`chmod(0o755)` leaves `st_mode == 0o100666` there). The execute-bit requirement
+  is now applied only on POSIX.
+- **Capability/method shadowing** — six integration classes set
+  `self.capabilities = None` while also defining a `capabilities()` method, so the
+  instance attribute silently shadowed the method. Renamed to `_capabilities`.
+- **`has_session_start_hook` hardcoded `False` for Claude** in
+  `voyager/integrations/capabilities.py` and left stale after the integration
+  shipped; it now reflects real detection (`config_valid` / `hook_invoked` are
+  tracked separately from the platform ceiling).
+- **A Unicode assertion that never executed** — `"\u4e00" <= ord(c)` compared a
+  string to an int and would have raised had it ever run; corrected to a range
+  check. It had been silently masked.
+- **`voyager integrate status` legend** did not mention the new `H` state.
+
+### Added
+- `H` startup status: **native hook registered, live trigger not yet verified**.
+  Only `Y` claims that a provider fires the hook by itself, and nothing claims `Y`.
+- `tests/test_claude_session_start_hook.py` (29 tests) — output protocol, payload
+  cap, UTF-16 length accounting, spill file, logging, log rotation, isolation.
+- `tests/test_context_cache.py` (39 tests) — cache helpers, hostile input,
+  end-to-end persistence, static guards.
+- `scripts/verify_claude_sessionstart.py` — end-to-end hook verifier that fails
+  loudly instead of passing on skips.
+- `tests/test_cli.py` — four regression tests pinning the lifecycle invariants
+  above: install/status must agree per provider, the `Y`/`H`/`A`/`N` legend must
+  hold, an already-registered MCP must still report assisted, and
+  `_check_mcp_support` must honour its `home` argument. Each was confirmed to
+  fail against the pre-fix code.
+- `.gitignore` entry for `.workbuddy-ai/` (agent-local memory, not product code).
+
+### Removed
+- Five repo-root scripts that shadowed or duplicated real tests:
+  `test_claude_sessionstart.py`, `test_discovery_scan_chain.py`,
+  `test_full_grok_continuity.py`, `test_grok_wrapper.py`,
+  `test_grok_wrapper_windows.py`. Coverage was promoted into `tests/` or was
+  already redundant; `claude_continuity_verdict.md` records each one. Note that
+  `test_claude_sessionstart.py` *encoded the retracted conclusion* — it declared
+  `SESSION_START_ZERO_TOUCH` if any settings key merely contained the substring
+  `hook`.
+
+### Notes
+- Test suite: `321 collected → 303 passed, 18 skipped, 0 failed`.
+- `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
+  Acceptance remains **open**; it now depends on a single manual observation, not
+  on further code.
+
 ## [0.3.0] — 2026-09-19
 
 > Continuity Engine core milestone. All roadmap phases
@@ -111,6 +201,11 @@ All notable changes to Voyager are documented here. Format loosely follows
   **Real-provider dogfood tests**: Codex/Claude startup discovery tested
   via `voyager-zero-touch-test/` — confirmed neither invokes `voyager_startup`
   automatically at session start → classification: STARTUP_ASSISTED.
+  ⚠️ **Retracted — see the Unreleased section.** The *observation* (nothing fired)
+  was real; the *attribution* was not. The cause was Voyager's own installer
+  writing an invented hook schema and never being called by `integrate install`,
+  not a platform limitation. Do not cite this entry as evidence about provider
+  capability.
 - `scripts/run_tests_core_only.py` — runs the suite with `mcp` and
   `zstandard` blocked, i.e. exactly what `pip install voyager` gives you.
 - **Test count**: Suite grew from 188 → 208 tests (added integration tests for

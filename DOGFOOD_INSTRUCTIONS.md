@@ -20,19 +20,23 @@ Expected output:
 Provider          Skill  MCP      Startup    Auto
 ----------------------------------------------------------------------
 Codex             Y      R        N          Y
-Claude            Y      R        A          Y
+Claude            Y      R        H          Y
 ```
 
-Legend: **R** = registered, **A** = assisted startup, **N** = no hook
+Legend: **R** = registered, **H** = native hook registered (live trigger unverified), **A** = startup-assisted, **N** = no hook. Only **Y** would mean the provider fires the hook by itself — nothing claims that yet.
+
+`H` appears for Claude only once `voyager integrate install claude` has actually written the hook into `~/.claude/settings.json`. If it prints `A` or `N` instead, the install did not land — re-run it and inspect the settings file.
 
 ## Test Philosophy
 
 **Zero-Touch Goal:** An Agent starts in a repo → automatically discovers existing WorkThread → loads session context without any `voyager` command.
 
-**Reality Check:** As of now, neither platform provides verified automatic startup triggers. This means:
+**Reality Check (corrected 2026-09-23):** The previous revision of this section claimed "neither platform provides verified automatic startup triggers" and blamed the platforms. That reasoning was **wrong**. Claude Code does support native `SessionStart` hooks; the reason nothing fired was a bug in Voyager's own installer — `ClaudeIntegration.install()` emitted an invented flat schema and was never wired into `voyager integrate install` in the first place. That is now fixed, and a schema-valid hook is registered. Current honest state:
+
 - ✅ Core functionality COMPLETE (discovery + attach + bundle compilation)
-- ❌ Runtime trigger INCOMPLETE (depends on platform capabilities)
-- 📊 Status: STARTUP_ASSISTED (requires manual instruction following)
+- ✅ Claude hook **registered** — handler verified, schema verified, payload protocol verified
+- ❌ **Provider firing the hook is still unobserved** → `SESSIONSTART_TRIGGER_LIVE_VERIFIED = false`
+- 📊 Claude = **`H`**; every other provider = **`N`** (no hook surface). Zero-Touch Final Acceptance remains **OPEN**.
 
 ## Test Scenario 1: Claude → Codex Continuity
 
@@ -172,18 +176,19 @@ After each test run, verify these items:
 ### Platform Limitations
 
 1. **Codex CLI**
-   - No native session-start hook
+   - No native session-start hook surface — there is nothing for the installer to register into
    - Must rely on agent reading Skill file and following instructions
-   - Status: STARTUP_ASSISTED
+   - Status: **`N`**
 
 2. **Claude Code**
-   - Limited visibility into startup sequence
-   - May have startup hooks but unverified
-   - Status: STARTUP_ASSISTED
+   - Native `SessionStart` hooks **are** supported, and Voyager now registers one (`hooks.SessionStart[].hooks[]`, `type: command`, matcher `startup`)
+   - The handler's output protocol (`hookSpecificOutput.additionalContext`), exit codes, and the 10 000-UTF-16-unit payload cap are all covered by tests
+   - What is missing is only the live observation: no run has yet confirmed the provider actually invokes it
+   - Status: **`H`** (registered, trigger unverified)
 
 3. **Grok CLI / DSH**
    - No startup hooks at all
-   - Status: BEST_EFFORT
+   - Status: **`N`** (best-effort via launcher shim / Skill guidance)
 
 ### What's Actually Verified
 
@@ -205,24 +210,25 @@ After each test run, verify these items:
 
 Update documentation:
 ```markdown
-| Provider | Skill | MCP | Status    | Verification      |
-|----------|-------|-----|-----------|-------------------|
-| Codex    | Y     | R   | AUTO      | ✓ PASS            |
-| Claude   | Y     | R   | AUTO      | ✓ PASS            |
+| Provider | Skill | MCP | Startup | Verification |
+|----------|-------|-----|---------|--------------|
+| Claude   | Y     | R   | Y       | ✓ observed   |
 ```
 
-Update `README.md` to reflect verified zero-touch capability.
+Only a provider whose hook was **observed firing** may be marked `Y`. Update `README.md` and `docs/DOGFOOD.md` to reflect that.
 
 ### If Tests Require Manual Intervention (Likely)
 
 This IS acceptable! Update honestly:
 
 ```markdown
-| Provider | Skill | MCP | Status         | Verification      |
-|----------|-------|-----|----------------|-------------------|
-| Codex    | Y     | R   | STARTUP_ASSISTED | Manual follow-up |
-| Claude   | Y     | R   | STARTUP_ASSISTED | Manual follow-up |
+| Provider | Skill | MCP | Startup | Verification                        |
+|----------|-------|-----|---------|-------------------------------------|
+| Claude   | Y     | R   | H       | Hook registered, firing unobserved  |
+| Codex    | Y     | R   | N       | No hook surface; Skill guidance     |
 ```
+
+`H` is the honest resting state for a provider whose hook is registered but never seen firing. Do **not** promote it to `Y` on the strength of a green test suite — pytest uses synthetic fixtures and proves the handler, not the provider.
 
 Document WHAT manual step is required:
 - "Agent must read Skill file"

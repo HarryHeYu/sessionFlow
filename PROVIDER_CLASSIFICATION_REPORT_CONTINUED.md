@@ -1,5 +1,15 @@
 # Provider Zero-Touch Capability Classification Report (Continued)
 
+> ⚠️ **Superseded snapshot — not current status.** This is a point-in-time
+> classification pass from 2026-09. Its `STARTUP_ASSISTED` / `BEST_EFFORT` labels
+> (and the "provisional until verification" caveats on Cursor, Antigravity, etc.)
+> predate the `Unreleased` fixes in [`CHANGELOG.md`](CHANGELOG.md). The Claude
+> entry in particular assumed no hook surface existed; the real cause was
+> Voyager's own installer writing an invented schema and never being invoked.
+> Current state: **Claude Code = `H`** (native hook registered, live trigger
+> unverified); **every other provider = `N`**. Narrative:
+> [`claude_continuity_verdict.md`](claude_continuity_verdict.md).
+
 ---
 
 ### DSH → LAUNCHER_ZERO_TOUCH ✅

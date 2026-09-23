@@ -10,7 +10,9 @@
 **Continuity Engine 主线到此完整：`index → WorkThread → goal rank → budget → skill → lease → switch → API/UI client`。**
 Phase 7 is partially shipped (API/bridge/scaffold done; Composer webview + one-click switch UI pending).
 
-**Final assessment (2026-09-20)**: All roadmap phases complete. Zero-Touch Startup Continuity core implementation verified via pytest (208 tests); real-provider runtime auto-trigger tested on Codex/Claude and classified as **STARTUP_ASSISTED** (manual startup required, no automatic `voyager_startup` invocation at agent startup).
+**Final assessment (2026-09-20; classification corrected 2026-09-23)**: All roadmap phases complete. Zero-Touch Startup Continuity core implementation verified via pytest (`321 collected → 303 passed, 18 skipped`).
+
+> **Correction.** The original assessment classified Codex/Claude as **STARTUP_ASSISTED**, reasoning that "no automatic `voyager_startup` invocation happens at agent startup". The *observation* was real; the *cause* was not the platforms. Voyager's own installer wrote an invented flat hook schema **and was never wired into `voyager integrate install`**, so nothing was ever registered. With that fixed, Claude Code registers a real native `SessionStart` hook and reports **`H`** — registered, live trigger unverified. No provider claims `Y`, and Zero-Touch Final Acceptance stays **OPEN**. See [`claude_continuity_verdict.md`](../claude_continuity_verdict.md).
 
 **Phase 2 close-out audit (2026-09-18, checked against the code):**
 

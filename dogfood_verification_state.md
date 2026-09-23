@@ -1,5 +1,14 @@
 # Provider Dogfood Verification State
 
+> ⚠️ **Superseded snapshot — not current status.** A 2026-09-21 verification
+> record. Two things in it are now wrong: (1) the hook wrapper it reports at
+> `~/.claude/voyager_session_start.sh` is gone — the entrypoint is
+> `claude_session_start.py` and the hook is written to `settings.json` with the
+> real nested schema; (2) the provider test scripts it references
+> (`test_full_grok_continuity.py`, etc.) were deleted from the repo root. Current
+> state: **Claude Code = `H`** (registered, trigger unverified); **all other
+> providers = `N`**. See [`CHANGELOG.md`](CHANGELOG.md).
+
 **Date**: 2026-09-21  
 **Status**: Ongoing investigation, evidence-based classifications
 

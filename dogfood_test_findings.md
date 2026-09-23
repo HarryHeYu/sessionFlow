@@ -1,5 +1,15 @@
 # Provider Dogfood Test Findings Summary
 
+> ⚠️ **Superseded snapshot — not current status.** A 2026-09-21 findings record.
+> The `STARTUP_ASSISTED` / `BEST_EFFORT` taxonomy below was replaced by the
+> `Y`/`H`/`A`/`N` startup legend, and the file paths it lists
+> (`~/.claude/voyager_session_start.sh`, `test_claude_sessionstart.py`,
+> `test_full_grok_continuity.py`) **no longer exist** — the legacy wrapper was
+> replaced by `claude_session_start.py` and the repo-root scripts were deleted.
+> Current state: **Claude Code = `H`**; **all other providers = `N`**. See
+> [`CHANGELOG.md`](CHANGELOG.md) and
+> [`claude_continuity_verdict.md`](claude_continuity_verdict.md).
+
 ## Executive Summary
 
 Completed E2E verification for 3 providers (Grok, Claude). Both classified at **LAUNCHER_ZERO_TOUCH** but NOT full continuity - launcher path verified, session attachment untested due to platform constraints.
