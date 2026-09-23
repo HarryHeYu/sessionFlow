@@ -215,6 +215,30 @@ All notable changes to Voyager are documented here. Format loosely follows
     misleading: it would re-insert the *unexpanded*
     `Path(os.environ.get("VOYAGER_HOME_OVERRIDE", home))` line fixed above.
 
+### Deferred (explicit follow-up — do not start on the current line)
+Recorded so the findings are not lost while implementation stays frozen.
+
+- **`get_git_snapshot()` git probe timeout** — four git calls, `timeout=2` each.
+  Measured in the sandbox: a single `git status --short` costs p50 1.30 s /
+  max 1.41 s, i.e. **1.54× headroom**. On timeout the exception is swallowed and
+  the snapshot silently reports `dirty_count=0`, so the dirty-tree warning
+  disappears (this is what turns `test_switch_warns_on_dirty_repo` red under
+  full-suite load). Raising it to 20 s was **proven** to fix it over a full run.
+  Not applied because it trades a flake for up to 80 s of added latency (vs 8 s)
+  in the SessionStart hook path when git genuinely hangs — a product decision,
+  not a mechanical one. On a normal machine git takes ~20–100 ms, so 2 s is
+  20–100× headroom and the issue does not appear.
+- **`skill.py`: two bare `claude mcp add` calls** — same defect class as the
+  `_launch()` fix: `shutil.which()` resolves the `.CMD` shim that bare-name
+  `subprocess` cannot spawn. Fix with the same executable-resolution principle,
+  plus real-home / scratch-home regression tests.
+- **WAL: ~236 MB uncheckpointed** — `index.db-wal` stays large with no python
+  process running. Candidate mechanism is `cmd_watch`'s long-lived connection
+  plus a second writer connection; **not asserted**.
+- **FTS: migrate `event_fts` to `content='events'`** — the index is not
+  external-content, so event text is stored twice (67 MB) plus a ~448 MB
+  trigram index.
+
 ### Notes
 - Test suite: `370 collected → 352 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
