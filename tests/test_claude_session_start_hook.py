@@ -17,13 +17,16 @@ optional dependencies, none of which are relevant here.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -460,6 +463,114 @@ class TestEnvDirOverrides(unittest.TestCase):
         d = hook._spill_dir()
         self.assertTrue(d.is_absolute(), f"not absolute: {d}")
         self.assertEqual(d, self.home / "voy-ctx")
+
+
+# ---------------------------------------------------------------------------
+# the native-start chain, end to end (everything except Claude Code itself)
+# ---------------------------------------------------------------------------
+
+def test_native_start_hook_chains_into_a_thread_membership(tmp_path, monkeypatch):
+    """Drive the whole chain the way it runs on a real machine.
+
+    The live verification has one step no test can perform here — Claude Code
+    itself firing `SessionStart` (it cannot even start in this environment: its
+    managed-policy read shells out to `reg.exe`, which the host blocks). Every
+    step *below* that one is real code and is exercised here:
+
+        hook stdin {session_id}      (the payload Claude Code sends)
+          -> startup_continuity       records a pending attach
+          -> the Claude adapter       indexes the transcript as claude:<session_id>
+          -> resolve_pending_attaches matches it **by identity**
+          -> the session is a WorkThread member
+
+    This pins the invariant the identity match rests on: the `session_id` the
+    hook reads from stdin is the same value the adapter derives from the
+    transcript's filename. Before the pending fix nothing depended on the
+    resolver honouring it; now the attach does, so a drift there would look
+    exactly like "the pending never resolves".
+    """
+    from voyager import store as store_mod
+    from voyager.cli import run_scan
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    # a real repo: the hook and the adapter must independently resolve the same
+    # repo_root, and that only happens the way production does it
+    repo = tmp_path / "workrepo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)],
+                   capture_output=True, timeout=60)
+
+    db_path = tmp_path / "index.db"
+    monkeypatch.setattr(store_mod, "default_db_path", lambda: db_path)
+
+    # an existing WorkThread for the repo, with one member, so this models
+    # "continue the work that is already here" rather than an empty thread
+    store = Store(db_path)
+    tid = store.thread_create(repo_root=str(repo), title="native start",
+                              goal="prove the chain")
+    seed_src = tmp_path / "seed.jsonl"
+    seed_src.write_text("{}\n", encoding="utf-8")
+    store.replace_session(
+        new_session(id="codex:prev", provider="codex", native_session_id="prev",
+                    title="earlier work", started_at=1000.0, updated_at=1000.0,
+                    cwd=str(repo), repo_root=str(repo), message_count=1),
+        [new_event(sid="codex:prev", ts=1000.0, seq=0, kind="user",
+                   content="earlier work")],
+        "codex", seed_src)
+    assert store.thread_attach(tid, "codex:prev") is True
+    store.close()
+
+    # Claude's transcript for a session that has *just* started. The timestamps
+    # must be current: the resolver refuses sessions born before the pending.
+    native = "live-0001"
+    projects = tmp_path / "claude-projects"
+    (projects / "E--workrepo").mkdir(parents=True)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    transcript = projects / "E--workrepo" / f"{native}.jsonl"
+    transcript.write_text("\n".join(json.dumps(row) for row in (
+        {"type": "user", "sessionId": native, "cwd": str(repo),
+         "gitBranch": "main", "timestamp": now_iso,
+         "message": {"role": "user", "content": "continue the work"}},
+        {"type": "assistant", "sessionId": native, "cwd": str(repo),
+         "gitBranch": "main", "timestamp": now_iso,
+         "message": {"role": "assistant", "content": "on it",
+                     "model": "claude-sonnet-4"}},
+    )) + "\n", encoding="utf-8")
+
+    from voyager.adapters import load_all
+    load_all()
+    claude_mod = importlib.import_module("voyager.adapters.claude")
+    monkeypatch.setattr(claude_mod, "PROJECTS_DIR", projects)
+    monkeypatch.setenv("VOYAGER_CONTEXT_DIR", str(tmp_path / "spill"))
+    monkeypatch.setenv("VOYAGER_CLAUDE_HOOK_BUDGET", "compact")
+
+    # Claude Code fires SessionStart with its own session id on stdin
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+        {"session_id": native, "cwd": str(repo), "source": "startup"})))
+
+    result = hook.handle_claude_session_start()
+
+    # The hook cannot attach a session it cannot resolve to a Voyager id, so it
+    # records the intent — and that record must actually exist.
+    assert result["attach_status"] == "pending_resolve", result
+    store = Store(db_path)
+    pends = store.pending_open(thread_id=tid)
+    assert len(pends) == 1, "pending_resolve must be backed by a record"
+    assert pends[0]["native_session_id"] == native
+    assert store.thread_member_ids(tid) == ["codex:prev"]
+    store.close()
+
+    # the next scan indexes the transcript; the resolver matches by identity
+    store = Store(db_path)
+    run_scan(store, providers=["claude"], quiet=True)
+
+    assert store.thread_member_ids(tid) == ["codex:prev", f"claude:{native}"]
+    row = store.q("SELECT status, resolved_sid FROM thread_pending "
+                  "WHERE thread_id=?", (tid,))[0]
+    assert row["status"] == "resolved"
+    assert row["resolved_sid"] == f"claude:{native}"
+    store.close()
 
 
 if __name__ == "__main__":
