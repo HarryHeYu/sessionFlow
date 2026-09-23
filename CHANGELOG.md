@@ -78,6 +78,9 @@ All notable changes to Voyager are documented here. Format loosely follows
   hold, an already-registered MCP must still report assisted, and
   `_check_mcp_support` must honour its `home` argument. Each was confirmed to
   fail against the pre-fix code.
+- `tests/test_workflows.py` — a static guard that the SessionStart verifier keeps
+  its `--home` flag and its `settings_path(home)` signature, so the chain stays
+  reproducible against a scratch profile.
 - `.gitignore` entry for `.workbuddy-ai/` (agent-local memory, not product code).
 
 ### Removed
@@ -91,7 +94,7 @@ All notable changes to Voyager are documented here. Format loosely follows
   `hook`.
 
 ### Notes
-- Test suite: `321 collected → 303 passed, 18 skipped, 0 failed`.
+- Test suite: `322 collected → 304 passed, 18 skipped, 0 failed`.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.

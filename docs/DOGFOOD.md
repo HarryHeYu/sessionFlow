@@ -20,7 +20,7 @@
 
 ## Testing Boundary
 
-### Automated Hermetic Tests (321 collected → 303 passed, 18 skipped)
+### Automated Hermetic Tests (322 collected → 304 passed, 18 skipped)
 All pytest tests use **synthetic fixtures** — no real agent data, no external dependencies. The 18 skips are optional-dependency and platform gates, not failures:
 
 - `test_adapters.py` — Parse synthetic JSON/SQL for all 8 providers
@@ -239,7 +239,7 @@ promote Claude Code from `H` to `Y`. Until that happens the honest answer stays
 
 ## Summary
 
-- **Automated core verified**: `321 collected → 303 passed, 18 skipped, 0 failed` (all logic paths covered; skips are optional-dependency/platform gates)
+- **Automated core verified**: `322 collected → 304 passed, 18 skipped, 0 failed` (all logic paths covered; skips are optional-dependency/platform gates)
 - **Real-provider runtime status** (as of 2026-09-23):
   * Claude Code = **`H`** — a schema-valid native `SessionStart` hook is registered by the installer; the provider firing it has **not** been observed. `SESSIONSTART_TRIGGER_LIVE_VERIFIED = false`.
   * Codex = **`N`** — no native hook surface; first-turn/Skill guidance only

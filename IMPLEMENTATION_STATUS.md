@@ -51,7 +51,7 @@
 
 ## ⚠️ CURRENT STATE - Manual Setup Required
 
-### What Happens When You Run `voyager integrate codex`
+### What Happens When You Run `voyager integrate install codex`
 
 **Current output:**
 ```
@@ -82,7 +82,7 @@ To achieve true zero-touch functionality, users must perform these one-time manu
 
 ### For Codex
 
-After running `voyager integrate codex`, manually edit `~/.config/codex/config.toml` or `mcp.json`:
+After running `voyager integrate install codex`, manually edit `~/.config/codex/config.toml` or `mcp.json`:
 
 **Option A - TOML format:**
 ```toml
@@ -108,7 +108,7 @@ Then restart Codex.
 
 ### For Claude Code
 
-After running `voyager integrate claude`, run:
+After running `voyager integrate install claude`, run:
 ```bash
 claude mcp add voyager python -m voyager.mcp_server
 ```
@@ -286,7 +286,7 @@ This honest positioning reflects actual current capabilities.
    - Document failure modes clearly
 
 4. **Re-test after fixes**
-   - Verify `voyager integrate codex` actually registers MCP
+   - Verify `voyager integrate install codex` actually registers MCP
    - Check `status` shows MCP: R (registered)
    - Update README with correct claim
 
