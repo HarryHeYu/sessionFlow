@@ -13,7 +13,10 @@ nothing. This script checks the whole chain:
   5. `additionalContext` is within Claude Code's 10,000 character cap.
   6. Optionally, `claude --init-only` fires the hook for real. That flag is
      the only headless way to run Setup + SessionStart:startup and exit, so
-     it is the authoritative end-to-end probe.
+     it is the authoritative end-to-end probe. A clean exit code is *not*
+     accepted as proof: the check reads the hook's own trace log and requires
+     an invocation carrying a `session_id` other than the synthetic one this
+     script uses in check 4.
 
 Usage:
     python scripts/verify_claude_sessionstart.py
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -41,6 +45,11 @@ import time
 from pathlib import Path
 
 MAX_ADDITIONAL_CONTEXT_CHARS = 10_000
+
+# The session_id this script puts in its own synthetic payload (check 4).  The
+# e2e probe must see a *different* id, otherwise it would be satisfied by this
+# script's own invocation rather than by Claude Code's.
+SYNTHETIC_SESSION_ID = "voyager-verify-0001"
 
 # SessionStart matchers Claude Code matches against the session `source`.
 # An empty matcher (""), "*", or an omitted matcher means "match everything".
@@ -77,6 +86,93 @@ def settings_path(home=None) -> Path:
 def load_settings(path: Path):
     """Read settings.json, tolerating a UTF-8 BOM (PowerShell writes one)."""
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def hook_log_path(home=None) -> Path:
+    """The hook trace log that `claude_session_start._log_debug()` appends to.
+
+    Mirrors that module's `_log_dir()`: `VOYAGER_LOG_DIR` wins, else
+    `<home>/.voyager/logs`.  Kept in sync deliberately -- the e2e probe reads
+    this file to prove the hook ran, so a divergence here would quietly turn the
+    strongest check in the script back into a no-op.
+    """
+    override = os.environ.get("VOYAGER_LOG_DIR")
+    if override:
+        return Path(override).expanduser() / "provider-hooks.jsonl"
+    base = Path(home) if home is not None else Path.home()
+    return base / ".voyager" / "logs" / "provider-hooks.jsonl"
+
+
+def read_hook_events(path: Path):
+    """Parse the hook trace log, skipping lines that are not JSON.
+
+    A truncated or interleaved line is a logging problem, not a verification
+    result, so it is ignored rather than allowed to abort the probe.
+    """
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
+def _written_since(event, since) -> bool:
+    """True if the trace record was written at or after `since`.
+
+    Freshness is judged from the `ts` field the hook stamps on every record,
+    NOT from a record's offset in the file. `_append_jsonl()` trims the log to
+    its last ~200 KB once it passes 1 MB, so a file position captured before
+    the probe can shift out from under a slice taken after it -- which would
+    silently drop the very record being looked for and report a false FAIL.
+    The timestamp is unaffected by trimming.
+    """
+    if since is None:
+        return True
+    ts = event.get("ts")
+    if not isinstance(ts, (int, float)):
+        # No timestamp means freshness cannot be established; the probe demands
+        # positive evidence, so an unverifiable record does not count.
+        return False
+    return ts >= since
+
+
+def find_real_trigger(events, synthetic_id: str = SYNTHETIC_SESSION_ID,
+                      since=None):
+    """Return `(session_id, cwd)` for the first invocation Claude Code itself
+    produced, or None.
+
+    `events` are the trace records. A record carrying `synthetic_id` is this
+    script's *own* check-4 invocation rather than Claude's, so it does not
+    count -- which is the whole point: accepting it would make the probe pass
+    without anything having fired. `since` (a wall-clock timestamp) additionally
+    restricts the search to records written during the probe.
+    """
+    for event in events:
+        if event.get("event") != "SessionStart_parsed":
+            continue
+        if not _written_since(event, since):
+            continue
+        sid = event.get("session_id")
+        if sid and sid != synthetic_id:
+            return sid, event.get("cwd")
+    return None
+
+
+def saw_hook_without_stdin(events, since=None) -> bool:
+    """True if the hook ran but Claude handed it nothing to parse.
+
+    Distinct from "the hook never ran": the trigger works, the payload plumbing
+    does not. Worth reporting separately rather than lumping together.
+    """
+    return any(e.get("event") == "SessionStart_no_stdin"
+               and _written_since(e, since) for e in events)
 
 
 def extract_session_start_hook(settings: dict):
@@ -168,8 +264,9 @@ def main() -> int:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--e2e", action="store_true",
-                        help="also run `claude --init-only` for a real trigger "
-                             "(counts as FAIL if claude is missing or exits non-zero)")
+                        help="also run `claude --init-only` and require the hook "
+                             "to actually fire (FAIL if claude is missing, exits "
+                             "non-zero, or leaves no trace record)")
     parser.add_argument("--expect-context", action="store_true",
                         help="require the hook to actually emit additionalContext "
                              "(use when running from a directory with an active WorkThread)")
@@ -233,7 +330,7 @@ def main() -> int:
 
     # ---- 4. run it exactly like Claude does ------------------------------
     payload = {
-        "session_id": "voyager-verify-0001",
+        "session_id": SYNTHETIC_SESSION_ID,
         "transcript_path": str(home / ".claude" / "projects" / "verify.jsonl"),
         "cwd": str(Path.cwd()),
         "hook_event_name": "SessionStart",
@@ -307,6 +404,15 @@ def main() -> int:
         print("-" * 66)
         print(f"{INFO} running `claude --init-only` (Setup + "
               f"SessionStart:startup, then exit)")
+
+        # Records written from here on are the ones Claude Code produced.
+        # check 4 has already invoked the hook once (appending a record of its
+        # own), so freshness is tracked by timestamp rather than by file offset:
+        # the log trims itself, so offsets are not stable across the probe.
+        log_path = hook_log_path()
+        print(f"{INFO} watching hook trace: {log_path}")
+        probe_started = time.time()
+
         if shutil.which("claude") is None:
             print(f"{FAIL} `claude` is not on PATH, so the trigger was NOT "
                   f"verified (--e2e was requested)")
@@ -332,6 +438,30 @@ def main() -> int:
             except subprocess.TimeoutExpired:
                 print(f"{FAIL} `claude --init-only` timed out")
                 failures += 1
+
+            # A clean exit only proves Claude started and quit. What is being
+            # verified is the *hook*, so require positive evidence that it ran,
+            # carrying a session_id that is not this script's synthetic one.
+            new_events = read_hook_events(log_path)
+            trigger = find_real_trigger(new_events, since=probe_started)
+            if trigger:
+                sid, trigger_cwd = trigger
+                print(f"{PASS} SessionStart hook fired with Claude's own "
+                      f"session_id={sid!r} (cwd={trigger_cwd})")
+            elif saw_hook_without_stdin(new_events, since=probe_started):
+                print(f"{FAIL} the hook ran but received no stdin payload, so "
+                      f"there is no session_id to show -- the trigger works, the "
+                      f"payload plumbing does not")
+                failures += 1
+            else:
+                print(f"{FAIL} no hook invocation recorded after "
+                      f"`claude --init-only`. Exit 0 does NOT prove the hook ran; "
+                      f"it only proves Claude started and quit.")
+                print(f"{INFO} check that the hook in {settings_path(home)} is the "
+                      f"one Claude Code actually reads, and that VOYAGER_LOG_DIR "
+                      f"does not point somewhere else.")
+                failures += 1
+
             if args.probe_file:
                 probe = Path(args.probe_file)
                 if probe.exists() and (before is None or probe.stat().st_mtime != before):
