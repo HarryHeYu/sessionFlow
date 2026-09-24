@@ -15,9 +15,23 @@ core-only CI job.
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
+import pytest
+
 WORKFLOWS = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+CORE_ONLY_RUNNER = (
+    Path(__file__).resolve().parent.parent / "scripts" / "run_tests_core_only.py"
+)
+
+
+def _load_core_only_runner():
+    spec = importlib.util.spec_from_file_location(
+        "core_only_runner_under_test", CORE_ONLY_RUNNER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _workflow_files():
@@ -91,6 +105,33 @@ def test_test_workflow_covers_supported_pythons_and_platforms():
     assert "windows-latest" in text, "windows jobs missing (adapters read %APPDATA%)"
     assert "core-only" in text, "the zero-optional-dependency job is gone"
     assert "pip install -e \".[all,dev]\"" in text, "extras install changed"
+
+
+def test_core_only_runner_blocks_every_non_pytest_extra():
+    """The core-only runner must recreate a real core install.
+
+    CI covers core-only for real -- that job installs `-e .` plus pytest and
+    nothing else -- so this script only matters on a machine that already has
+    `.[all,dev]`. There, an optional dependency it forgets to block keeps its
+    tests running, and the "core-only" figure it reports is one no core-only
+    install could produce. That is exactly what Pillow did: it arrives via the
+    `dev` extra, `test_diagram.py` gates on `PIL`, and blocking only `mcp` and
+    `zstandard` left those three tests running.
+    """
+    module = _load_core_only_runner()
+
+    # every extra except pytest itself: `all` = mcp + zstandard, and `dev` adds
+    # pillow on top of those
+    assert {"mcp", "zstandard", "PIL"} <= set(module.BLOCKED), (
+        "the core-only runner no longer blocks every non-pytest extra, so it "
+        "reports a count a core-only install would not produce"
+    )
+
+    finder = module.Block()
+    for name in ("mcp", "zstandard", "PIL", "PIL.Image", "zstandard.backend_c"):
+        with pytest.raises(ModuleNotFoundError):
+            finder.find_spec(name)
+    assert finder.find_spec("json") is None, "the blocker must be narrow"
 
 
 def test_failure_reporting_script_exists():
