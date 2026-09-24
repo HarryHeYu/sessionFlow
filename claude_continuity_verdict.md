@@ -619,7 +619,7 @@ before changing anything.
 | `voyager/store.py` | `meta_get` / `meta_set` / `meta_delete` accessors; `meta_set` reports failure (D8); **added the missing `attached_to_thread()`** (D5) |
 | `voyager/mcp_server.py` | Corrected the `context_stale` / `context_source` / `compiled_at` docs, which described the old semantics |
 | `scripts/verify_claude_sessionstart.py` | **New** — end-to-end hook verifier; no longer passes on skips (P1-3) |
-| `tests/test_claude_session_start_hook.py` | **New** — 29 tests over the entrypoint (protocol, cap, UTF-16 length, spill, logging, rotation, isolation) |
+| `tests/test_claude_session_start_hook.py` | **New** — 33 tests over the entrypoint (protocol, cap, UTF-16 length, spill, logging, rotation, isolation) |
 | `tests/test_context_cache.py` | **New** — 39 tests over the cache (helpers, hostile input, end-to-end via `startup_continuity`, static guards) |
 | `tests/test_integrations.py` | Replaced the assertions that **locked in the wrong schema** (RC6) with assertions on the real `hooks[].hooks[].type == "command"` shape; added coverage for absolute/quoted commands and legacy-entry upgrade |
 | `tests/test_cli.py` | **New** `integrate` coverage (RC7) — install writes the native hook, remove does not crash, all three subcommands accept `--json`. The suite previously had no `integrate` tests at all, which is why a 100%-broken `remove` survived. |

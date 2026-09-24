@@ -20,8 +20,32 @@
 
 ## Testing Boundary
 
-### Automated Hermetic Tests (370 collected → 352 passed, 18 skipped)
-All pytest tests use **synthetic fixtures** — no real agent data, no external dependencies. The 18 skips are optional-dependency and platform gates, not failures:
+### Automated Tests (full dev extras: 374 collected → 372 passed, 2 skipped)
+
+Two environments, two different numbers — they are not interchangeable:
+
+| Environment | Command | Result |
+|---|---|---|
+| Full dev extras | `python -m pytest tests/ -q` | `374 collected → 372 passed, 2 skipped, 0 failed` |
+| Simulated core-only | `python scripts/run_tests_core_only.py` | `374 collected → 356 passed, 18 skipped, 0 failed` |
+
+Almost all tests are hermetic — they build synthetic provider fixtures in a tmp
+tree and never call a provider. Two are not: they read the **default local
+index** and skip when it holds no suitable data. The skips fall into two
+classes, and conflating them is the mistake this section exists to prevent:
+
+- **Dependency-gated (16, core-only only)** — `mcp`, `zstandard` and `PIL` are
+  absent, so `test_continuity_tools.py`, `test_mcp.py`, `test_diagram.py` and
+  `test_dsh.py` skip. Installing `.[all,dev]` removes all 16, which is why the
+  full dev run skips only twice.
+- **Data-dependent, against the default local index (2, both environments)** —
+  `tests/test_unicode_preservation.py` skips when the local index holds no
+  Chinese-titled session (`:33`) or no sessions at all (`:103`). Independent of
+  what is installed.
+
+Neither class is a platform gate, and neither is a failure.
+
+**What the hermetic tests cover:**
 
 - `test_adapters.py` — Parse synthetic JSON/SQL for all 8 providers
 - `test_*.py` — Store, continuity, budget, leases, switch, thread operations
@@ -239,7 +263,7 @@ promote Claude Code from `H` to `Y`. Until that happens the honest answer stays
 
 ## Summary
 
-- **Automated core verified**: `370 collected → 352 passed, 18 skipped, 0 failed` (all logic paths covered; skips are optional-dependency/platform gates)
+- **Automated verified** — full dev extras: `374 collected → 372 passed, 2 skipped, 0 failed`; simulated core-only: `374 collected → 356 passed, 18 skipped, 0 failed`. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
 - **Real-provider runtime status** (as of 2026-09-23):
   * Claude Code = **`H`** — a schema-valid native `SessionStart` hook is registered by the installer; the provider firing it has **not** been observed. `SESSIONSTART_TRIGGER_LIVE_VERIFIED = false`.
   * Codex = **`N`** — no native hook surface; first-turn/Skill guidance only

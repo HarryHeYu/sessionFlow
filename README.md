@@ -75,7 +75,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 370 collected: 352 passed, 18 skipped (synthetic fixtures, no provider data)
+python -m pytest tests/ -q     # full dev env: 374 collected, 372 passed, 2 skipped
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -294,9 +294,17 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 370 collected: 352 passed, 18 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration
-python scripts/run_tests_core_only.py     # same suite with no optional deps (skips extras)
+python -m pytest tests/ -q                # full dev env: 374 collected, 372 passed, 2 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration
+python scripts/run_tests_core_only.py     # core-only simulated: 374 collected, 356 passed, 18 skipped
 ```
+
+The two environments skip for different reasons, and the two numbers are not
+interchangeable. With the full dev extras the only 2 skips are
+**data-dependent**: `tests/test_unicode_preservation.py` reads the default local
+index and skips when it holds no Chinese-titled session (`:33`) or no sessions
+at all (`:103`). The core-only run adds 16 **dependency-gated** skips — `mcp`,
+`zstandard` and `PIL` are absent, so `test_continuity_tools.py`, `test_mcp.py`,
+`test_diagram.py` and `test_dsh.py` skip. Neither class is a platform gate.
 
 CI ([.github/workflows/test.yml](.github/workflows/test.yml)) runs the suite
 on Python 3.10–3.13 (Linux) and 3.10/3.13 (Windows — the adapters deal with

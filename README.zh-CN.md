@@ -68,7 +68,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"   
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # 370 collected：352 passed / 18 skipped（全合成 fixture，不碰你的真实会话）
+python -m pytest tests/ -q     # full dev 环境：374 collected：372 passed / 2 skipped
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -266,9 +266,16 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 370 collected：352 passed / 18 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
-python scripts/run_tests_core_only.py     # 模拟"只装核心依赖"，可选依赖相关测试自动跳过
+python -m pytest tests/ -q                # full dev 环境：374 collected：372 passed / 2 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
+python scripts/run_tests_core_only.py     # 模拟 core-only：374 collected：356 passed / 18 skipped
 ```
+
+两套环境的 skip 原因不同，两个数字不能互换。装了 full dev extras 时仅有的 2 个
+skip 是**数据依赖**：`tests/test_unicode_preservation.py` 读的是**默认本地索引**，
+库里没有「标题含中文」的会话（`:33`）或一个会话都没有（`:103`）时才跳过。
+core-only 会额外多出 16 个**依赖门禁** skip——缺 `mcp` / `zstandard` / `PIL`，
+于是 `test_continuity_tools.py`、`test_mcp.py`、`test_diagram.py`、`test_dsh.py`
+跳过。两类都不是平台门禁。
 
 CI（[.github/workflows/test.yml](.github/workflows/test.yml)）在 Python 3.10–3.13
 （Linux）与 3.10/3.13（Windows，适配器要处理 `%APPDATA%`、盘符和反斜杠）上跑全量

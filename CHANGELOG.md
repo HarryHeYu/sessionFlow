@@ -179,7 +179,7 @@ All notable changes to Voyager are documented here. Format loosely follows
   positive one red.
 - `H` startup status: **native hook registered, live trigger not yet verified**.
   Only `Y` claims that a provider fires the hook by itself, and nothing claims `Y`.
-- `tests/test_claude_session_start_hook.py` (29 tests) — output protocol, payload
+- `tests/test_claude_session_start_hook.py` (33 tests) — output protocol, payload
   cap, UTF-16 length accounting, spill file, logging, log rotation, isolation.
 - `tests/test_context_cache.py` (39 tests) — cache helpers, hostile input,
   end-to-end persistence, static guards.
@@ -287,7 +287,16 @@ Recorded so the findings are not lost while implementation stays frozen.
   Priority to be set after live acceptance; no production change now.
 
 ### Notes
-- Test suite: `370 collected → 352 passed, 18 skipped, 0 failed`.
+- Test suite, full dev extras (`pip install -e ".[all,dev]"`):
+  `374 collected → 372 passed, 2 skipped, 0 failed`.
+- Test suite, simulated core-only (`python scripts/run_tests_core_only.py`):
+  `374 collected → 356 passed, 18 skipped, 0 failed`.
+- The two environments skip for different reasons, and the numbers are not
+  interchangeable. The 2 full-dev skips are **data-dependent**:
+  `tests/test_unicode_preservation.py` reads the default local index and skips
+  when it holds no Chinese-titled session (`:33`) or no sessions at all
+  (`:103`). Core-only adds 16 **dependency-gated** skips (`mcp`, `zstandard`,
+  `PIL`). Neither class is a platform gate.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
   Acceptance remains **open**; it now depends on a single manual observation, not
   on further code.
