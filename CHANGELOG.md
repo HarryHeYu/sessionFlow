@@ -268,6 +268,23 @@ Recorded so the findings are not lost while implementation stays frozen.
   shrink) and `event_fts_content` ≈ 67 MB (the duplicate copy, which it does).
   The migration's saving is the ~67 MB content table, not the whole FTS index —
   a ~448 MB figure for the saving is wrong.
+- **WorkThread cache invalidation keys off a wall-clock timestamp (correctness,
+  P1/P2)** — `thread_attach` calls `thread_touch`, so every thread mutation stamps
+  `threads.updated_at = time.time()`, and the context cache is invalidated only
+  when `thread_updated > last_compiled_at` (`startup.py`). When a mutation and the
+  compile it follows share one clock tick, the member set has changed but the
+  cache is still considered valid, so a bundle missing the new member is served
+  silently. Narrow — the window is one clock tick, and a human-driven attach plus
+  continue is far slower than any real clock granularity — but real, and a test
+  pins the intended behaviour
+  (`test_context_cache.py::TestStartupContinuityCaching::test_attaching_another_member_invalidates_the_cache`,
+  which fails under a deliberately coarse clock).
+  **Not fixed by flipping `>` to `>=`**: that would recompile on every call even
+  when nothing changed. The direction is to stop using wall-clock time as a
+  version number — record a monotonic `source_revision` on compile, bump the
+  thread's revision on every mutation, and treat the cache as valid only when
+  `current_revision == source_revision`.
+  Priority to be set after live acceptance; no production change now.
 
 ### Notes
 - Test suite: `370 collected → 352 passed, 18 skipped, 0 failed`.
