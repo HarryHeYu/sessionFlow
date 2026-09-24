@@ -144,7 +144,7 @@ Voyager 在同一个仓库里切换 Agent 时会自动接续工作：
 **产品状态**：
 
 **核心功能**：完整可用。  
-**运行时自动触发**：Claude Code 有原生 `SessionStart` hook，Voyager 会注册它。但 Claude Code 是否真的会触发，**尚未在真机上验证过**。
+**运行时自动触发**：Claude Code 有原生 `SessionStart` hook，Voyager 会注册它。Claude Code 触发 hook 已在 **2026-09-24 真机验证通过** —— provider 自己的 `session_id` 抵达了 hook，随后该会话在**没有任何 Voyager 命令**的情况下自动挂进了它的 WorkThread。
 
 `startup_continuity()` 能正确发现 WorkThread、自动挂接会话、编译接续上下文。各家 provider 的差别在于：会话启动时能不能**在你什么都不做**的前提下走到这个函数。
 
@@ -152,14 +152,14 @@ Voyager 在同一个仓库里切换 Agent 时会自动接续工作：
 
 | Provider | Skill | MCP | Status                | 含义                                   |
 |----------|-------|-----|-----------------------|----------------------------------------|
-| Claude   | Y     | R   | `H` — hook 已注册      | 已安装原生 `SessionStart` hook；触发尚未在真机观察到 |
+| Claude   | Y     | R   | `H` — hook 已注册      | 已安装原生 `SessionStart` hook；provider **已**在真机触发过（2026-09-24）。`H` 是静态能力读数，不代表 live 证据 |
 | Codex    | Y     | R   | `A` — 启动辅助         | 无原生 hook，需要显式调用               |
 | Grok CLI | Y     | N   | `N` — 无机制           | Best effort                            |
 | DSH      | Y     | N   | `N` — 无机制           | Best effort                            |
 
 Legend：**Y** = ready/installed，**R** = ready/auto-configured，**N** = unsupported。
 
-启动状态：**`Y`** = 零触达已真机验证，**`H`** = 原生 hook 已注册但**实时触发尚未验证**，**`A`** = 启动辅助，**`N`** = 无 hook。只有 `Y` 才宣称 provider 会自己触发；目前没有任何 provider 是 `Y`。在你机器上的实际情况，跑 `voyager integrate status` 即可。
+启动状态：**`Y`** = 零触达已真机验证，**`H`** = 原生 hook 已注册，**`A`** = 启动辅助，**`N`** = 无 hook。这个字母**只由静态能力与配置推导** —— Voyager 不保存任何持久化的 live 证据状态，所以 CLI 无法反映人工观测结果，也就没有任何 provider 会显示 `Y`。Claude Code 的触发**已**在真机观察到（2026-09-24），但它仍然显示 `H`。你机器上的配置情况，跑 `voyager integrate status` 即可。
 
 ### Claude Code hook 在这里怎么工作
 
@@ -182,13 +182,13 @@ Claude Code 从 `~/.claude/settings.json` 读取 `SessionStart` hook。Voyager �
 
 `voyager integrate install claude` 会自动写好它（叠加式写入：你自己的 hook 会被保留，且写前会备份原文件）。安装的命令用绝对路径，因此不依赖解释器是否在 `PATH` 里。
 
-**两件事已验证，一件事没有。** Handler 已验证：它输出协议合法的 payload，把注入的上下文限制在 9000 个 UTF-16 码元以内，完整 bundle 落到 `~/.voyager/context/`，并以 0 退出。**注册**已验证：`voyager integrate status` 会把文件读回来核对。**没有**验证的是 Claude Code 自己会不会调用这个 hook —— 这需要手动跑一次：
+**三件事都已验证。** Handler 已验证：它输出协议合法的 payload，把注入的上下文限制在 9000 个 UTF-16 码元以内，完整 bundle 落到 `~/.voyager/context/`，并以 0 退出。**注册**已验证：`voyager integrate status` 会把文件读回来核对。**provider 真的触发 hook 也已验证**（2026-09-24）—— 下面这次手动运行记录到的 `SessionStart`，其 `session_id` 属于 Claude Code 自己，不是 verifier 的合成 id：
 
 ```sh
 claude --debug hooks --init-only     # 期望看到：Found 1 hook matchers in settings
 ```
 
-在看到那一行之前，触发都应视为未证实。完整证据链见 [claude_continuity_verdict.md](claude_continuity_verdict.md)。
+那一行已在 2026-09-24 观察到，它携带的真实 `session_id` 随后走完了整条链路：发现 transcript → 入索引 → pending row 转为 resolved → 会话挂进 WorkThread `thr_0854d50b88`，全程没有任何 Voyager 命令。**仍未证实**的是模型是否真的**读取并使用了**注入的上下文；而且没有任何 provider 会显示 `Y` —— 那个字母来自静态配置，不来自这次观测。证据表见 [docs/DOGFOOD.md](docs/DOGFOOD.md#live-verification-2026-09-24--done)。
 
 **推荐 workflow**（按自动化程度排序）：
 

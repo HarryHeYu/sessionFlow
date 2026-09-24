@@ -10,11 +10,12 @@
 > (see `fix(claude)` / `fix(cli)` in `CHANGELOG.md`).
 >
 > Claude Code now gets a **real native `SessionStart` hook** written into
-> `~/.claude/settings.json`. What is *still* not established is whether the
-> provider actually fires it on a real machine — that needs a human to run
-> `scripts/verify_claude_sessionstart.py`, and until then
-> `SESSIONSTART_TRIGGER_LIVE_VERIFIED` stays `false`. No provider currently
-> claims `Y`. Full narrative: [`claude_continuity_verdict.md`](../claude_continuity_verdict.md).
+> `~/.claude/settings.json`, and the provider firing it is **live-verified
+> (2026-09-24)** — see *Live verification* below.
+> `SESSIONSTART_TRIGGER_LIVE_VERIFIED` is now `true`. The CLI still prints `H`,
+> because that letter is a static capability reading with no persisted
+> live-evidence state behind it; no provider prints `Y`. Full narrative:
+> [`claude_continuity_verdict.md`](../claude_continuity_verdict.md).
 
 **Status**: Automated tests cover all hermetic verification; real-agent end-to-end flows require manual execution with installed agents.
 
@@ -55,11 +56,11 @@ Neither class is a platform gate, and neither is a failure.
 These flows were tested on actual Claude/Codex installations:
 
 1. **Codex startup discovery** → **`N`** — Codex exposes no native session-start hook, so there is nothing to register
-2. **Claude startup discovery** → **`H`** — a real native `SessionStart` hook is now written by the installer, but **no run has yet observed the provider firing it**
-3. **No provider is currently proven to auto-trigger Voyager at session start** — explicit invocation via `voyager switch`, an MCP tool call, or Skill guidance is still required in practice
-4. **Target agent continuation context** — verified via explicit workflows (`switch`/`continue`)
+2. **Claude startup discovery** → **`H`** — a real native `SessionStart` hook is written by the installer, and the provider has now been **observed firing it on a live run (2026-09-24)**. The CLI letter stays `H` for the reason given under *Live verification*
+3. **Claude Code auto-triggers Voyager at session start** → **proven 2026-09-24** — the provider's own `session_id` reached the hook, the transcript was discovered and indexed, and the session attached itself to its WorkThread with no Voyager command. No other provider is proven to do this
+4. **Target agent continuation context** — verified via explicit workflows (`switch`/`continue`); whether the model actually *uses* the injected context is still unproven (`CONTEXT_INJECTION_LIVE_VERIFIED`)
 
-Startup legend (matches `voyager integrate status`): **`Y`** = zero-touch verified live · **`H`** = native hook registered, live trigger unverified · **`A`** = startup-assisted · **`N`** = no hook.
+Startup legend (matches `voyager integrate status`): **`Y`** = zero-touch verified live · **`H`** = native hook registered · **`A`** = startup-assisted · **`N`** = no hook. The letter reflects **static capability and configuration only** — Voyager keeps no persisted live-evidence state, so it does not move when a human observes a live trigger. Claude Code's trigger *has* been observed live (2026-09-24) and it still reports `H`; nothing reports `Y`.
 
 This document provides a repeatable manual verification procedure.
 
@@ -191,17 +192,17 @@ Mark each item as ✅ or ❌ after running:
 | **Cursor** | ✅ Via SQLite | ❌ IDE only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** (no CLI surface) |
 | **Kiro** | ✅ Via JSON | ❌ IDE only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** (no CLI surface) |
 
-Only `claude` sets `has_startup_hook = True` in `PROVIDER_CONFIG`; every other provider returns `N` for the startup column because the platform has no hook surface to register into. `H` is deliberately *not* `Y`: registration is proven by the installer, the provider actually firing the trigger is not.
+Only `claude` sets `has_startup_hook = True` in `PROVIDER_CONFIG`; every other provider returns `N` for the startup column because the platform has no hook surface to register into. `H` is deliberately *not* `Y`: the letter is computed from static capability and configuration, so it has no way to represent a live observation. The provider firing the trigger *has* now been observed (2026-09-24) — the letter simply cannot say so.
 
 ### Classification Criteria
-- **`Y` (zero-touch verified live)**: a human has observed the provider invoking Voyager at session start with no user command. **Nothing currently claims this.**
-- **`H` (hook registered, trigger unverified)**: the installer wrote a schema-valid hook and `voyager integrate status` reports it; the provider firing it has not been observed.
+- **`Y` (zero-touch verified live)**: a human has observed the provider invoking Voyager at session start with no user command. **The observation now exists for Claude Code (2026-09-24), but nothing prints `Y` — see *Live verification*.**
+- **`H` (hook registered)**: the installer wrote a schema-valid hook and `voyager integrate status` reports it. This is all the CLI can see; it says nothing about whether the provider fired.
 - **`N` (no hook)**: the platform exposes no session-start hook surface. Continuity is still available through `voyager switch`, MCP tools, or Skill guidance.
 - **Best-effort**: continuity works via MCP/Skill/launcher, but no startup automation is claimed.
 - **Explicit-only**: requires manual paste of the bundle; no automation possible.
 - **Unsupported**: no external CLI, cannot participate in CLI-based continuity.
 
-> Note: pytest passing is **not** evidence of live zero-touch. Hermetic tests use synthetic fixtures and never touch a real provider; only the manual procedure below can move a provider from `H` to `Y`.
+> Note: pytest passing is **not** evidence of live zero-touch. Hermetic tests use synthetic fixtures and never touch a real provider. Only a manual observation can establish the trigger — and even then the CLI letter stays `H`, because no persisted live-evidence state exists to move it.
 
 ---
 
@@ -225,13 +226,13 @@ The **automated tests** guarantee that all core logic is correct. This manual pr
 
 ---
 
-## Closing the remaining gap (the only open item)
+## Closing the remaining gap
 
-Everything except one thing is already machine-verified. You can confirm the
-whole chain yourself, without touching your real profile:
+The scratch-home run verifies everything except the provider's own behaviour,
+without touching your real profile:
 
 ```bash
-# 1. Point the verifier at a scratch home and let it install + run the hook.
+# Point the verifier at a scratch home and let it install + run the hook.
 voyager integrate install claude --home "$SCRATCH"
 python scripts/verify_claude_sessionstart.py --home "$SCRATCH"
 ```
@@ -241,36 +242,75 @@ exit code, the `hookSpecificOutput` protocol, and the 10 000-char cap. It
 proves the handler works **when called** — it cannot prove Claude Code *calls*
 it, because that is the provider's behaviour, not ours.
 
-The last mile is therefore a single observation, and only you can make it:
+The provider-behaviour half is therefore a manual observation:
 
 ```bash
-# 2. Ask Claude Code itself to run SessionStart headlessly, then inspect it.
+# Ask Claude Code itself to run SessionStart headlessly, then inspect it.
 claude --debug hooks --init-only
 python scripts/verify_claude_sessionstart.py --e2e
 ```
 
-When `claude --init-only` exits 0 **and** the hook's own log shows an entry
-whose `session_id` is a real Claude Code session (not the synthetic
-`voyager-verify-0001`), set `SESSIONSTART_TRIGGER_LIVE_VERIFIED = true` and
-promote Claude Code from `H` to `Y`. Until that happens the honest answer stays
-`H`, and Zero-Touch Final Acceptance stays **OPEN**.
+The criterion: `claude --init-only` exits 0 **and** the hook's own log shows an
+entry whose `session_id` is a real Claude Code session (not the synthetic
+`voyager-verify-0001`) ⇒ `SESSIONSTART_TRIGGER_LIVE_VERIFIED = true`.
 
 > Do not promote on the strength of a green test suite or a passing simulation.
-> pytest uses synthetic fixtures; the simulation above uses a synthetic
+> pytest uses synthetic fixtures; the scratch-home simulation uses a synthetic
 > `session_id`. Neither observes the provider.
+
+### Live verification (2026-09-24) — done
+
+Both halves of that criterion held on a real machine, and the chain ran all the
+way through:
+
+| Step | Evidence |
+|---|---|
+| provider fires the hook | `SessionStart_parsed` `session_id=3ae4d2b8-83b8-488e-94bd-3c27147b9782`, `cwd=E:\code\voyager` |
+| continuity runs | `thread_id=thr_0854d50b88`, `attach_status=pending_resolve`, `context_length=79886`, `context_source=fresh_compile` |
+| pending persisted | `thread_pending.native_session_id=3ae4d2b8-…`, `note='native session start: awaiting index'` |
+| transcript discovered | a real interactive session wrote `~/.claude/projects/E--code-voyager/08563967-36f7-48e4-bd62-ed786ccfbd53.jsonl` |
+| indexed | `claude:08563967-36f7-48e4-bd62-ed786ccfbd53`, `repo_root=E:/code/voyager` |
+| pending resolved | `status='resolved'`, `resolved_sid='claude:08563967-…'` |
+| attached to the WorkThread | `thread_sessions` row `(thr_0854d50b88, claude:08563967-…, ord=2)` |
+
+```text
+LIFECYCLE_TRIGGER_LIVE_VERIFIED    = true
+SESSION_DISCOVERY_LIVE_VERIFIED    = true
+SESSION_ATTACH_LIVE_VERIFIED       = true
+CONTEXT_INJECTION_LIVE_VERIFIED    = false
+SESSIONSTART_TRIGGER_LIVE_VERIFIED = true
+```
+
+**`CONTEXT_INJECTION_LIVE_VERIFIED` stays `false`.** The hook emitted an
+`additionalContext` payload of 9 000 chars (full bundle 79 886 chars, spilled to
+`~/.voyager/context/`), but nothing here shows the *model* read and used it.
+Establishing that needs the private-sentinel test: plant a marker that exists
+only in the session history, then ask the agent about it without naming it.
+
+**Why the CLI still prints `H`.** `voyager integrate status` derives the letter
+from static capability and configuration. Voyager keeps **no persisted
+live-evidence state**, so the CLI cannot reflect a manual observation, and
+nothing prints `Y`. Making `Y` a product state means designing a persisted
+verification record deliberately — not having the CLI read
+`provider-hooks.jsonl` at runtime and treat a log as a database.
+
+**Zero-Touch Final Acceptance stays OPEN** — not for the trigger, which is now
+observed, but for `CONTEXT_INJECTION_LIVE_VERIFIED` and for the cross-provider
+leg (Claude → close → normal Grok launch). A proven native trigger on one
+provider is not yet invisible continuity *across* providers.
 
 ---
 
 ## Summary
 
 - **Automated verified** — full dev extras: `374 collected → 372 passed, 2 skipped, 0 failed`; simulated core-only: `374 collected → 356 passed, 18 skipped, 0 failed`. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
-- **Real-provider runtime status** (as of 2026-09-23):
-  * Claude Code = **`H`** — a schema-valid native `SessionStart` hook is registered by the installer; the provider firing it has **not** been observed. `SESSIONSTART_TRIGGER_LIVE_VERIFIED = false`.
+- **Real-provider runtime status** (as of 2026-09-24):
+  * Claude Code = **`H`** (CLI letter) / **trigger live-verified** — a schema-valid native `SessionStart` hook is registered by the installer, and the provider **has been observed firing it** (2026-09-24). `SESSIONSTART_TRIGGER_LIVE_VERIFIED = true`. The letter stays `H` because the CLI has no persisted live-evidence state.
   * Codex = **`N`** — no native hook surface; first-turn/Skill guidance only
   * Grok = **`N`** — no native hook; opt-in launcher shim is the available path
   * DSH = **`N`** — launcher + session watcher; real environment not verified
 - **Provider-limited**: ZCode desktop, Cursor/Kiro IDE-only
 - **MCP registration**: Fully automated, no manual setup required
-- **Zero-Touch Final Acceptance: OPEN** — no provider claims `Y` yet.
+- **Zero-Touch Final Acceptance: OPEN** — `CONTEXT_INJECTION_LIVE_VERIFIED` is unproven and no provider prints `Y`.
 
-The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`) or MCP tool calls. Claude Code is now the one provider where an invisible auto-startup path plausibly exists — the hook is registered and the handler is verified — but the last mile, observing the provider actually fire it, remains unproven and is the single open item blocking Zero-Touch Final Acceptance.
+The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`) or MCP tool calls. Claude Code is now the one provider where the invisible auto-startup path is proven end to end: the hook is registered, the provider fires it, the transcript is discovered and indexed, the pending row resolves, and the native session attaches itself to the right WorkThread — all with no Voyager command. Two things still block Zero-Touch Final Acceptance: proving the model actually *uses* the injected context (`CONTEXT_INJECTION_LIVE_VERIFIED`), and repeating it across providers (Claude → close → normal Grok launch).

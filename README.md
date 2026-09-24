@@ -160,7 +160,7 @@ explicitly instead of pretending.
 ## Startup Continuity — product status
 
 **Core functionality**: Complete and operational.  
-**Runtime auto-trigger**: Claude Code has a native `SessionStart` hook, and Voyager registers one. Whether Claude Code actually fires it is **not yet verified on a live run**.
+**Runtime auto-trigger**: Claude Code has a native `SessionStart` hook, and Voyager registers one. Claude Code firing it is **live-verified as of 2026-09-24** — the provider's own `session_id` reached the hook, and that session then attached itself to its WorkThread with no Voyager command.
 
 The `startup_continuity()` function correctly discovers WorkThreads, auto-attaches sessions, and compiles continuation context. What varies per provider is whether a session start can reach that function *without the user doing anything*.
 
@@ -168,14 +168,14 @@ The `startup_continuity()` function correctly discovers WorkThreads, auto-attach
 
 | Provider | Skill | MCP | Status                | What it means                          |
 |----------|-------|-----|-----------------------|----------------------------------------|
-| Claude   | Y     | R   | `H` — hook registered | Native `SessionStart` hook installed; trigger not yet observed live |
+| Claude   | Y     | R   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-24). `H` is a static capability reading, not live evidence |
 | Codex    | Y     | R   | `A` — startup-assisted | No native hook; needs an explicit call |
 | Grok CLI | Y     | N   | `N` — no mechanism    | Best effort                            |
 | DSH      | Y     | N   | `N` — no mechanism    | Best effort                            |
 
 Legend: **Y** = installed, **R** = registered, **N** = unsupported, **A** = available/manual setup needed.
 
-Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered but the live trigger is **not yet verified**, **`A`** = startup-assisted, **`N`** = no hook. Only `Y` claims the provider fires the hook by itself; nothing currently claims `Y`. Run `voyager integrate status` for the live answer on your machine.
+Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered, **`A`** = startup-assisted, **`N`** = no hook. The letter is derived from **static capability and configuration only** — Voyager keeps no persisted live-evidence state, so the CLI cannot report a manual observation, and nothing prints `Y`. Claude Code's trigger *has* been observed live (2026-09-24) and it still reports `H`. Run `voyager integrate status` for the configuration answer on your machine.
 
 ### How Claude Code hooks work here
 
@@ -198,13 +198,13 @@ Claude Code reads `SessionStart` hooks from `~/.claude/settings.json`. Voyager w
 
 `voyager integrate install claude` writes this for you (it is additive — your own hooks are preserved, and the file is backed up first). The installed command uses absolute paths, so it does not depend on the interpreter being on `PATH`.
 
-**Two things are verified, one is not.** The handler is verified end-to-end: it emits a protocol-valid payload, caps the injected context at 9,000 UTF-16 code units, spills the full bundle to `~/.voyager/context/`, and exits 0. The *registration* is verified: `voyager integrate status` reads the file back. What is **not** verified is Claude Code itself invoking the hook — that needs one manual run:
+**Three things are verified.** The handler is verified end-to-end: it emits a protocol-valid payload, caps the injected context at 9,000 UTF-16 code units, spills the full bundle to `~/.voyager/context/`, and exits 0. The *registration* is verified: `voyager integrate status` reads the file back. And the **provider firing the hook is verified too** (2026-09-24) — the manual run below recorded a `SessionStart` whose `session_id` belongs to Claude Code itself, not the verifier's synthetic one:
 
 ```sh
 claude --debug hooks --init-only     # expect: Found 1 hook matchers in settings
 ```
 
-Until someone sees that line, treat the trigger as unproven. See [claude_continuity_verdict.md](claude_continuity_verdict.md) for the full evidence trail.
+That line was observed on 2026-09-24, and the real `session_id` it carried then completed the whole chain: transcript discovered → indexed → pending row resolved → session attached to WorkThread `thr_0854d50b88`, with no Voyager command. What is **still** unproven is that the model actually *read and used* the injected context, and no provider prints `Y` — the CLI letter comes from static configuration, not from this observation. See [docs/DOGFOOD.md](docs/DOGFOOD.md#live-verification-2026-09-24--done) for the evidence table.
 
 ### What works right now ✅
 

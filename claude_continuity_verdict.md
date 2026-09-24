@@ -41,10 +41,10 @@ observed, and cannot be observed from this sandbox.
 ```text
 CLAUDE_CLI_SESSIONSTART_SUPPORTED   = true        (code-level evidence)
 SESSIONSTART_CONFIG_PRESENT         = true        (file parsed, shape validated)
-SESSIONSTART_CONFIG_LOADED          = UNVERIFIED  (nothing observed loading it)
-HOOK_COMMAND_EXECUTABLE             = true        (invoked as Claude would)
-SESSIONSTART_TRIGGER_LIVE_VERIFIED  = false       (needs one manual run)
-OUR_SESSIONSTART_TRIGGER            = FIXED, NOT LIVE-VERIFIED
+SESSIONSTART_CONFIG_LOADED          = true        (2026-09-24: the provider loaded it and fired)
+HOOK_COMMAND_EXECUTABLE             = true        (invoked as Claude would; and by Claude itself)
+SESSIONSTART_TRIGGER_LIVE_VERIFIED  = true        (2026-09-24, real native session)
+OUR_SESSIONSTART_TRIGGER            = FIXED, LIVE-VERIFIED (2026-09-24)
 INSTALLER_WRITES_VALID_SCHEMA       = true        (RC6; was false, now tested)
 ```
 
@@ -551,12 +551,16 @@ Two further observations from the same log:
 
 ---
 
-## Remaining gap: the one manual run
+## Remaining gap: the one manual run — closed 2026-09-24
 
-`SESSIONSTART_TRIGGER_LIVE_VERIFIED` still needs Claude Code itself to fire
-the hook. That step was not automated here, because in this environment
-launching the CLI fails with `Error: spawn EPERM` — reported as an unhandled
-rejection during startup.
+`SESSIONSTART_TRIGGER_LIVE_VERIFIED` needed Claude Code itself to fire the hook.
+That step could not be automated in this environment, because launching the CLI
+fails here with `Error: spawn EPERM` — reported as an unhandled rejection during
+startup. It was therefore run by hand on a real machine, where it passed: the
+provider's own `session_id` reached the hook, the transcript was discovered and
+indexed, the pending row resolved, and the native session attached itself to its
+WorkThread with no Voyager command. Evidence table:
+[`docs/DOGFOOD.md`](docs/DOGFOOD.md) → *Live verification (2026-09-24)*.
 
 > **Unverified explanation.** The earlier revision of this file attributed that
 > EPERM to the sandbox blacklisting `reg.exe`, which Claude Code spawns at

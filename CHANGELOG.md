@@ -177,8 +177,11 @@ All notable changes to Voyager are documented here. Format loosely follows
   **not** attached. Mutation-verified: bypassing the identity filter turns the
   negative test red, and drifting the adapter's `native_id` off the stem turns the
   positive one red.
-- `H` startup status: **native hook registered, live trigger not yet verified**.
-  Only `Y` claims that a provider fires the hook by itself, and nothing claims `Y`.
+- `H` startup status: **native hook registered**. Only `Y` claims that a provider
+  fires the hook by itself, and nothing claims `Y` — the letter is derived from
+  static capability and configuration, with no persisted live-evidence state
+  behind it. (On 2026-09-24 Claude Code was separately observed firing the hook
+  live; the letter still reads `H`.)
 - `tests/test_claude_session_start_hook.py` (33 tests) — output protocol, payload
   cap, UTF-16 length accounting, spill file, logging, log rotation, isolation.
 - `tests/test_context_cache.py` (39 tests) — cache helpers, hostile input,
@@ -297,9 +300,15 @@ Recorded so the findings are not lost while implementation stays frozen.
   when it holds no Chinese-titled session (`:33`) or no sessions at all
   (`:103`). Core-only adds 16 **dependency-gated** skips (`mcp`, `zstandard`,
   `PIL`). Neither class is a platform gate.
-- `SESSIONSTART_TRIGGER_LIVE_VERIFIED` remains **false**. Zero-Touch Final
-  Acceptance remains **open**; it now depends on a single manual observation, not
-  on further code.
+- `SESSIONSTART_TRIGGER_LIVE_VERIFIED` is now **true**, observed on 2026-09-24:
+  the provider's own `session_id` reached the hook, the transcript was discovered
+  and indexed, and the native session attached itself to WorkThread
+  `thr_0854d50b88` with no Voyager command. `CONTEXT_INJECTION_LIVE_VERIFIED`
+  stays **false** — nothing yet shows the model read and used the injected
+  context. Zero-Touch Final Acceptance remains **open**: it now needs that
+  sentinel proof plus the cross-provider leg (Claude → close → normal Grok
+  launch), not more code. The CLI still prints `H` for Claude, because no
+  persisted live-evidence state exists for it to read.
 
 ## [0.3.0] — 2026-09-19
 
