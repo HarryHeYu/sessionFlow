@@ -198,6 +198,30 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
         if renewed:
             print("  ↳ lease heartbeat renewed ({0})".format(renewed))
 
+    # Refresh the Grok startup context now that the index is current.
+    #
+    # Grok's SessionStart hook cannot inject anything (the event is passive and
+    # its stdout is ignored), so the only channel into an interactive session is
+    # the rules file Grok loads before the first turn. The launcher writes it,
+    # but the launcher only runs when ~/.voyager/bin precedes the real binary on
+    # PATH — which is not the default — so a sync also refreshes it. A scan is
+    # the last thing to run before a handoff in the documented flow.
+    #
+    # `clear=False` because a sync is not a launch: `voyager watch` is started
+    # from the Startup folder, so its cwd is not the repo the user is in, and
+    # clearing on "no thread for *my* cwd" would delete the rule the handoff
+    # depends on once per interval. Only a caller that knows where the next
+    # session starts (the launcher) may remove the file.
+    try:
+        from .integrations.grok_native import write_context_rules
+        grok_ctx = write_context_rules(cwd=os.getcwd(), store=store,
+                                       clear=False)
+    except Exception:
+        grok_ctx = {"status": "error"}
+    if not quiet and grok_ctx.get("status") == "written":
+        print("  ↳ grok continuation rule refreshed ({0})".format(
+            grok_ctx["path"]))
+
     stats = store.stats()
     res = {"new": grand_new, "skip": grand_skip, "events_added": grand_evt,
            "changed_sources": grand_changed, "elapsed": _time.time() - t0,
@@ -739,6 +763,65 @@ def _run_launcher_prelaunch(args) -> int:
     from .launcher import main as launcher_main
     sys.exit(launcher_main(["prelaunch", f"--provider={args.provider}",
                            f"--cwd={args.cwd}"] + (["--json"] if args.json else [])))
+
+
+def cmd_hook_grok_context(args) -> int:
+    """Write Grok's continuation rule file before the launcher execs the CLI.
+
+    Grok loads every ``*.md`` in ``$GROK_HOME/rules/`` into the system prompt at
+    session start, before the first turn, which is the only verified way to get
+    continuation context into an *interactive* Grok session. The launcher runs
+    this first so the rule is on disk by the time Grok reads its rules.
+    """
+    from .integrations.grok_native import write_context_rules
+
+    home = Path(args.home) if getattr(args, "home", None) else None
+    store = Store(args.db) if getattr(args, "db", None) else None
+    try:
+        result = write_context_rules(cwd=args.cwd, home=home, store=store)
+    finally:
+        if store is not None:
+            store.close()
+
+    if getattr(args, "json", False):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif not getattr(args, "quiet", False):
+        status = result.get("status")
+        if status == "written":
+            print("Voyager: continuation context -> {0} ({1} chars, thread {2})"
+                  .format(result["path"], result["chars"], result["thread"]))
+        elif status == "no_thread":
+            print("Voyager: no active WorkThread for this repo; rules cleared")
+        else:
+            print("Voyager: could not write Grok rules: {0}"
+                  .format(result.get("message", status)))
+    return 0
+
+
+def cmd_hook_grok_session_start(args) -> int:
+    """Grok ``SessionStart`` hook body: record the pending attach.
+
+    Grok passes ``GROK_SESSION_ID``/``GROK_WORKSPACE_ROOT`` in the environment,
+    so the native id is known at startup and the later resolution is an identity
+    match. Always exits 0: a hook must fail open.
+    """
+    from .integrations.grok_native import session_start
+
+    home = Path(args.home) if getattr(args, "home", None) else None
+    store = Store(args.db) if getattr(args, "db", None) else None
+    try:
+        result = session_start(
+            session_id=getattr(args, "session_id", None),
+            cwd=getattr(args, "cwd", None),
+            home=home,
+            store=store,
+        )
+    finally:
+        if store is not None:
+            store.close()
+    if getattr(args, "json", False):
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 def _watch_sleep(args, store) -> float:
@@ -1589,6 +1672,31 @@ def main(argv=None) -> int:
     hks.add_argument("--goal", help="primary goal for context ranking")
     hks.add_argument("--compact", action="store_true", help="use compact budget")
     hks.set_defaults(func=cmd_hook_startup)
+
+    # Grok native surfaces (verified against Grok CLI 1.0.41). Kept as separate
+    # subcommands rather than folded into `hook startup`, whose status/context
+    # contract other callers depend on.
+    hkgc = hksub.add_parser(
+        "grok-context",
+        help="write Grok's continuation rule file (run by the launcher)")
+    hkgc.add_argument("--cwd", required=True, help="current working directory")
+    hkgc.add_argument("--home", help="override HOME (testing)")
+    hkgc.add_argument("--db", help="index db path")
+    hkgc.add_argument("--json", action="store_true")
+    hkgc.add_argument("--quiet", action="store_true")
+    hkgc.set_defaults(func=cmd_hook_grok_context)
+
+    hkgs = hksub.add_parser(
+        "grok-session-start",
+        help="Grok SessionStart hook body (records the pending attach)")
+    hkgs.add_argument("--session-id",
+                      help="native session id (defaults to $GROK_SESSION_ID)")
+    hkgs.add_argument("--cwd",
+                      help="working dir (defaults to $GROK_WORKSPACE_ROOT)")
+    hkgs.add_argument("--home", help="override HOME (testing)")
+    hkgs.add_argument("--db", help="index db path")
+    hkgs.add_argument("--json", action="store_true")
+    hkgs.set_defaults(func=cmd_hook_grok_session_start)
     
     # Legacy skill install still supported
     sp = sub.add_parser("skill", help="(legacy) install the voyager skill into known agents",
