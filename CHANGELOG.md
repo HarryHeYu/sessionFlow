@@ -162,10 +162,21 @@ All notable changes to Voyager are documented here. Format loosely follows
   cannot run in this environment, but every step below it is real code and is now
   driven with real code: hook stdin `{session_id}` → a pending attach record → the
   Claude adapter indexing the transcript → `resolve_pending_attaches` matching by
-  identity → the session becoming a WorkThread member. This also pins the
-  invariant the identity match rests on — the `session_id` the hook reads from
-  stdin must equal the adapter's `native_id` (the transcript's filename stem).
-  Verified by mutating the adapter's `native_id`, which turns the test red.
+  identity → the session becoming a WorkThread member.
+  The identity match rests on a relation between two *independent* channels — the
+  `session_id` the hook reads from stdin, and the adapter's `native_id` (the
+  transcript's filename stem) — with a third channel, the `sessionId` written
+  *inside* the transcript, deciding whether the test can actually tell them apart.
+  The cases keep those three distinct instead of writing one literal into all
+  three: the positive case fires the hook with the value that also names the file
+  (so it resolves) while the in-file id deliberately differs — an adapter that
+  read the wrong field would index `claude:<in-file id>` and resolve nothing —
+  and a **negative regression** starts a native session and then offers the
+  resolver a *different* session that satisfies every other heuristic (same
+  provider, same repo, newer than the pending, unique candidate) and asserts it is
+  **not** attached. Mutation-verified: bypassing the identity filter turns the
+  negative test red, and drifting the adapter's `native_id` off the stem turns the
+  positive one red.
 - `H` startup status: **native hook registered, live trigger not yet verified**.
   Only `Y` claims that a provider fires the hook by itself, and nothing claims `Y`.
 - `tests/test_claude_session_start_hook.py` (29 tests) — output protocol, payload
@@ -219,25 +230,44 @@ All notable changes to Voyager are documented here. Format loosely follows
 Recorded so the findings are not lost while implementation stays frozen.
 
 - **`get_git_snapshot()` git probe timeout** — four git calls, `timeout=2` each.
-  Measured in the sandbox: a single `git status --short` costs p50 1.30 s /
-  max 1.41 s, i.e. **1.54× headroom**. On timeout the exception is swallowed and
-  the snapshot silently reports `dirty_count=0`, so the dirty-tree warning
-  disappears (this is what turns `test_switch_warns_on_dirty_repo` red under
-  full-suite load). Raising it to 20 s was **proven** to fix it over a full run.
+  On timeout the exception is swallowed and the snapshot silently reports
+  `dirty_count=0`, so the dirty-tree warning disappears (this is what turns
+  `test_switch_warns_on_dirty_repo` red under full-suite load). The trigger was
+  observed in this sandbox: process startup overhead made a single
+  `git status --short` cost ~1.3 s, which exposed a timeout-sensitive test path.
+  **That is environment-specific evidence, not representative of normal local git
+  latency** — on a normal machine git takes ~20–100 ms, i.e. 20–100× headroom, and
+  the issue does not appear. Raising the timeout to 20 s was **observed** to clear
+  the failure on a single full run; that is not a claim that the suite is green.
   Not applied because it trades a flake for up to 80 s of added latency (vs 8 s)
   in the SessionStart hook path when git genuinely hangs — a product decision,
-  not a mechanical one. On a normal machine git takes ~20–100 ms, so 2 s is
-  20–100× headroom and the issue does not appear.
+  not a mechanical one.
 - **`skill.py`: two bare `claude mcp add` calls** — same defect class as the
-  `_launch()` fix: `shutil.which()` resolves the `.CMD` shim that bare-name
-  `subprocess` cannot spawn. Fix with the same executable-resolution principle,
-  plus real-home / scratch-home regression tests.
+  `_launch()` fix, where `shutil.which()` resolves the `.CMD` shim that a
+  bare-name `subprocess` call cannot spawn (WinError 193). Neither site does that
+  resolution today, and both swallow `OSError`, so on Windows the registration
+  silently degrades to writing the config file instead of failing loudly.
+  Two further differences from the MCP-server registration path, both unchecked:
+  the call at `skill.py:322` omits the `--` separator before the command (so
+  `-m` is left for the provider CLI to parse as one of its own flags), and
+  neither call passes `--scope user`. Fix with the same executable-resolution
+  principle, plus real-home / scratch-home regression tests.
+- **Test isolation: the scan test reads the developer's real `~/.grok/sessions`** —
+  `test_scan_indexes_the_session_and_resolves_the_pending` passes
+  `providers=["grok"]` to `run_scan` without redirecting the Grok adapter's
+  `SESSIONS_DIR`, so the scan walks the real Grok history. It does not affect the
+  assertion (the pending under test belongs to `claude`), but it makes the test
+  depend on the machine. Redirect `SESSIONS_DIR` the way the Claude tests redirect
+  `PROJECTS_DIR`.
 - **WAL: ~236 MB uncheckpointed** — `index.db-wal` stays large with no python
   process running. Candidate mechanism is `cmd_watch`'s long-lived connection
   plus a second writer connection; **not asserted**.
 - **FTS: migrate `event_fts` to `content='events'`** — the index is not
-  external-content, so event text is stored twice (67 MB) plus a ~448 MB
-  trigram index.
+  external-content, so event text is stored twice: measured `event_fts_data`
+  ≈ 408 MB (the full-text index, which an external-content migration does **not**
+  shrink) and `event_fts_content` ≈ 67 MB (the duplicate copy, which it does).
+  The migration's saving is the ~67 MB content table, not the whole FTS index —
+  a ~448 MB figure for the saving is wrong.
 
 ### Notes
 - Test suite: `370 collected → 352 passed, 18 skipped, 0 failed`.
