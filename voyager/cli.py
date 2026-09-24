@@ -198,30 +198,6 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
         if renewed:
             print("  ↳ lease heartbeat renewed ({0})".format(renewed))
 
-    # Refresh the Grok startup context now that the index is current.
-    #
-    # Grok's SessionStart hook cannot inject anything (the event is passive and
-    # its stdout is ignored), so the only channel into an interactive session is
-    # the rules file Grok loads before the first turn. The launcher writes it,
-    # but the launcher only runs when ~/.voyager/bin precedes the real binary on
-    # PATH — which is not the default — so a sync also refreshes it. A scan is
-    # the last thing to run before a handoff in the documented flow.
-    #
-    # `clear=False` because a sync is not a launch: `voyager watch` is started
-    # from the Startup folder, so its cwd is not the repo the user is in, and
-    # clearing on "no thread for *my* cwd" would delete the rule the handoff
-    # depends on once per interval. Only a caller that knows where the next
-    # session starts (the launcher) may remove the file.
-    try:
-        from .integrations.grok_native import write_context_rules
-        grok_ctx = write_context_rules(cwd=os.getcwd(), store=store,
-                                       clear=False)
-    except Exception:
-        grok_ctx = {"status": "error"}
-    if not quiet and grok_ctx.get("status") == "written":
-        print("  ↳ grok continuation rule refreshed ({0})".format(
-            grok_ctx["path"]))
-
     stats = store.stats()
     res = {"new": grand_new, "skip": grand_skip, "events_added": grand_evt,
            "changed_sources": grand_changed, "elapsed": _time.time() - t0,
@@ -234,11 +210,51 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
     return res
 
 
+def _refresh_grok_rules(store: Store) -> None:
+    """Refresh Grok's continuation rule for the repo this sync ran in.
+
+    Grok's SessionStart hook cannot inject anything (the event is passive and
+    its stdout is ignored), so the only channel into an interactive session is
+    the rules file Grok loads before the first turn. The launcher writes it, but
+    the launcher only runs when ``~/.voyager/bin`` precedes the real binary on
+    ``PATH`` -- which is not the default -- so the sync also refreshes it. A scan
+    is the last thing to run before a handoff in the documented flow.
+
+    This belongs to the *command*, not to ``run_scan()``. ``run_scan()`` is a
+    core primitive that context compilation calls back into
+    (``auto.get_continuation_context(sync=True)``), and this write compiles
+    context itself, so putting it in ``run_scan()`` made the two re-enter each
+    other::
+
+        run_scan -> write_context_rules -> startup_continuity -> compile
+                 -> get_continuation_context -> run_scan -> ...
+
+    With a stale cache that recursed until the stack ran out, which hung
+    ``voyager scan`` and every Claude SessionStart that had to compile.
+
+    ``clear=False`` because a sync is not a launch: ``voyager watch`` is started
+    from the Startup folder, so its cwd is not the repo the user is in, and
+    clearing on "no thread for *my* cwd" would delete the rule the handoff
+    depends on once per interval. Only a caller that knows where the next
+    session starts (the launcher) may remove the file.
+    """
+    try:
+        from .integrations.grok_native import write_context_rules
+        grok_ctx = write_context_rules(cwd=os.getcwd(), store=store,
+                                       clear=False)
+    except Exception:
+        return
+    if grok_ctx.get("status") == "written":
+        print("  ↳ grok continuation rule refreshed ({0})".format(
+            grok_ctx["path"]))
+
+
 def cmd_scan(args) -> int:
     store = Store(args.db)
     run_scan(store,
              providers=args.platform.split(",") if args.platform else None,
              force=args.force, quiet=False)
+    _refresh_grok_rules(store)
     return 0
 
 
