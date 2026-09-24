@@ -207,7 +207,8 @@ def test_plain_grok_launch_path_carries_the_continuation_context(
     assert main(["hook", "grok-context", "--cwd", repo, "--home", str(home),
                  "--db", str(store.db_path), "--quiet"]) == 0
     assert rules.is_file()
-    run_scan(store, providers=["grok"], quiet=True)
+    assert main(["--db", str(store.db_path), "scan",
+                 "--platform", "grok"]) == 0
     assert rules.is_file(), (
         "a background sync deleted the continuation rule for a repo it was "
         "not in -- the next `grok` would start with no context"
@@ -225,3 +226,54 @@ def test_plain_grok_launch_path_carries_the_continuation_context(
     win = (home / ".voyager/bin/grok.cmd").read_text(encoding="utf-8")
     assert "hook grok-context" in shim
     assert "hook grok-context" in win
+
+
+# ---------------------------------------------------------------------------
+# 3. A scan refreshes the rule without re-entering context compilation
+# ---------------------------------------------------------------------------
+
+def test_a_scan_refreshes_the_rule_without_re_entering_compilation(
+        store, git_repo, monkeypatch):
+    """The refresh belongs to the scan *command*, not to `run_scan()`.
+
+    `run_scan()` is a core primitive that context compilation calls back into
+    (`auto.get_continuation_context(sync=True)`). The Grok refresh compiles
+    context itself, so doing it from inside `run_scan()` closed a cycle::
+
+        run_scan -> write_context_rules -> startup_continuity -> compile
+                 -> get_continuation_context -> run_scan -> ...
+
+    With a stale cache that recursed until the stack ran out, so `voyager scan`
+    never finished -- and neither did any Claude SessionStart that had to
+    compile, because that hook reaches the same primitive.
+
+    The rest of the suite cannot see it: conftest sets `VOYAGER_NO_SYNC`, which
+    makes `get_continuation_context` step over the scan and the cycle with it.
+    Counting the writer's calls catches it in milliseconds instead of by
+    waiting for a scan to hang.
+    """
+    repo = str(git_repo)
+    store.thread_create(repo_root=repo, title="scan re-entrancy")
+    monkeypatch.chdir(repo)
+
+    seen = []
+
+    def fake_write_context_rules(**kwargs):
+        seen.append(kwargs)
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(
+        "voyager.integrations.grok_native.write_context_rules",
+        fake_write_context_rules)
+
+    # the primitive has to stay re-entrant ...
+    run_scan(store, providers=["grok"], quiet=True)
+    assert seen == [], (
+        "run_scan() called back into context compilation; a scan that has to "
+        "compile never terminates"
+    )
+
+    # ... and the command is where the refresh happens, exactly once
+    assert main(["--db", str(store.db_path), "scan",
+                 "--platform", "grok"]) == 0
+    assert len(seen) == 1, "the sync command must refresh the rule"
