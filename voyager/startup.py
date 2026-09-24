@@ -71,6 +71,47 @@ class StartupContinuityResult:
         return self.__dict__.copy()
 
 
+def record_startup_pending(
+    store: Store,
+    *,
+    thread_id: str,
+    provider: str,
+    repo_root: str,
+    cwd: Optional[str] = None,
+    native_session_id: Optional[str] = None,
+    goal: Optional[str] = None,
+    note: str = "native session start: awaiting index",
+) -> None:
+    """Record the open pending attach a native session start leaves behind.
+
+    This is the single writer for the shared state machine
+
+        native startup → pending → discovery → resolution → thread_attach
+
+    Every provider-native startup surface goes through it, so Claude's
+    SessionStart handler and Grok's SessionStart hook cannot drift into two
+    similar-but-different flavours of "record the intent, let the scan finish".
+
+    The row is keyed ``(thread_id, provider)``, so re-recording for the same
+    pair replaces the previous row rather than piling up. ``native_session_id``
+    is what makes the later resolution an identity match instead of the
+    "exactly one candidate" heuristic, so a surface that knows its session id
+    must pass it.
+
+    ``source_provider``/``source_session`` are deliberately left unset: they
+    describe the session a *switch* handed off from, and a native start has no
+    such session.
+    """
+    store.pending_record(
+        thread_id, provider,
+        native_session_id=native_session_id,
+        note=note,
+        repo_root=repo_root,
+        cwd=cwd,
+        goal=goal,
+    )
+
+
 def startup_continuity(
     provider: str,
     cwd: Optional[str] = None,
@@ -78,6 +119,7 @@ def startup_continuity(
     auto_attach: bool = True,
     budget: str = "auto",
     store: Optional[Store] = None,
+    compile_context: bool = True,
 ) -> StartupContinuityResult:
     """Unified startup continuity primitive.
     
@@ -139,6 +181,11 @@ def startup_continuity(
         auto_attach: Whether to automatically attach session to thread (default True)
         budget: Context budget mode (compact/balanced/full/auto/Nk)
         store: Optional pre-opened Store instance (for batch operations)
+        compile_context: Whether to compile the continuation bundle (default
+            True). Set False from a surface that cannot deliver context — a
+            passive lifecycle hook — so it still records the pending attach
+            without paying for a bundle nobody can read. ``context`` is then
+            None and ``context_source`` is "none".
     
     Returns:
         StartupContinuityResult with all discovery/attach/context state
@@ -291,12 +338,13 @@ def startup_continuity(
                     # `source_provider`/`source_session` are deliberately left
                     # unset: they describe the session a switch handed off *from*,
                     # and there is no such session here.
-                    store.pending_record(
-                        tid, provider,
-                        native_session_id=native_session_id,
-                        note="native session start: awaiting index",
+                    record_startup_pending(
+                        store,
+                        thread_id=tid,
+                        provider=provider,
                         repo_root=git_root,
                         cwd=cwd,
+                        native_session_id=native_session_id,
                         goal=dict(thread).get("goal"),
                     )
                     attach_status = "pending_resolve"
@@ -316,11 +364,13 @@ def startup_continuity(
         # reported `context_source` was always "fresh_compile" even when
         # nothing had changed.
         members = store.thread_members(tid)
-        cached = _load_context_cache(store, tid, provider, budget)
+        cached = (_load_context_cache(store, tid, provider, budget)
+                  if compile_context else {"compiled_at": 0, "context": None})
         last_compiled_at = cached["compiled_at"]
         context = cached["context"]
         context_stale = False
-        context_source = "cached" if context else "fresh_compile"
+        context_source = ("none" if not compile_context
+                          else "cached" if context else "fresh_compile")
         
         # Stale if:
         # - Never compiled OR compiled > 5 minutes ago
@@ -341,7 +391,7 @@ def startup_continuity(
         
         git_head_changed = _git_head_changed_since(
             store, tid, git_root, last_compiled_at
-        )
+        ) if compile_context else False
         
         holder_changed = (lst["held"] and 
                          dict(lease).get("holder") != _latest_holder_provider(store, tid))
@@ -358,8 +408,11 @@ def startup_continuity(
         
         compiled_at = last_compiled_at
         
-        # Compile context if needed
-        if needs_compile or not context:
+        # Compile context if needed. A caller that only wants the pending attach
+        # (Grok's SessionStart hook) opts out: the event is passive, so the
+        # bundle could never reach the model, and compiling it shells out to git
+        # and rebuilds transcript-derived text on every single launch.
+        if compile_context and (needs_compile or not context):
             context_source = "fresh_compile"
             context_stale = True  # the cache was stale (or absent) before this call
             fresh_context = None
