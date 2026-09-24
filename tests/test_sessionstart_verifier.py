@@ -221,7 +221,21 @@ def _run_probe(tmp_path: Path, mode: str):
 
     return subprocess.run(
         [sys.executable, str(VERIFIER), "--e2e", "--home", str(home)],
-        capture_output=True, text=True, env=env, timeout=300,
+        capture_output=True,
+        text=True,
+        # The verifier promises UTF-8 on stdout (`_configure_stdout()`), and its
+        # output is not ASCII-only -- the INFO line for an empty payload contains
+        # an em dash. Decoding with the locale default instead (GBK on a zh-CN
+        # Windows) kills the reader thread, so `proc.stdout` comes back as None
+        # and every assertion below fails as `TypeError: argument of type
+        # 'NoneType' is not iterable`, which reads as a probe failure rather than
+        # as a harness bug. `errors="strict"` is deliberate: the UTF-8 promise is
+        # part of the contract under test, so a non-UTF-8 byte should turn the
+        # test red rather than be silently replaced.
+        encoding="utf-8",
+        errors="strict",
+        env=env,
+        timeout=300,
     )
 
 
@@ -265,6 +279,36 @@ def test_e2e_verdict_proves_the_resolved_shim_is_runnable(tmp_path):
     assert "could not start" not in proc.stdout
     assert "Traceback" not in proc.stderr, proc.stderr
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="the .cmd shim resolution this covers is Windows-specific")
+def test_e2e_probe_captures_the_verifier_output_as_utf8(tmp_path):
+    """The probe's output is UTF-8 and must be captured *as* UTF-8.
+
+    `_configure_stdout()` makes the verifier promise UTF-8 on its streams, and
+    its output is not ASCII-only: the INFO line printed when the hook injects
+    nothing contains an em dash. Capturing that with the locale default instead
+    (GBK on a zh-CN Windows) kills the reader thread, `proc.stdout` becomes
+    None, and every assertion in `test_e2e_verdict` then fails as
+    `TypeError: argument of type 'NoneType' is not iterable` -- a harness bug
+    wearing the costume of a probe failure.
+
+    Pins both halves of the contract: the capture produced a `str` at all, and
+    the non-ASCII text survived intact rather than being mangled by a lossy
+    decode. No sentinel is added to the verifier for this -- the em dash is
+    already there, and asserting on it keeps the test honest about what the
+    real output contains.
+    """
+    proc = _run_probe(tmp_path, "nostdin")
+
+    assert isinstance(proc.stdout, str), (
+        f"stdout was not captured as text: {proc.stdout!r} / "
+        f"stderr: {proc.stderr!r}")
+    assert "—" in proc.stdout, (
+        f"the verifier's non-ASCII output did not survive the capture:\n"
+        f"{proc.stdout}")
 
 
 # --- the probe must not regress to an exit-code-only check ------------------
