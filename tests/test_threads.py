@@ -229,6 +229,19 @@ def test_continue_repo_resolves_newest_thread(tmp_path, three_sessions,
     # deliberately different membership
     tid_b = store.thread_create(repo_root="E:/shared/repo", title="thread B")
     store.thread_attach(tid_b, "claude:d3")
+    # Pin the ordering instead of trusting the wall clock. Every call above
+    # stamps `threads.updated_at` from `time.time()` -- `thread_create` directly,
+    # `thread_attach` via `thread_touch` -- so if the whole six-call sequence
+    # lands inside one clock tick, all the stamps tie and the
+    # `max(cands, key=updated_at)` pick in `cli.py` falls back to list order,
+    # which is thread A. On a coarse clock this test then fails for a reason
+    # that has nothing to do with the rule it is named after. Two explicit
+    # values make the assertion about the rule, not about clock resolution.
+    store.con.execute("UPDATE threads SET updated_at=? WHERE id=?",
+                      (100.0, tid_a))
+    store.con.execute("UPDATE threads SET updated_at=? WHERE id=?",
+                      (200.0, tid_b))
+    store.con.commit()
     store.close()
 
     monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
