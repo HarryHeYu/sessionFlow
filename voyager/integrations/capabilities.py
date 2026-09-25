@@ -88,7 +88,16 @@ class ProviderCapabilities:
     project_instruction_supported: bool = False
     skill_system_supported: bool = False
     
-    # Integration protocols (platform capability)
+    # Integration protocols (platform capability).
+    #
+    # De facto contract, as every detector below implements it: *Voyager has a
+    # known, manageable MCP registration surface for this provider* -- a config
+    # file it can write into, or a CLI subcommand it can drive.  It is NOT "the
+    # provider can consume MCP servers": Grok loads five MCP servers and still
+    # reports False here, because Voyager has no Grok registration path
+    # (`PROVIDER_CONFIG["grok"]["mcp_config"] is None`).  The name reads the
+    # other way round; that is a known naming debt, and renaming the field would
+    # break every `to_dict()` consumer, so the contract is documented instead.
     mcp_supported: bool = False
     plugin_surface: bool = False
     extension_api: bool = False
@@ -319,7 +328,10 @@ def _detect_claude_capabilities(home: Path) -> ProviderCapabilities:
         mcp_supported=mcp_supported,
         has_session_start_hook=True,
         has_agent_spawn_hook=False,
-        native_session_id_at_start=False,
+        # The SessionStart payload carries `session_id`, and the hook stored it
+        # in the pending row (live-verified 2026-09-24).  This was hardcoded
+        # False from the pre-implementation investigation, like Grok's was.
+        native_session_id_at_start=True,
         session_file_creation_timing="after_first_turn",
         stdout_context_injection=True,
         max_zero_touch_level=max_level,

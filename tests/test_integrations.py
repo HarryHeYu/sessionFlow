@@ -591,6 +591,19 @@ class TestCapabilitySeparation:
         assert status.locally_configured is False
         assert status.live_verified is False
 
+    def test_claude_reports_the_native_session_id_at_start(self, tmp_path):
+        """Claude's `SessionStart` payload carries `session_id`.
+
+        Live-verified 2026-09-24: the hook received it and the pending row stored
+        it, which is what the identity-matched attach is built on.  The flag that
+        says the native id is known at start was hardcoded `False` from the
+        pre-implementation investigation -- the same stale hardcode Grok's had.
+        """
+        from voyager.integrations.capabilities import detect_capabilities
+
+        caps = detect_capabilities("claude", tmp_path)
+        assert caps.native_session_id_at_start is True
+
     def test_provider_capabilities_method_is_not_shadowed(self, tmp_path):
         """`capabilities()` must be reachable on every provider class.
 
@@ -677,6 +690,39 @@ class TestGrokCapabilityReporting:
         assert after["startup_status"] == "H"
         # Registering a hook is not live evidence, so it must never be `Y`.
         assert after["startup_status"] != "Y"
+
+
+class TestStartupLetterIsAboutTheHook:
+    """A stale artifact must not decide the startup letter.
+
+    `ClaudeIntegration.verify()` carries `legacy_wrapper_absent` among its
+    checks, and the letter used to read the bundled `verified` value.  A real
+    home with a leftover `~/.claude/voyager_session_start.sh` therefore read `A`
+    while the native hook was in fact registered.  The letter answers "is the
+    hook registered?", and the leftover still surfaces under `next_steps`.
+    """
+
+    def test_a_legacy_wrapper_does_not_downgrade_the_letter(self, tmp_path):
+        from voyager.integrations.claude import ClaudeIntegration
+        from voyager.skill import check_integration_status
+
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+
+        claude = ClaudeIntegration(home=home)
+        assert claude.install()["status"] == "installed"
+        assert check_integration_status(providers=["claude"], home=home)[0][
+            "startup_status"] == "H"
+
+        # Recreate what the previous mechanism left behind on this machine.
+        claude.legacy_wrapper.parent.mkdir(parents=True, exist_ok=True)
+        claude.legacy_wrapper.write_text("#!/bin/bash\n# legacy\n", encoding="utf-8")
+
+        entry = check_integration_status(providers=["claude"], home=home)[0]
+        assert entry["hook"]["registered"] is True
+        assert entry["startup_status"] == "H", (
+            "a leftover legacy wrapper is an installation-hygiene warning, not a "
+            "hook-registration fact")
 
 
 class TestIdempotency:

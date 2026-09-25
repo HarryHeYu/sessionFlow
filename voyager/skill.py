@@ -780,7 +780,18 @@ def check_integration_status(providers: Optional[List[str]] = None,
             from .integrations.claude import ClaudeIntegration
 
             hook_verify = ClaudeIntegration(home=home).verify()
-            status["hook"]["registered"] = bool(hook_verify["verified"])
+            checks = hook_verify.get("checks", {})
+            # The letter answers "is the native hook registered?" -- not "is the
+            # installation clean?".  `verify()["verified"]` bundles
+            # `legacy_wrapper_absent`, so a stale wrapper from the previous
+            # mechanism made a real home read `A` while the hook was in fact
+            # registered.  The wrapper still surfaces, under `next_steps`.
+            # Mirrors the Grok branch below.
+            status["hook"]["registered"] = bool(
+                checks.get("settings_file_exists")
+                and checks.get("entrypoint_exists")
+                and checks.get("voyager_entry_present")
+                and checks.get("command_uses_entrypoint"))
             status["hook"]["command"] = hook_verify.get("command")
         elif provider == "grok":
             from .integrations.grok import GrokIntegration
