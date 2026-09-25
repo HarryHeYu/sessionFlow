@@ -170,12 +170,12 @@ The `startup_continuity()` function correctly discovers WorkThreads, auto-attach
 |----------|-------|-----|-----------------------|----------------------------------------|
 | Claude   | Y     | R   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-24). `H` is a static capability reading, not live evidence |
 | Codex    | Y     | R   | `A` — startup-assisted | No native hook; needs an explicit call |
-| Grok CLI | Y     | N   | `N` — no mechanism    | Best effort                            |
+| Grok CLI | Y     | N   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-25). `H` is a static capability reading, not live evidence |
 | DSH      | Y     | N   | `N` — no mechanism    | Best effort                            |
 
 Legend: **Y** = installed, **R** = registered, **N** = unsupported, **A** = available/manual setup needed.
 
-Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered, **`A`** = startup-assisted, **`N`** = no hook. The letter is derived from **static capability and configuration only** — Voyager keeps no persisted live-evidence state, so the CLI cannot report a manual observation, and nothing prints `Y`. Claude Code's trigger *has* been observed live (2026-09-24) and it still reports `H`. Run `voyager integrate status` for the configuration answer on your machine.
+Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered, **`A`** = startup-assisted, **`N`** = no hook. The letter is derived from **static capability and configuration only** — Voyager keeps no persisted live-evidence state, so the CLI cannot report a manual observation, and nothing prints `Y`. Both Claude Code's trigger (2026-09-24) and Grok's (2026-09-25) *have* been observed live, and both still report `H`. Run `voyager integrate status` for the configuration answer on your machine.
 
 ### How Claude Code hooks work here
 

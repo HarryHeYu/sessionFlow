@@ -186,13 +186,13 @@ Mark each item as ✅ or ❌ after running:
 |----------|--------------|---------------|-------------------|-----------------|---------------|-------------|----------------------|-------------------|---------------------|
 | **Codex** | ✅ Via adapter | ✅ `codex resume` | ❌ No native hook surface → **`N`** | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **No auto at startup** | ✅ Implemented | **`N`** — first-turn/Skill guidance only |
 | **Claude Code** | ✅ Via adapter | ✅ `claude --resume` | ✅ Real native `SessionStart` hook written to `settings.json` → **`H`** | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Registered, firing not yet observed** | ⏳ Not yet implemented | **`H`** — registered; `Y` not claimed |
-| **Grok** | ✅ Via adapter | ✅ `grok -r` | ❌ No native hook → **`N`**; opt-in launcher shim | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **`N`** — launcher-shim path available |
+| **Grok** | ✅ Via adapter | ✅ `grok -r` | ✅ Real native `SessionStart` hook written to `~/.grok/hooks/` → **`H`** | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Registered; firing observed 2026-09-25** | ✅ Implemented | **`H`** — registered; `Y` not claimed |
 | **DSH** | ✅ Via adapter | ✅ `dsh --resume` | ❌ No native hook → **`N`**; launcher + session watcher | ✅ SKILL.md | ✅ voyager_context | ✅ pending resolution | **Best-effort** | ✅ Implemented | **`N`** — launcher path; real env not verified |
 | **ZCode** | ✅ Via SQLite | ❌ Desktop only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No tool | ❌ Manual attach | **No** | ❌ N/A | **Explicit-only** (manual paste required) |
 | **Cursor** | ✅ Via SQLite | ❌ IDE only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** (no CLI surface) |
 | **Kiro** | ✅ Via JSON | ❌ IDE only | ❌ No CLI → **`N`** | ❌ No SKILL.md | ❌ No resume | ❌ Manual attach | **No** | ❌ N/A | **Unsupported** (no CLI surface) |
 
-Only `claude` sets `has_startup_hook = True` in `PROVIDER_CONFIG`; every other provider returns `N` for the startup column because the platform has no hook surface to register into. `H` is deliberately *not* `Y`: the letter is computed from static capability and configuration, so it has no way to represent a live observation. The provider firing the trigger *has* now been observed (2026-09-24) — the letter simply cannot say so.
+`claude` and `grok` set `has_startup_hook = True` in `PROVIDER_CONFIG` and register a real native `SessionStart` hook; the other providers return `N` for the startup column because the platform has no hook surface to register into. `H` is deliberately *not* `Y`: the letter is computed from static capability and configuration, so it has no way to represent a live observation. Both providers' triggers *have* now been observed (2026-09-24 / 2026-09-25) — the letter simply cannot say so.
 
 ### Classification Criteria
 - **`Y` (zero-touch verified live)**: a human has observed the provider invoking Voyager at session start with no user command. **The observation now exists for Claude Code (2026-09-24), but nothing prints `Y` — see *Live verification*.**
@@ -306,11 +306,11 @@ WorkThread with no manual scan. `CONTEXT_INJECTION_LIVE_VERIFIED`,
 
 ## Summary
 
-- **Automated verified** — full dev extras: `377 collected → 375 passed, 2 skipped, 0 failed`; simulated core-only: `377 collected → 359 passed, 18 skipped, 0 failed`. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
+- **Automated verified** — current collection `379`. Sandbox gate, measured with the delete-guard shim dropped: `379 collected → 376 passed, 2 skipped, 1 deselected, 0 failed` (deselected: `tests/test_switch.py::test_switch_warns_on_dirty_repo`, an environment effect — see the changelog). Simulated core-only: `379 collected → 361 passed, 18 skipped, 0 failed`. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
 - **Real-provider runtime status** (as of 2026-09-25):
   * Claude Code = **`H`** (CLI letter) / **trigger live-verified** — a schema-valid native `SessionStart` hook is registered by the installer, and the provider **has been observed firing it** (2026-09-24). `SESSIONSTART_TRIGGER_LIVE_VERIFIED = true`. The letter stays `H` because the CLI has no persisted live-evidence state.
   * Codex = **`N`** — no native hook surface; first-turn/Skill guidance only
-  * Grok = **`N`** (CLI letter) / **zero-touch live-verified** — a native `SessionStart` hook records the pending attach with the `GROK_SESSION_ID` Grok provides, and `$GROK_HOME/rules/` carries the continuation context into an interactive session. The cross-provider acceptance ran on this path. The letter stays `N` for the same reason Claude's stays `H`: the status command derives it from static capability and configuration, and Voyager keeps no persisted live-evidence record.
+  * Grok = **`H`** (CLI letter) / **zero-touch live-verified** — a native `SessionStart` hook records the pending attach with the `GROK_SESSION_ID` Grok provides, and `$GROK_HOME/rules/` carries the continuation context into an interactive session. The cross-provider acceptance ran on this path. The letter is `H` for the same reason Claude's is: the status command derives it from static capability and configuration, and Voyager keeps no persisted live-evidence record.
   * DSH = **`N`** — launcher + session watcher; real environment not verified
 - **Provider-limited**: ZCode desktop, Cursor/Kiro IDE-only
 - **MCP registration**: Fully automated, no manual setup required

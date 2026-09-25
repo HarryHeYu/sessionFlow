@@ -154,12 +154,12 @@ Voyager 在同一个仓库里切换 Agent 时会自动接续工作：
 |----------|-------|-----|-----------------------|----------------------------------------|
 | Claude   | Y     | R   | `H` — hook 已注册      | 已安装原生 `SessionStart` hook；provider **已**在真机触发过（2026-09-24）。`H` 是静态能力读数，不代表 live 证据 |
 | Codex    | Y     | R   | `A` — 启动辅助         | 无原生 hook，需要显式调用               |
-| Grok CLI | Y     | N   | `N` — 无机制           | Best effort                            |
+| Grok CLI | Y     | N   | `H` — hook 已注册      | 已安装原生 `SessionStart` hook；provider **已**在真机触发过（2026-09-25）。`H` 是静态能力读数，不代表 live 证据 |
 | DSH      | Y     | N   | `N` — 无机制           | Best effort                            |
 
 Legend：**Y** = ready/installed，**R** = ready/auto-configured，**N** = unsupported。
 
-启动状态：**`Y`** = 零触达已真机验证，**`H`** = 原生 hook 已注册，**`A`** = 启动辅助，**`N`** = 无 hook。这个字母**只由静态能力与配置推导** —— Voyager 不保存任何持久化的 live 证据状态，所以 CLI 无法反映人工观测结果，也就没有任何 provider 会显示 `Y`。Claude Code 的触发**已**在真机观察到（2026-09-24），但它仍然显示 `H`。你机器上的配置情况，跑 `voyager integrate status` 即可。
+启动状态：**`Y`** = 零触达已真机验证，**`H`** = 原生 hook 已注册，**`A`** = 启动辅助，**`N`** = 无 hook。这个字母**只由静态能力与配置推导** —— Voyager 不保存任何持久化的 live 证据状态，所以 CLI 无法反映人工观测结果，也就没有任何 provider 会显示 `Y`。Claude Code 的触发（2026-09-24）与 Grok 的触发（2026-09-25）**都已**在真机观察到，但两者仍然显示 `H`。你机器上的配置情况，跑 `voyager integrate status` 即可。
 
 ### Claude Code hook 在这里怎么工作
 

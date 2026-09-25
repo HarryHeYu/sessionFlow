@@ -36,7 +36,7 @@ Legend: **R** = registered, **H** = native hook registered (live trigger unverif
 - ✅ Core functionality COMPLETE (discovery + attach + bundle compilation)
 - ✅ Claude hook **registered** — handler verified, schema verified, payload protocol verified
 - ❌ **Provider firing the hook is still unobserved** → `SESSIONSTART_TRIGGER_LIVE_VERIFIED = false`
-- 📊 Claude = **`H`**; every other provider = **`N`** (the letter is derived from static capability and configuration, not from live evidence — Grok's zero-touch path is separately live-verified). Zero-Touch Final Acceptance is **CLOSED (2026-09-25)**.
+- 📊 Claude = **`H`**, Grok CLI = **`H`** (both register a native `SessionStart` hook); Codex = **`A`**, DSH = **`N`** (no hook surface). The letter is derived from static capability and configuration, not from live evidence. Zero-Touch Final Acceptance is **CLOSED (2026-09-25)**.
 
 ## Test Scenario 1: Claude → Codex Continuity
 
