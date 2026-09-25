@@ -294,23 +294,32 @@ nothing prints `Y`. Making `Y` a product state means designing a persisted
 verification record deliberately — not having the CLI read
 `provider-hooks.jsonl` at runtime and treat a log as a database.
 
-**Zero-Touch Final Acceptance stays OPEN** — not for the trigger, which is now
-observed, but for `CONTEXT_INJECTION_LIVE_VERIFIED` and for the cross-provider
-leg (Claude → close → normal Grok launch). A proven native trigger on one
-provider is not yet invisible continuity *across* providers.
+**Zero-Touch Final Acceptance is CLOSED (2026-09-25).** The cross-provider leg
+ran live: a private sentinel written only in Claude was recovered by a normally
+launched Grok session, and that native Grok session attached itself to the same
+WorkThread with no manual scan. `CONTEXT_INJECTION_LIVE_VERIFIED`,
+`CROSS_PROVIDER_INVISIBLE_CONTINUITY` and `FULL_CONTINUITY_LIVE_VERIFIED` are all
+**true**. Session ids and the state-transition evidence are in
+[`grok_continuity_verdict.md`](../grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
 
 ---
 
 ## Summary
 
-- **Automated verified** — full dev extras: `374 collected → 372 passed, 2 skipped, 0 failed`; simulated core-only: `374 collected → 356 passed, 18 skipped, 0 failed`. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
-- **Real-provider runtime status** (as of 2026-09-24):
+- **Automated verified** — full dev extras: `377 collected → 375 passed, 2 skipped, 0 failed`; simulated core-only: `377 collected → 359 passed, 18 skipped, 0 failed`. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
+- **Real-provider runtime status** (as of 2026-09-25):
   * Claude Code = **`H`** (CLI letter) / **trigger live-verified** — a schema-valid native `SessionStart` hook is registered by the installer, and the provider **has been observed firing it** (2026-09-24). `SESSIONSTART_TRIGGER_LIVE_VERIFIED = true`. The letter stays `H` because the CLI has no persisted live-evidence state.
   * Codex = **`N`** — no native hook surface; first-turn/Skill guidance only
-  * Grok = **`N`** — no native hook; opt-in launcher shim is the available path
+  * Grok = **`N`** (CLI letter) / **zero-touch live-verified** — a native `SessionStart` hook records the pending attach with the `GROK_SESSION_ID` Grok provides, and `$GROK_HOME/rules/` carries the continuation context into an interactive session. The cross-provider acceptance ran on this path. The letter stays `N` for the same reason Claude's stays `H`: the status command derives it from static capability and configuration, and Voyager keeps no persisted live-evidence record.
   * DSH = **`N`** — launcher + session watcher; real environment not verified
 - **Provider-limited**: ZCode desktop, Cursor/Kiro IDE-only
 - **MCP registration**: Fully automated, no manual setup required
-- **Zero-Touch Final Acceptance: OPEN** — `CONTEXT_INJECTION_LIVE_VERIFIED` is unproven and no provider prints `Y`.
+- **Zero-Touch Final Acceptance: CLOSED / PASS (2026-09-25)** — `CONTEXT_INJECTION_LIVE_VERIFIED`, `CROSS_PROVIDER_INVISIBLE_CONTINUITY` and `FULL_CONTINUITY_LIVE_VERIFIED` are **true**. No provider prints `Y`: that letter would require a persisted live-evidence record, which Voyager deliberately does not keep.
 
-The product goal "user doesn't re-explain prior context when switching agents" is **achieved via explicit commands** (`voyager switch`) or MCP tool calls. Claude Code is now the one provider where the invisible auto-startup path is proven end to end: the hook is registered, the provider fires it, the transcript is discovered and indexed, the pending row resolves, and the native session attaches itself to the right WorkThread — all with no Voyager command. Two things still block Zero-Touch Final Acceptance: proving the model actually *uses* the injected context (`CONTEXT_INJECTION_LIVE_VERIFIED`), and repeating it across providers (Claude → close → normal Grok launch).
+The product goal "user doesn't re-explain prior context when switching agents" now
+holds **with no Voyager command at the handoff**: a private sentinel written only
+in the Claude WorkThread was recovered by a normally launched Grok session
+together with the prior task state, and that native Grok session attached itself
+to the same WorkThread without a manual scan. Session ids and the state-transition
+evidence are in
+[`grok_continuity_verdict.md`](../grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).

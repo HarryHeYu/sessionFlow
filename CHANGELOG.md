@@ -291,9 +291,14 @@ Recorded so the findings are not lost while implementation stays frozen.
 
 ### Notes
 - Test suite, full dev extras (`pip install -e ".[all,dev]"`):
-  `374 collected → 372 passed, 2 skipped, 0 failed`.
+  `377 collected → 375 passed, 2 skipped, 0 failed`. The +3 over the previous
+  `374` are the Grok zero-touch regression tests. In the agent's sandbox the same
+  run reports `374 passed, 2 skipped, 1 failed`: `test_switch_warns_on_dirty_repo`
+  fails there because `get_git_snapshot()`'s 2 s per-call budget sits below this
+  sandbox's ~1.4 s process-startup cost. It fails identically on a pristine
+  `HEAD` tree, so it is an environment effect, not a regression.
 - Test suite, simulated core-only (`python scripts/run_tests_core_only.py`):
-  `374 collected → 356 passed, 18 skipped, 0 failed`.
+  `377 collected → 359 passed, 18 skipped, 0 failed` (measured).
 - The two environments skip for different reasons, and the numbers are not
   interchangeable. The 2 full-dev skips are **data-dependent**:
   `tests/test_unicode_preservation.py` reads the default local index and skips
@@ -303,12 +308,23 @@ Recorded so the findings are not lost while implementation stays frozen.
 - `SESSIONSTART_TRIGGER_LIVE_VERIFIED` is now **true**, observed on 2026-09-24:
   the provider's own `session_id` reached the hook, the transcript was discovered
   and indexed, and the native session attached itself to WorkThread
-  `thr_0854d50b88` with no Voyager command. `CONTEXT_INJECTION_LIVE_VERIFIED`
-  stays **false** — nothing yet shows the model read and used the injected
-  context. Zero-Touch Final Acceptance remains **open**: it now needs that
-  sentinel proof plus the cross-provider leg (Claude → close → normal Grok
-  launch), not more code. The CLI still prints `H` for Claude, because no
-  persisted live-evidence state exists for it to read.
+  `thr_0854d50b88` with no Voyager command. The CLI still prints `H` for Claude,
+  because no persisted live-evidence state exists for it to read.
+- **Zero-Touch Final Acceptance is CLOSED (2026-09-25).** The cross-provider leg
+  ran live: a fresh private sentinel written only in Claude session
+  `6452817d-d82d-4c97-9507-e02bf3b3f1fd` was recovered by a normally launched
+  Grok session (`01a0d890-6803-7710-ab08-068c8420db1f`) together with the prior
+  task state, and that native session attached itself to the same WorkThread with
+  no manual scan. `CONTEXT_INJECTION_LIVE_VERIFIED`,
+  `CROSS_PROVIDER_INVISIBLE_CONTINUITY` and `FULL_CONTINUITY_LIVE_VERIFIED` are
+  all **true**. The Grok path is Grok's own two native surfaces — a
+  `SessionStart` hook that records the pending attach with `GROK_SESSION_ID`, and
+  `$GROK_HOME/rules/` for the continuation context — not the launcher shim, which
+  only takes effect when `~/.voyager/bin` precedes the real binary on `PATH`.
+  Session ids, the state-transition evidence, and the attribution caveat (that
+  "no manual scan ran" is an operator record rather than something the index can
+  prove) are in
+  [`grok_continuity_verdict.md`](grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
 
 ## [0.3.0] — 2026-09-19
 

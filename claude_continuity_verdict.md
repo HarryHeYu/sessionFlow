@@ -758,9 +758,16 @@ this document) for anything that must outlive the session.
 |---|---|---|
 | SUPPORTED | Provider surface exists | ✅ `SessionStart` in the event list; `m0("startup", …)`; hidden flag `--init-only` |
 | CONFIG_PRESENT | Config file exists and parses with the expected shape | ✅ `~/.claude/settings.json`, validated by the verifier |
-| CONFIG_LOADED | Claude Code read that config | ⏳ **UNVERIFIED** — would need a live run with `--debug hooks` |
+| CONFIG_LOADED | Claude Code read that config | ✅ 2026-09-24 — the provider loaded it and fired |
 | HANDLER_VERIFIED | Entrypoint produces a correct payload | ✅ protocol, size cap and exit codes validated; 19 unit tests |
-| HOOK_COMMAND_EXECUTABLE | The command works when invoked the way Claude invokes hooks | ✅ simulated via `shell=True` with a real payload on stdin — **a simulation, not a live run** |
-| SESSION_START_TRIGGER_LIVE_VERIFIED | Claude Code actually fires it | ⏳ one manual `claude --init-only` |
-| CONTEXT_INJECTION_LIVE_VERIFIED | Model sees the context on turn 1 | ⏳ follows from the above |
-| FULL_CONTINUITY_LIVE_VERIFIED | End-to-end chain | ⏳ follows from the above |
+| HOOK_COMMAND_EXECUTABLE | The command works when invoked the way Claude invokes hooks | ✅ invoked as Claude would, and by Claude itself |
+| SESSION_START_TRIGGER_LIVE_VERIFIED | Claude Code actually fires it | ✅ 2026-09-24, real native session |
+| CONTEXT_INJECTION_LIVE_VERIFIED | Model sees the context on turn 1 | ✅ 2026-09-25 — observed on the **Grok** leg (rules channel); see [`grok_continuity_verdict.md`](grok_continuity_verdict.md) |
+| CROSS_PROVIDER_INVISIBLE_CONTINUITY | Work done in one provider reaches the next with no handoff step | ✅ 2026-09-25 — Claude → normal `grok`, no Voyager command |
+| FULL_CONTINUITY_LIVE_VERIFIED | End-to-end chain | ✅ 2026-09-25 — same run; see [`grok_continuity_verdict.md`](grok_continuity_verdict.md) |
+
+The three live markers were closed by the cross-provider run recorded in
+[`grok_continuity_verdict.md`](grok_continuity_verdict.md#final-acceptance--closed-2026-09-25):
+a private sentinel written only in Claude was recovered by a normally-launched
+Grok session, whose native session id then attached itself to the same
+WorkThread with no manual scan.

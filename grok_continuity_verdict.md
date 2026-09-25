@@ -2,26 +2,128 @@
 
 ## Executive Summary
 
-**Status**: LAUNCH_PATH_LIVE_VERIFIED
+**Status**: CLOSED — `FULL_CONTINUITY_LIVE_VERIFIED` (2026-09-25, live)
 
-**Key Finding**: Voyager launcher wrapper successfully installed and tested. However, **full continuity chain remains unproven** due to:
-1. Insufficient test coverage (--help not equivalent to real conversation)
-2. No verification of actual prompt→session persistence lifecycle
-3. Unclear context injection mechanism (how does prelaunch output reach model?)
+**Why the assessment below changed.** It was written when the only surface was
+the opt-in launcher wrapper, and that wrapper never ran: it only takes effect
+when `~/.voyager/bin` precedes the real binary on `PATH`, which is not the
+default. Every "unproven" item was resolved by implementing Grok's two *native*
+surfaces instead of a wrapper — a `SessionStart` hook that records the pending
+attach with the `GROK_SESSION_ID` Grok hands it, and the `$GROK_HOME/rules/`
+file that carries the continuation context into an interactive session. The live
+acceptance is recorded in [Final Acceptance](#final-acceptance--closed-2026-09-25).
 
 ---
 
 ## Verification Level Matrix
 
 ```text
-SUPPORTED:                    yes (CLI exists at ~/.grok/bin/grok.EXE)
-CONFIGURED:                   yes (wrapper script deployed)
-UNIT_VERIFIED:                yes (helper/launch paths work)
-LAUNCHER_ZERO_TOUCH:          yes (opt-in wrapper strategy)
-LAUNCH_PATH_LIVE_VERIFIED:    yes (wrapper executes correctly)
-CONTEXT_INJECTION_LIVE_VERIFIED: NO - unknown channel
-SESSION_DISCOVERY_LIVE_VERIFIED: NO - session creation unverified
-FULL_CONTINUITY_LIVE_VERIFIED: NO
+SUPPORTED:                           yes (CLI at ~/.grok/bin/grok.exe)
+CONFIGURED:                          yes (native SessionStart hook + rules file)
+UNIT_VERIFIED:                       yes (tests/test_grok_native.py, mutation-verified)
+LAUNCHER_ZERO_TOUCH:                 yes (wrapper still installed; not required)
+LAUNCH_PATH_LIVE_VERIFIED:           yes (`grok inspect` lists the rules file)
+CONTEXT_INJECTION_LIVE_VERIFIED:     yes (2026-09-25 — see Final Acceptance)
+SESSION_DISCOVERY_LIVE_VERIFIED:     yes (2026-09-25)
+SESSION_ATTACH_LIVE_VERIFIED:        yes (2026-09-25)
+CROSS_PROVIDER_INVISIBLE_CONTINUITY: yes (2026-09-25)
+FULL_CONTINUITY_LIVE_VERIFIED:       yes (2026-09-25)
+```
+
+---
+
+## Final Acceptance — CLOSED (2026-09-25)
+
+A real cross-provider run: a fresh private sentinel was written **only** in the
+Claude WorkThread, then Grok was started normally — no Voyager command at the
+Grok launch, no context copied by hand, no `switch` / `handoff` / `continue`.
+
+The sentinel value is deliberately not recorded here; it was generated for this
+run alone and never written to the repository.
+
+### The chain
+
+```text
+Claude WorkThread thr_0854d50b88
+  → fresh private sentinel written in Claude session 6452817d-d82d-4c97-9507-e02bf3b3f1fd
+  → voyager scan                    (source preparation; the protocol allows this one)
+      ↳ grok continuation rule refreshed → ~/.grok/rules/voyager-continuation.md
+  → normal `grok`                   (no voyager command, no pasted context)
+  → Grok recovers the sentinel + prior task state                    ← A
+  → native Grok session 01a0d890-6803-7710-ab08-068c8420db1f
+  → attached to thr_0854d50b88 with no manual scan                   ← B
+```
+
+### A — context injection: PASS
+
+Grok reproduced the private sentinel — which had only ever existed inside the
+Claude session — together with the WorkThread (`thr_0854d50b88`), its title and
+goal, and an accurate description of the work in progress. The channel is the
+rules file, and Grok's own configuration report confirms it is loaded:
+
+```text
+$ grok inspect --json
+projectInstructions: {"path": "C:\\Users\\He_Yu_Hao\\.grok\\rules\\voyager-continuation.md",
+                      "scope": "global", "fileType": "rules",
+                      "sizeBytes": 94427, "approxTokens": 23606}
+projectTrusted: true
+```
+
+The same report lists the hook that records the pending attach:
+
+```text
+hooks: {"event": "session_start", "hookType": "command",
+        "target": "voyager-session-start.cmd",
+        "source": {"type": "user", "path": "C:\\Users\\He_Yu_Hao\\.grok\\hooks"}}
+```
+
+### B — automatic native attach: PASS
+
+State-transition evidence, re-read from `~/.voyager/index.db` after the run:
+
+| fact | value |
+|---|---|
+| pending row `(thr_0854d50b88, grok)` | `native_session_id = 01a0d890-6803-7710-ab08-068c8420db1f` |
+| pending `created_at` → `resolved_at` | 20:36:38 → 20:36:39 |
+| `resolved_sid` | `grok:01a0d890-6803-7710-ab08-068c8420db1f` |
+| thread membership | `grok:01a0d890-6803-7710-ab08-068c8420db1f` ∈ `thr_0854d50b88` |
+| indexed session | `repo_root=E:/code/voyager/`, `started_at` 20:35:37, 9 messages |
+
+The pending carried the native id, so the resolver matched it **by identity**
+rather than by the "exactly one candidate" heuristic, and the id in the pending
+is the same id that appears in the thread membership.
+
+**Attribution — what the data can and cannot carry.** The state transition above
+is database-verifiable. That no manual `voyager scan` / `switch` / `handoff` /
+`continue` ran between the Grok launch and the attach is an *operator record*,
+not something the index can prove. What the data does support is that the
+**timing is consistent with automatic resolution**: the watcher in use was
+started 20:26:36, so its cycles fall at ≈20:26:36 / ≈20:31:4x / ≈20:36:4x, and
+no Claude hook event is logged near 20:36:39 (`logs/provider-hooks.jsonl`), so
+the resolution lines up with a watcher cycle rather than a provider-triggered
+scan.
+
+### Environment the acceptance ran against
+
+```text
+hook     = 125686e   (fresh process per event, so always the on-disk code)
+watcher  = 125686e   (PID 39828, CreationDate 2026-09-25 20:26:36,
+                      "C:\Python314\pythonw.exe" -m voyager.cli watch --interval 300)
+resolver = 125686e
+rules    = 125686e
+```
+
+The watcher was restarted for this run precisely so that no 2026-09-21 process
+took part: an earlier watcher (PID 31556, started 2026-09-23 10:11) predated the
+implementation and would have made the attach evidence a mixed-version result.
+
+### Markers set by this run
+
+```text
+CONTEXT_INJECTION_LIVE_VERIFIED      = true
+CROSS_PROVIDER_INVISIBLE_CONTINUITY  = true
+FULL_CONTINUITY_LIVE_VERIFIED        = true
+Zero-Touch Final Acceptance          = CLOSED / PASS
 ```
 
 ---
@@ -188,7 +290,13 @@ No major technical debt discovered during Grok testing. Existing integration cod
 
 ## Recommended Classification Path
 
-### Current State: LAUNCH_PATH_LIVE_VERIFIED
+> **Superseded (2026-09-25).** This section was written when the launcher wrapper
+> was the only surface. The elevation it lists as "required" has since been
+> reached through Grok's native surfaces — see
+> [Final Acceptance](#final-acceptance--closed-2026-09-25). Kept as the record of
+> what was believed at the time.
+
+### Current state at the time of writing: LAUNCH_PATH_LIVE_VERIFIED
 
 Good foundation: wrapper exists, hook fires, prelaunch works.
 
