@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -368,11 +369,13 @@ def test_install_and_status_agree_on_startup_status(tmp_path):
         )
 
 
-def test_startup_status_letters_match_the_legend(tmp_path):
+def test_startup_status_letters_match_the_legend(tmp_path, monkeypatch):
     """Pin the legend so a refactor cannot silently reshuffle it.
 
-    `H` is reserved for a registered native hook; a provider with no hook surface
-    must never report `H`.  Only Claude Code currently has such a surface.
+    `H` is reserved for a registered native hook; a provider with no hook
+    surface must never report `H`, and nothing reports `Y` because no provider
+    has a persisted live-evidence record.  Claude Code and Grok CLI both
+    register a native `SessionStart` hook today.
     """
     from voyager.skill import (
         PROVIDER_CONFIG,
@@ -384,6 +387,17 @@ def test_startup_status_letters_match_the_legend(tmp_path):
     for provider in PROVIDER_CONFIG:
         (home / f".{provider}").mkdir(parents=True, exist_ok=True)
 
+    # Grok's installer only writes its native hook once the real binary
+    # resolves, so point `which` at a stand-in: the letter must not depend on
+    # this machine happening to have Grok installed.
+    real_which = shutil.which
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name, *args, **kwargs: (
+            "/opt/grok/bin/grok" if name == "grok"
+            else real_which(name, *args, **kwargs)),
+    )
+
     seen = {}
     for provider in PROVIDER_CONFIG:
         install_integration(provider, force=True, home=home)
@@ -393,13 +407,15 @@ def test_startup_status_letters_match_the_legend(tmp_path):
         }[provider]
         seen[provider] = entry["startup_status"]
 
-    # Claude Code registers a real hook, so it reports `H` -- never `Y`, because
+    # Both register a real native hook, so both report `H` -- never `Y`, because
     # nothing has observed the provider firing it.
-    assert seen["claude"] == "H"
+    for provider in ("claude", "grok"):
+        assert seen[provider] == "H", (provider, seen[provider])
     # No hook surface => cannot be `H` or `Y`.
-    for provider in ("grok", "dsh"):
-        assert seen[provider] == "N", (provider, seen[provider])
+    assert seen["dsh"] == "N", seen["dsh"]
     assert seen["codex"] in {"A", "N"}, seen["codex"]
+    # `Y` needs a persisted live-evidence record; nothing may report it yet.
+    assert "Y" not in seen.values(), seen
 
 
 def test_install_threads_home_into_mcp_detection(tmp_path, monkeypatch):

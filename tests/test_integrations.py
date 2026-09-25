@@ -616,6 +616,69 @@ class TestCapabilitySeparation:
             assert profile.provider, cls.__name__
 
 
+class TestGrokCapabilityReporting:
+    """Grok's reported capability has to match what was observed live.
+
+    Live-verified 2026-09-25: Grok's native `SessionStart` hook fired, the
+    environment carried `GROK_SESSION_ID`, and the pending row stored that
+    identity.  The flags below were hardcoded from the pre-implementation
+    investigation and had been contradicting that evidence.
+
+    `mcp_supported` is deliberately **not** flipped: its contract (a native MCP
+    surface vs. loading a compatibility layer vs. Voyager managing its own
+    server) is unresolved, so it stays `False` until that is settled.  It is
+    pinned here only so a later change has to be deliberate.
+    """
+
+    def test_capability_flags_match_the_live_evidence(self, tmp_path):
+        from voyager.integrations.capabilities import (
+            ZeroTouchLevel, detect_capabilities,
+        )
+        from voyager.skill import PROVIDER_CONFIG
+
+        caps = detect_capabilities("grok", tmp_path)
+        assert caps.has_session_start_hook is True
+        assert caps.native_session_id_at_start is True
+        assert caps.max_zero_touch_level is ZeroTouchLevel.SESSION_START_ZERO_TOUCH
+        # unresolved contract -- unchanged on purpose
+        assert caps.mcp_supported is False
+        # The second capability table (`skill.PROVIDER_CONFIG`) is not read by
+        # any code today, but it must not contradict the detector again.
+        assert PROVIDER_CONFIG["grok"]["has_startup_hook"] is True
+
+    def test_installed_native_hook_reports_h_not_y(self, tmp_path, monkeypatch):
+        import shutil
+
+        from voyager.skill import check_integration_status, install_integration
+
+        home = tmp_path / "home"
+        (home / ".grok").mkdir(parents=True)
+
+        # Grok's installer needs the real binary to resolve; the letter must not
+        # depend on this machine having Grok installed.
+        real_which = shutil.which
+        monkeypatch.setattr(
+            "shutil.which",
+            lambda name, *args, **kwargs: (
+                "/opt/grok/bin/grok" if name == "grok"
+                else real_which(name, *args, **kwargs)),
+        )
+
+        # With no hook on disk the pre-existing rule still applies.
+        before = check_integration_status(providers=["grok"], home=home)[0]
+        assert before["hook"]["registered"] is False
+        assert before["startup_status"] == "N"
+
+        installed = install_integration("grok", force=True, home=home)
+        assert installed["hook"]["status"] == "installed"
+
+        after = check_integration_status(providers=["grok"], home=home)[0]
+        assert after["hook"]["registered"] is True
+        assert after["startup_status"] == "H"
+        # Registering a hook is not live evidence, so it must never be `Y`.
+        assert after["startup_status"] != "Y"
+
+
 class TestIdempotency:
     """Test install/remove idempotency."""
     

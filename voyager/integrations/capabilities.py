@@ -336,10 +336,11 @@ def _detect_grok_capabilities(home: Path) -> ProviderCapabilities:
     - Provides CLI: grok -r for resume
     - Skill system (~/.grok/skills/)
     - NO confirmed MCP support
-    - NO native session-start hook
-    - Could use launcher shim strategy
+    - HAS a native session-start hook (~/.grok/hooks/*.json)
+    - Hands the hook its native session id in the environment
     
-    Key: Grok CLI is shell-friendly, good candidate for opt-in wrapper.
+    Key: Grok's own lifecycle hook is the zero-touch surface; the launcher shim
+    is only needed for the pre-launch context write.
     """
     # Check executable
     exe = shutil.which("grok")
@@ -352,15 +353,26 @@ def _detect_grok_capabilities(home: Path) -> ProviderCapabilities:
     # Grok does NOT have MCP support (per current investigation)
     mcp_supported = False
     
-    # Grok does NOT have native hooks
-    has_session_start_hook = False
+    # Native `SessionStart` hook, live-verified 2026-09-25: the hook fired, and
+    # `GROK_SESSION_ID` was present in its environment.  This was previously
+    # hardcoded False from the pre-implementation investigation, the same stale
+    # hardcode that had already been removed for Claude.
+    has_session_start_hook = True
     
-    # Best approach: launcher shim via opt-in installation
-    max_level = ZeroTouchLevel.LAUNCHER_ZERO_TOUCH if cli_launcher else ZeroTouchLevel.STARTUP_ASSISTED
+    # SessionStart is where that id arrives, so it is known at start.
+    native_session_id_at_start = True
+    
+    # Ceiling is the platform surface, not this machine's binary: mirror the
+    # Claude detector's shape rather than keying the level off `cli_launcher`.
+    max_level = (
+        ZeroTouchLevel.SESSION_START_ZERO_TOUCH if has_session_start_hook
+        else (ZeroTouchLevel.LAUNCHER_ZERO_TOUCH if cli_launcher
+              else ZeroTouchLevel.STARTUP_ASSISTED)
+    )
     notes = [
-        "Opt-in launcher wrapper recommended",
+        "Native SessionStart hook installed by `voyager integrate install`",
         "Resume via 'grok -r' supported",
-        "Skill guidance available but no native hook",
+        "Launcher shim still writes the pre-launch continuation rule",
     ]
     
     return ProviderCapabilities(
@@ -371,7 +383,7 @@ def _detect_grok_capabilities(home: Path) -> ProviderCapabilities:
         skill_system_supported=skill_system_supported,
         mcp_supported=mcp_supported,
         has_session_start_hook=has_session_start_hook,
-        native_session_id_at_start=False,
+        native_session_id_at_start=native_session_id_at_start,
         session_file_creation_timing="unknown",
         max_zero_touch_level=max_level,
         notes=notes,

@@ -50,7 +50,9 @@ PROVIDER_CONFIG = {
         "name": "Grok CLI",
         "skill_enabled": True,
         "mcp_enabled": False,
-        "has_startup_hook": False,
+        # Grok has a native SessionStart hook (live-verified 2026-09-25); this
+        # flag was False only because the hook had not been implemented yet.
+        "has_startup_hook": True,
         "config_file": None,
         "mcp_config": None,
     },
@@ -519,6 +521,21 @@ def install_integration(provider: str, force: bool = False,
                 "native SessionStart hook not installed: "
                 + str(hook_result.get("message") or hook_result.get("status"))
             )
+    elif provider == "grok":
+        # Grok's native SessionStart hook is what records the pending attach, so
+        # registering it is the same class of step as Claude's -- and the reason
+        # Grok stops reporting `N`.  `install()` also writes the launcher shim,
+        # which needs the real binary on PATH; both install and status key off
+        # the hook files, so they cannot disagree about the letter.
+        from .integrations.grok import GrokIntegration
+
+        hook_result = GrokIntegration(home=home).install()
+        result["hook"] = hook_result
+        if hook_result.get("status") != "installed":
+            result.setdefault("warnings", []).append(
+                "native SessionStart hook not installed: "
+                + str(hook_result.get("message") or hook_result.get("status"))
+            )
 
     # Step 3: Generate startup instructions
     bootstrap_funcs = {
@@ -757,7 +774,7 @@ def check_integration_status(providers: Optional[List[str]] = None,
                 status["bootstrap"]["available"] = True
                 status["bootstrap"]["status"] = "instructions_generated"
         
-        # Native lifecycle hook registration (Claude Code only, so far).
+        # Native lifecycle hook registration (Claude Code and Grok CLI).
         status["hook"] = {"registered": False, "command": None}
         if provider == "claude":
             from .integrations.claude import ClaudeIntegration
@@ -765,6 +782,16 @@ def check_integration_status(providers: Optional[List[str]] = None,
             hook_verify = ClaudeIntegration(home=home).verify()
             status["hook"]["registered"] = bool(hook_verify["verified"])
             status["hook"]["command"] = hook_verify.get("command")
+        elif provider == "grok":
+            from .integrations.grok import GrokIntegration
+
+            gi = GrokIntegration(home=home)
+            checks = gi.verify().get("checks", {})
+            # The letter is about the native hook, not the launcher shim: the
+            # shim needs the real binary on PATH, the hook does not.
+            status["hook"]["registered"] = bool(
+                checks.get("hook_installed") and checks.get("hook_script"))
+            status["hook"]["command"] = str(gi.hook_cmd)
 
         # Determine startup_status based on platform capabilities
         if status["hook"]["registered"]:
