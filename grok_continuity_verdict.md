@@ -41,6 +41,21 @@ Grok launch, no context copied by hand, no `switch` / `handoff` / `continue`.
 The sentinel value is deliberately not recorded here; it was generated for this
 run alone and never written to the repository.
 
+### Evidence classes
+
+Each claim below is labelled with what can actually reproduce it:
+
+```text
+Part 1  B's state transition   database/index — independently reproducible
+Part 2  attribution            operator action provenance + timing
+Part 3A context injection      operator-provided Grok transcript
+Part 3B native attach          Part 1 + Part 2
+```
+
+Only Part 1 is reproducible from the machine. Part 3A rests on the transcript the
+operator saved and provided — stronger than an in-the-moment report, but not
+something the index can re-derive.
+
 ### The chain
 
 ```text
@@ -56,10 +71,11 @@ Claude WorkThread thr_0854d50b88
 
 ### A — context injection: PASS
 
-Grok reproduced the private sentinel — which had only ever existed inside the
-Claude session — together with the WorkThread (`thr_0854d50b88`), its title and
-goal, and an accurate description of the work in progress. The channel is the
-rules file, and Grok's own configuration report confirms it is loaded:
+A is supported by the **operator-provided Grok transcript**: Grok reproduced the
+private sentinel — which had only ever existed inside the Claude session —
+together with the WorkThread (`thr_0854d50b88`), its title and goal, and an
+accurate description of the work in progress. The channel is the rules file, and
+Grok's own configuration report confirms it is loaded:
 
 ```text
 $ grok inspect --json
