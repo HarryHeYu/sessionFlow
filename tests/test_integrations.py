@@ -604,6 +604,12 @@ class TestCapabilitySeparation:
         caps = detect_capabilities("claude", tmp_path)
         assert caps.native_session_id_at_start is True
 
+        # The mirror-image temptation, pinned so it is not "fixed" the same way:
+        # `hook_invoked` must NOT become True just because a live firing was
+        # observed.  Nothing persists live-evidence state, so this detector
+        # cannot report history as present state.
+        assert caps.hook_invoked is False
+
     def test_provider_capabilities_method_is_not_shadowed(self, tmp_path):
         """`capabilities()` must be reachable on every provider class.
 

@@ -126,6 +126,11 @@ class ProviderCapabilities:
     # Current installation state (separate from platform capability)
     installed: bool = False
     config_valid: bool = False
+    # Whether this detector can *currently* see the provider firing its hook --
+    # not "has it ever fired".  Live invocation has been observed (Claude
+    # 2026-09-24, Grok 2026-09-25), but nothing persists live-evidence state, so
+    # this stays False rather than reporting history as present state.  Wiring it
+    # to a real observation needs a persisted record, not a hardcode.
     hook_invoked: bool = False
     
     notes: List[str] = field(default_factory=list)
@@ -316,7 +321,8 @@ def _detect_claude_capabilities(home: Path) -> ProviderCapabilities:
         ("Voyager hook registered in ~/.claude/settings.json"
          if hook_registered else
          "No Voyager hook registered - run `voyager integrate install claude`"),
-        "Claude Code firing the trigger has NOT been observed yet",
+        "Hook installation is detectable here; historical live invocation is not "
+        "persisted by this detector",
     ]
 
     return ProviderCapabilities(
