@@ -290,10 +290,12 @@ Recorded so the findings are not lost while implementation stays frozen.
   Priority to be set after live acceptance; no production change now.
 
 ### Notes
-- Test suite, current collection: `379` — five Grok tests added across the two
-  follow-ups (`374` before).
+- Test suite, current collection: `381` — seven tests added across the follow-ups
+  (`374` before): three for Grok's zero-touch chain, one pinning `run_scan`
+  re-entrancy, two for Grok's reported capability, and one for Claude's stale
+  `native_session_id_at_start`.
 - Sandbox gate, measured here with the delete-guard shim dropped:
-  `379 collected → 376 passed, 2 skipped, 1 deselected, 0 failed`. The deselected
+  `381 collected → 378 passed, 2 skipped, 1 deselected, 0 failed`. The deselected
   node is `tests/test_switch.py::test_switch_warns_on_dirty_repo`; it fails in
   this sandbox because `get_git_snapshot()`'s 2 s per-call budget sits below the
   ~1.4 s process-startup cost here, and it fails identically on a pristine `HEAD`
@@ -301,7 +303,7 @@ Recorded so the findings are not lost while implementation stays frozen.
   pass/skip figure for a normal machine is **not** claimed here — that needs a
   local `python -m pytest tests\ -q`.
 - Simulated core-only (`python scripts/run_tests_core_only.py`):
-  `379 collected → 361 passed, 18 skipped, 0 failed` (measured).
+  `381 collected → 363 passed, 18 skipped, 0 failed` (measured).
 - The two environments skip for different reasons, and the numbers are not
   interchangeable. The 2 full-dev skips are **data-dependent**:
   `tests/test_unicode_preservation.py` reads the default local index and skips
