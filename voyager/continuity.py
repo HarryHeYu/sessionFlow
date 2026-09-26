@@ -21,8 +21,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .store import Store
+from .model import text_of
 from .ranker import extract_candidate_facts, rank_candidates
+from .store import Store
 
 PROMPT_TARGETS = {
     "claude": "claude",
@@ -122,10 +123,11 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
 #   L1  recent working set       canonical event order + hard budget
 #   L2  historical evidence      searchable, not injected by default
 #
-# Only L0-core exists so far.  L0-core is a *projection* of fields the
-# WorkThread already owns: nothing here reads session prose and nothing infers
-# meaning.  That is the point -- a thread's goal must not be overwritten by
-# whatever the newest session happens to be doing.
+# L0-core and the L1 primitive now exist; neither is wired into an automatic
+# writer yet.  L0-core is a *projection* of fields the WorkThread already
+# owns: nothing here reads session prose and nothing infers meaning.  That is
+# the point -- a thread's goal must not be overwritten by whatever the newest
+# session happens to be doing.
 
 #: Bumped whenever the L0 block's shape changes.  It is meant to be part of the
 #: context cache key, so a cached block is never served under a different format.
@@ -222,6 +224,155 @@ def build_thread_state(
             max_field_chars),
     ]
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# L1 -- bounded active working context
+# ---------------------------------------------------------------------------
+#
+# L1 is the newest contiguous window of *complete turns* over the canonical
+# event order, under a hard byte budget.  Canonical order is structural, never
+# chronological: sessions appear in the order the caller passes them (the
+# thread's own attach order), and events within a session appear in store
+# order (``ORDER BY seq, id``).  Timestamps are never consulted for selection
+# -- a provider with broken clocks must not be able to move what "newest"
+# means.
+#
+# A turn starts at every ``user`` event and runs to the next one; the leading
+# non-user events of a session form that session's first turn, and turns never
+# span sessions.  Packing walks backward (newest turn first) and stops at the
+# first turn that does not fit whole -- older turns are L2 material,
+# retrievable via show/search/bundle, never silently rewritten.  One
+# exception: when the newest turn alone exceeds the budget, its older events
+# are dropped behind an explicit marker (its tail -- the newest evidence --
+# is what survives) and the document still stays under the budget.
+
+#: Shown in place of the dropped head when the newest turn alone exceeds the
+#: budget.  An explicit marker, never a silent cut.
+L1_TRUNCATION_MARKER = (
+    "[L1: older events of the newest turn dropped to fit the byte budget]")
+
+
+def _utf8_len(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def _utf8_tail(text: str, limit: int) -> str:
+    """The largest suffix of ``text`` fitting ``limit`` UTF-8 bytes.
+
+    Never starts the kept chunk inside a multibyte character, so the same
+    input always clips at the same character.
+    """
+    raw = text.encode("utf-8")
+    if len(raw) <= limit:
+        return text
+    chunk = raw[len(raw) - limit:]
+    i = 0
+    while i < len(chunk) and (chunk[i] & 0xC0) == 0x80:
+        i += 1
+    return chunk[i:].decode("utf-8", "replace")
+
+
+def _l1_event_line(ev: Any, provider: str, native_id: str) -> str:
+    """One provenance-bound line; empty when the event carries no evidence."""
+    body = text_of(ev["content"]) or (ev["command"] or "")
+    body = body.strip()
+    if not body:
+        return ""
+    seq = ev["seq"] if ev["seq"] is not None else "-"
+    return "[{0}:{1} #{2}] {3}: {4}".format(
+        provider, native_id, seq, ev["kind"], body)
+
+
+def _l1_turn_texts(store: Store, session_rows: List[Any]) -> List[str]:
+    """Serialize every turn, oldest first, over the canonical event order."""
+    turns: List[str] = []
+    for row in session_rows:
+        provider, native = row["provider"], row["native_id"]
+        current: List[str] = []
+        for ev in store.events(row["id"]):    # canonical: ORDER BY seq, id
+            if ev["kind"] == "user" and current:
+                turns.append("\n".join(current))
+                current = []
+            line = _l1_event_line(ev, provider, native)
+            if line:
+                current.append(line)
+        if current:
+            turns.append("\n".join(current))
+    return turns
+
+
+def _l1_header(hard_max: int) -> str:
+    """Fixed banner whose every byte is known before any packing happens, so
+    the budget splits exactly between header and payload."""
+    return "\n".join([
+        "[L1 Active Working Context]",
+        "selection: newest-first over canonical event order (sessions in the "
+        "order given, events by seq then id), complete turns only",
+        "budget: %d bytes hard; when the newest turn alone exceeds it, older "
+        "events of that turn are dropped with a marker" % hard_max,
+        "",
+    ])
+
+
+def build_working_context(
+    store: Store,
+    session_rows: Any,
+    *,
+    hard_max: int,
+) -> str:
+    """Bounded L1: the newest complete turns under a hard byte budget.
+
+    Read-only and offline: the store is only queried, never written; no git,
+    no cache, no LLM.  The same store state and the same ``session_rows``
+    order always produce byte-identical output.
+
+    Deterministic contracts (pinned by tests, no importance scoring):
+
+    - selection order is the canonical event order -- sessions in the order
+      given, events by ``seq, id``; timestamps never decide what is newest;
+    - the packing unit is a complete turn; a turn that does not fit whole is
+      dropped entirely (older turns are L2 material, not partially inlined);
+    - ``hard_max`` is a hard UTF-8 byte bound on the whole document;
+    - priority is recency only -- newest turns first;
+    - when the newest turn alone exceeds the budget, its older events are
+      dropped with ``L1_TRUNCATION_MARKER`` and its tail -- the newest
+      evidence -- survives.
+
+    ``hard_max`` below the fixed header size raises ``ValueError``: there is
+    no honest way to honor the bound and keep the banner.
+    """
+    header = _l1_header(hard_max)
+    header_len = _utf8_len(header)
+    if hard_max < header_len:
+        raise ValueError(
+            "hard_max %d is smaller than the fixed L1 header (%d bytes)"
+            % (hard_max, header_len))
+
+    turns = _l1_turn_texts(store, list(session_rows or ()))
+    room = hard_max - header_len          # bytes left for the payload
+
+    packed: List[str] = []
+    used = 0
+    for turn in reversed(turns):          # newest first: recency is the only priority
+        cost = _utf8_len(turn) + (2 if packed else 0)   # "\n\n" between turns
+        if used + cost > room:
+            break             # first whole turn that does not fit ends the window
+        packed.append(turn)
+        used += cost
+
+    if packed:
+        payload = "\n\n".join(reversed(packed))   # chronological presentation
+    elif turns:
+        # The newest turn alone busts the budget: keep its tail (the newest
+        # evidence), drop its head behind the explicit marker.
+        avail = room - _utf8_len(L1_TRUNCATION_MARKER) - 1
+        payload = (L1_TRUNCATION_MARKER + "\n" + _utf8_tail(turns[-1], avail)
+                   if avail > 0 else "")
+    else:
+        payload = ""
+
+    return header + payload
 
 
 def build_continuation_bundle(
@@ -489,8 +640,8 @@ def build_tiered_bundle(
 
     This is a composition layer, not a second implementation: the payload comes
     from `build_continuation_bundle()` unchanged, so there is no session, event,
-    git or budget formatting here to drift away from the flat builder while L1 is
-    still being designed.
+    git or budget formatting here to drift away from the flat builder until L1
+    is wired into this composition.
 
     Step B does not shrink anything yet.  It exists to pin the format marker, the
     composition boundary and -- with `CONTEXT_FORMAT_TIERED` in the cache key --
