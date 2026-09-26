@@ -306,7 +306,7 @@ WorkThread with no manual scan. `CONTEXT_INJECTION_LIVE_VERIFIED`,
 
 ## Summary
 
-- **Automated verified** — current collection `386`. Sandbox gate, measured with the delete-guard shim dropped: `386 collected → 383 passed, 2 skipped, 1 deselected, 0 failed` (deselected: `tests/test_switch.py::test_switch_warns_on_dirty_repo`, an environment effect — see the changelog). Simulated core-only: last measured at collection `381` → `363 passed, 18 skipped, 0 failed`; the five L0 tests are core-only-safe, so a re-measurement at `386` is pending. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
+- **Automated verified** — current collection `386`. Sandbox gate, measured with the delete-guard shim dropped: `386 collected → 383 passed, 2 skipped, 1 deselected, 0 failed` (deselected: `tests/test_switch.py::test_switch_warns_on_dirty_repo`, an environment effect — see the changelog). Simulated core-only: `386 collected → 368 passed, 18 skipped, 0 failed`. The 2 full-dev skips are data-dependent reads of the default local index; core-only adds 16 dependency-gated skips (`mcp` / `zstandard` / `PIL`).
 - **Real-provider runtime status** (as of 2026-09-25):
   * Claude Code = **`H`** (CLI letter) / **trigger live-verified** — a schema-valid native `SessionStart` hook is registered by the installer, and the provider **has been observed firing it** (2026-09-24). `SESSIONSTART_TRIGGER_LIVE_VERIFIED = true`. The letter stays `H` because the CLI has no persisted live-evidence state.
   * Codex = **`N`** — no native hook surface; first-turn/Skill guidance only

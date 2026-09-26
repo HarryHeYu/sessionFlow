@@ -302,9 +302,8 @@ Recorded so the findings are not lost while implementation stays frozen.
   tree, so it is an environment effect rather than a regression. A full-dev
   pass/skip figure for a normal machine is **not** claimed here — that needs a
   local `python -m pytest tests\ -q`.
-- Simulated core-only (`python scripts/run_tests_core_only.py`): last measured at
-  collection `381` → `363 passed, 18 skipped, 0 failed`. The five L0 tests are
-  core-only-safe, so a re-measurement at `386` is pending.
+- Simulated core-only (`python scripts/run_tests_core_only.py`):
+  `386 collected → 368 passed, 18 skipped, 0 failed` (measured).
 - The two environments skip for different reasons, and the numbers are not
   interchangeable. The 2 full-dev skips are **data-dependent**:
   `tests/test_unicode_preservation.py` reads the default local index and skips
