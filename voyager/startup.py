@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .adapters.base import git_info
+from .continuity import CONTEXT_FORMAT_FLAT
 from .store import Store
 
 
@@ -492,12 +493,22 @@ CONTEXT_CACHE_PREFIX = "ctx_cache:"
 CONTEXT_TTL_SECONDS = 300  # 5 minutes
 
 
-def _context_cache_key(tid: str, provider: str, budget: str) -> str:
-    return f"{CONTEXT_CACHE_PREFIX}{tid}:{provider}:{budget}"
+def _context_cache_key(tid: str, provider: str, budget: str,
+                       context_format: str = CONTEXT_FORMAT_FLAT) -> str:
+    """Cache identity for a compiled bundle.
+
+    `context_format` belongs in the key, not beside it: a flat bundle and a
+    tiered one are different documents for the same thread/provider/budget, and
+    serving either for the other would be a silent aliasing bug.  It is
+    defaulted to `flat` so existing callers keep today's behaviour until the
+    writers are migrated deliberately; adding the dimension does mean the rows
+    written before it are misses once, which just rebuilds them.
+    """
+    return f"{CONTEXT_CACHE_PREFIX}{tid}:{provider}:{budget}:{context_format}"
 
 
-def _load_context_cache(store: Store, tid: str, provider: str,
-                        budget: str) -> Dict[str, Any]:
+def _load_context_cache(store: Store, tid: str, provider: str, budget: str,
+                        context_format: str = CONTEXT_FORMAT_FLAT) -> Dict[str, Any]:
     """Load a cached continuation bundle.
 
     Returns {"compiled_at": float, "context": str | None}. Anything malformed,
@@ -512,7 +523,8 @@ def _load_context_cache(store: Store, tid: str, provider: str,
     """
     miss = {"compiled_at": 0.0, "context": None}
     try:
-        raw = store.meta_get(_context_cache_key(tid, provider, budget))
+        raw = store.meta_get(
+            _context_cache_key(tid, provider, budget, context_format))
         if not raw:
             return miss
         payload = json.loads(raw)
@@ -539,7 +551,8 @@ def _load_context_cache(store: Store, tid: str, provider: str,
 
 
 def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
-                        context: str, compiled_at: float) -> bool:
+                        context: str, compiled_at: float,
+                        context_format: str = CONTEXT_FORMAT_FLAT) -> bool:
     """Persist a compiled bundle. Returns False if it could not be stored.
 
     Never raises. `ensure_ascii=True` is deliberate: session text can contain a
@@ -551,7 +564,7 @@ def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
     """
     try:
         return bool(store.meta_set(
-            _context_cache_key(tid, provider, budget),
+            _context_cache_key(tid, provider, budget, context_format),
             json.dumps({"compiled_at": compiled_at, "budget": budget,
                         "context": context}, ensure_ascii=True),
         ))

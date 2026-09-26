@@ -131,6 +131,13 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
 #: context cache key, so a cached block is never served under a different format.
 CONTEXT_FORMAT_VERSION = 1
 
+#: Format identifiers for the context cache identity.  ``flat`` is the existing
+#: continuation bundle; ``tiered-v1`` is L0 composed with that bundle as a
+#: compatibility payload.  They are different documents for the same
+#: thread/provider/budget, so they must never share a cache entry.
+CONTEXT_FORMAT_FLAT = "flat"
+CONTEXT_FORMAT_TIERED = "tiered-v1"
+
 #: Per-field cap for L0.  A pathologically long explicit value is truncated with
 #: an explicit marker; it is never summarised into something that reads better,
 #: because an explicit field's authority outranks any heuristic rewrite.
@@ -466,6 +473,41 @@ def build_continuation_bundle(
     L.append("")
 
     return "\n".join(L)
+
+
+def build_tiered_bundle(
+    store: Store,
+    thread: Any,
+    members: Any = (),
+    session_rows: Optional[List[Any]] = None,
+    *,
+    goal: Optional[str] = None,
+    live_git: bool = True,
+    max_field_chars: int = L0_FIELD_MAX_CHARS,
+) -> str:
+    """Compose L0 with the existing flat bundle as the compatibility payload.
+
+    This is a composition layer, not a second implementation: the payload comes
+    from `build_continuation_bundle()` unchanged, so there is no session, event,
+    git or budget formatting here to drift away from the flat builder while L1 is
+    still being designed.
+
+    Step B does not shrink anything yet.  It exists to pin the format marker, the
+    composition boundary and -- with `CONTEXT_FORMAT_TIERED` in the cache key --
+    the fact that a tiered document and a flat one are not interchangeable.
+    """
+    payload = build_continuation_bundle(
+        store, session_rows or [], goal=goal, live_git=live_git)
+    return "\n".join([
+        "format: %s" % CONTEXT_FORMAT_TIERED,
+        "",
+        "[L0 Thread State]",
+        build_thread_state(
+            thread, members, max_field_chars=max_field_chars).rstrip("\n"),
+        "",
+        "[L1 Compatibility Payload]",
+        payload,
+    ])
 
 
 def default_bundle_name(session_rows: List[Any]) -> str:

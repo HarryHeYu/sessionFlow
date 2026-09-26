@@ -11,11 +11,13 @@ import pytest
 
 from voyager.cli import main
 from voyager.continuity import (
+    CONTEXT_FORMAT_TIERED,
     CONTEXT_FORMAT_VERSION,
     CONTINUATION_INSTRUCTION,
     PROMPT_TARGETS,
     build_continuation_bundle,
     build_thread_state,
+    build_tiered_bundle,
     bundle_command,
     default_bundle_name,
     get_bundles_dir,
@@ -356,3 +358,71 @@ class TestL0ThreadState:
         assert [dict(m) for m in store.thread_member_sessions(tid)] == \
             members_before
         assert store.stats() == stats_before
+
+
+# --- Step B: tiered bundle skeleton ----------------------------------------
+
+class TestTieredBundleSkeleton:
+    """Step B pins the format and the composition boundary. Nothing shrinks yet.
+
+    The payload is the flat builder's own output rather than a re-implementation,
+    so there is no second set of session/event/git/budget formatting to drift
+    away while L1 is still being designed.
+    """
+
+    def _fixture(self, tmp_path):
+        store = Store(tmp_path / "tiered.db")
+        tid = store.thread_create(repo_root=str(tmp_path),
+                                  title="Continuity Engine build-out",
+                                  goal="complete the roadmap")
+        src = tmp_path / "s.jsonl"
+        src.write_text("{}", encoding="utf-8")
+        session = new_session(
+            id="claude:tb", provider="claude", native_session_id="tb",
+            title="Session tb", started_at=10.0, updated_at=20.0,
+            repo_root=str(tmp_path), cwd=str(tmp_path))
+        store.replace_session(
+            session,
+            [new_event(sid="claude:tb", seq=1, kind="user", ts=10.0,
+                       content="Ship the tiered bundle skeleton."),
+             new_event(sid="claude:tb", seq=2, kind="tool_call", ts=15.0,
+                       tool_name="shell", command="pytest -q",
+                       file_path="voyager/continuity.py"),
+             new_event(sid="claude:tb", seq=3, kind="error", ts=16.0,
+                       content="boom: TypeError")],
+            "claude", src)
+        store.thread_attach(tid, "claude:tb")
+        return (store, store.thread_get(tid), store.thread_member_sessions(tid),
+                [dict(r) for r in store.sessions()])
+
+    def test_marker_and_authoritative_l0(self, tmp_path):
+        store, thread, members, rows = self._fixture(tmp_path)
+        out = build_tiered_bundle(store, thread, members, rows, live_git=False)
+        assert out.startswith("format: %s\n" % CONTEXT_FORMAT_TIERED)
+        assert "[L0 Thread State]" in out
+        assert "goal: complete the roadmap" in out
+        assert "context_format_version: %d" % CONTEXT_FORMAT_VERSION in out
+        assert "[L1 Compatibility Payload]" in out
+
+    def test_payload_is_byte_identical_to_the_flat_builder(self, tmp_path):
+        store, thread, members, rows = self._fixture(tmp_path)
+        out = build_tiered_bundle(store, thread, members, rows, live_git=False)
+        payload = out.split("[L1 Compatibility Payload]\n", 1)[1]
+        assert payload == build_continuation_bundle(store, rows, live_git=False)
+        # ...and it still carries the evidence the flat bundle carried
+        assert "pytest -q" in payload
+        assert "boom: TypeError" in payload
+
+    def test_same_input_is_byte_identical(self, tmp_path):
+        store, thread, members, rows = self._fixture(tmp_path)
+        assert (build_tiered_bundle(store, thread, members, rows, live_git=False)
+                == build_tiered_bundle(store, thread, members, rows,
+                                       live_git=False))
+
+    def test_tiered_build_does_not_mutate_state(self, tmp_path):
+        store, thread, members, rows = self._fixture(tmp_path)
+        stats_before = store.stats()
+        thread_before = dict(store.thread_get(thread["id"]))
+        build_tiered_bundle(store, thread, members, rows, live_git=False)
+        assert store.stats() == stats_before
+        assert dict(store.thread_get(thread["id"])) == thread_before

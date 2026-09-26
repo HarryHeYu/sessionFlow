@@ -30,6 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from voyager.continuity import (  # noqa: E402
+    CONTEXT_FORMAT_FLAT,
+    CONTEXT_FORMAT_TIERED,
+)
 from voyager.store import Store  # noqa: E402
 from voyager.startup import (  # noqa: E402
     CONTEXT_TTL_SECONDS,
@@ -555,3 +559,53 @@ class TestNoPhantomCacheAttribute(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestCacheFormatIsolation(CacheCase):
+    """The cache identity carries the context format (Phase C / Step B).
+
+    A flat bundle and a tiered one are different documents for the same
+    thread/provider/budget. If the format were not in the key, whichever was
+    compiled first would be served for the other -- silently, and with nothing
+    in the output to say it was the wrong shape.
+    """
+
+    def test_keys_differ_by_format(self):
+        assert _context_cache_key("thr_x", PROVIDER, BUDGET,
+                                  CONTEXT_FORMAT_FLAT) != \
+            _context_cache_key("thr_x", PROVIDER, BUDGET, CONTEXT_FORMAT_TIERED)
+
+    def test_flat_entry_is_not_served_for_a_tiered_request(self):
+        _save_context_cache(self.store, "thr_x", PROVIDER, BUDGET, "FLAT BODY",
+                            123.0, context_format=CONTEXT_FORMAT_FLAT)
+        assert _load_context_cache(self.store, "thr_x", PROVIDER, BUDGET,
+                                   CONTEXT_FORMAT_FLAT)["context"] == "FLAT BODY"
+        assert _load_context_cache(self.store, "thr_x", PROVIDER, BUDGET,
+                                   CONTEXT_FORMAT_TIERED)["context"] is None
+
+    def test_tiered_entry_is_not_served_for_a_flat_request(self):
+        _save_context_cache(self.store, "thr_x", PROVIDER, BUDGET, "TIERED BODY",
+                            124.0, context_format=CONTEXT_FORMAT_TIERED)
+        assert _load_context_cache(self.store, "thr_x", PROVIDER, BUDGET,
+                                   CONTEXT_FORMAT_TIERED)["context"] == \
+            "TIERED BODY"
+        assert _load_context_cache(self.store, "thr_x", PROVIDER, BUDGET,
+                                   CONTEXT_FORMAT_FLAT)["context"] is None
+
+    def test_both_formats_coexist_for_the_same_thread(self):
+        _save_context_cache(self.store, "thr_x", PROVIDER, BUDGET, "FLAT BODY",
+                            123.0, context_format=CONTEXT_FORMAT_FLAT)
+        _save_context_cache(self.store, "thr_x", PROVIDER, BUDGET, "TIERED BODY",
+                            124.0, context_format=CONTEXT_FORMAT_TIERED)
+        assert _load_context_cache(self.store, "thr_x", PROVIDER, BUDGET,
+                                   CONTEXT_FORMAT_FLAT)["context"] == "FLAT BODY"
+        assert _load_context_cache(self.store, "thr_x", PROVIDER, BUDGET,
+                                   CONTEXT_FORMAT_TIERED)["context"] == \
+            "TIERED BODY"
+
+    def test_the_default_stays_flat(self):
+        """Existing callers pass no format and must keep today's behaviour."""
+        _save_context_cache(self.store, "thr_x", PROVIDER, BUDGET,
+                            "DEFAULT BODY", 125.0)
+        assert _load_context_cache(self.store, "thr_x", PROVIDER, BUDGET)[
+            "context"] == "DEFAULT BODY"
