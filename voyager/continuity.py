@@ -112,6 +112,111 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
     return snapshot
 
 
+# ---------------------------------------------------------------------------
+# L0 -- authoritative WorkThread state
+# ---------------------------------------------------------------------------
+#
+# The tiered context model splits what a continuation carries:
+#
+#   L0  canonical thread state   small, stable, authoritative
+#   L1  recent working set       canonical event order + hard budget
+#   L2  historical evidence      searchable, not injected by default
+#
+# Only L0-core exists so far.  L0-core is a *projection* of fields the
+# WorkThread already owns: nothing here reads session prose and nothing infers
+# meaning.  That is the point -- a thread's goal must not be overwritten by
+# whatever the newest session happens to be doing.
+
+#: Bumped whenever the L0 block's shape changes.  It is meant to be part of the
+#: context cache key, so a cached block is never served under a different format.
+CONTEXT_FORMAT_VERSION = 1
+
+#: Per-field cap for L0.  A pathologically long explicit value is truncated with
+#: an explicit marker; it is never summarised into something that reads better,
+#: because an explicit field's authority outranks any heuristic rewrite.
+L0_FIELD_MAX_CHARS = 500
+L0_TRUNCATION_MARKER = "...[truncated]"
+L0_UNKNOWN = "unknown"
+
+
+def _l0_get(row: Any, key: str) -> Any:
+    """Read a field from a mapping or a ``sqlite3.Row``; missing -> ``None``."""
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _l0_field(value: Any, max_chars: int) -> str:
+    """One deterministic line: whitespace-normalised, bounded, never summarised."""
+    if value is None:
+        return L0_UNKNOWN
+    text = " ".join(str(value).split())
+    if not text:
+        return L0_UNKNOWN
+    if max_chars > 0 and len(text) > max_chars:
+        keep = max(0, max_chars - len(L0_TRUNCATION_MARKER))
+        text = text[:keep] + L0_TRUNCATION_MARKER
+    return text
+
+
+def _l0_latest_member(members: List[Any]) -> Optional[Any]:
+    """Newest member by a total order, so the pick never depends on input order."""
+    latest = None
+    latest_key: Optional[Tuple[Any, Any, str]] = None
+    for member in members:
+        key = (
+            _l0_get(member, "updated_at") or 0,
+            _l0_get(member, "started_at") or 0,
+            str(_l0_get(member, "id") or ""),
+        )
+        if latest_key is None or key > latest_key:
+            latest, latest_key = member, key
+    return latest
+
+
+def build_thread_state(
+    thread: Any,
+    members: Any = (),
+    *,
+    max_field_chars: int = L0_FIELD_MAX_CHARS,
+) -> str:
+    """Project a WorkThread's canonical state into a bounded L0 block.
+
+    Pure and offline: no store, no scan, no git, no cache, no mutation of the
+    arguments.  The same inputs always produce byte-identical output.
+
+    ``id`` / ``title`` / ``goal`` / ``status`` are the WorkThread's own fields,
+    copied verbatim (whitespace-normalised, and truncated with an explicit
+    marker if pathologically long).  They are deliberately *not* derived from
+    session text: a thread whose goal is "complete the roadmap" must keep that
+    goal while the newest session works on "fix a test count".
+
+    ``members`` / ``latest_session_*`` are mechanical counts and lookups over
+    the attached sessions.  A missing value reads ``unknown`` rather than being
+    inferred from whatever prose happens to be nearby.
+    """
+    member_list = list(members)
+    latest = _l0_latest_member(member_list)
+
+    lines = [
+        "[WorkThread]",
+        "context_format_version: %d" % CONTEXT_FORMAT_VERSION,
+        "id: %s" % _l0_field(_l0_get(thread, "id"), max_field_chars),
+        "title: %s" % _l0_field(_l0_get(thread, "title"), max_field_chars),
+        "goal: %s" % _l0_field(_l0_get(thread, "goal"), max_field_chars),
+        "status: %s" % _l0_field(_l0_get(thread, "status"), max_field_chars),
+        "members: %d" % len(member_list),
+        "latest_session_provider: %s" % _l0_field(
+            _l0_get(latest, "provider") if latest is not None else None,
+            max_field_chars),
+        "latest_session_id: %s" % _l0_field(
+            _l0_get(latest, "id") if latest is not None else None,
+            max_field_chars),
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def build_continuation_bundle(
     store: Store,
     session_rows: List[Any],

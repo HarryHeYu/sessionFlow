@@ -11,9 +11,11 @@ import pytest
 
 from voyager.cli import main
 from voyager.continuity import (
+    CONTEXT_FORMAT_VERSION,
     CONTINUATION_INSTRUCTION,
     PROMPT_TARGETS,
     build_continuation_bundle,
+    build_thread_state,
     bundle_command,
     default_bundle_name,
     get_bundles_dir,
@@ -245,3 +247,112 @@ def test_phase1b_scan_is_idempotent(tmp_path, monkeypatch):
         rc = main(["--db", str(db), "scan"])
     assert rc == 0
     assert "0 new/refreshed" in buf.getvalue()
+
+
+# --- L0: authoritative WorkThread state (Phase C / Step A) ------------------
+
+L0_MARKER = "...[truncated]"
+
+
+def _l0_thread(**over):
+    row = {
+        "id": "thr_l0test",
+        "repo_root": "E:/code/repo",
+        "title": "Continuity Engine build-out",
+        "goal": "complete the roadmap",
+        "status": "active",
+        "created_at": 1.0,
+        "updated_at": 2.0,
+    }
+    row.update(over)
+    return row
+
+
+def _l0_member(sid, provider, ts):
+    return {"id": sid, "provider": provider, "started_at": ts, "updated_at": ts}
+
+
+def _l0_line(out, name):
+    return [ln for ln in out.splitlines() if ln.startswith(name + ": ")][0]
+
+
+class TestL0ThreadState:
+    """L0-core projects the WorkThread's own fields; it does not read sessions.
+
+    The tier split exists so that a session's temporary task cannot overwrite the
+    thread's actual goal, which is why that negative case is the first test.
+    """
+
+    def test_goal_survives_a_session_working_on_something_else(self):
+        out = build_thread_state(
+            _l0_thread(), [_l0_member("claude:aaa", "claude", 10.0)])
+        assert _l0_line(out, "goal") == "goal: complete the roadmap"
+        # Nothing session-derived may become the authority for `goal`.
+        assert "fix test count" not in out
+        assert out.count("goal:") == 1
+
+    def test_missing_field_reads_unknown_and_is_never_inferred(self):
+        assert _l0_line(build_thread_state(_l0_thread(goal=None), ()),
+                        "goal") == "goal: unknown"
+        assert _l0_line(build_thread_state(_l0_thread(goal="   "), ()),
+                        "goal") == "goal: unknown"
+        # An absent member list is reported mechanically, not guessed at.
+        out = build_thread_state(_l0_thread(), ())
+        assert _l0_line(out, "members") == "members: 0"
+        assert _l0_line(out, "latest_session_id") == "latest_session_id: unknown"
+
+    def test_long_field_is_truncated_with_an_explicit_marker(self):
+        goal = "x" * 5000
+        line = _l0_line(
+            build_thread_state(_l0_thread(goal=goal), (), max_field_chars=100),
+            "goal")
+        assert line.endswith(L0_MARKER)
+        assert len(line) == len("goal: ") + 100
+        # deterministic: the same over-long value clips to the same thing
+        assert line == _l0_line(
+            build_thread_state(_l0_thread(goal=goal), (), max_field_chars=100),
+            "goal")
+
+    def test_same_input_is_byte_identical_regardless_of_member_order(self):
+        members = [_l0_member("claude:bbb", "claude", 30.0),
+                   _l0_member("grok:ccc", "grok", 20.0)]
+        first = build_thread_state(_l0_thread(), members)
+        assert first == build_thread_state(_l0_thread(), members)
+        assert first == build_thread_state(_l0_thread(), list(reversed(members)))
+        assert _l0_line(first, "latest_session_id") == \
+            "latest_session_id: claude:bbb"
+        assert _l0_line(first, "latest_session_provider") == \
+            "latest_session_provider: claude"
+        assert first.startswith(
+            "[WorkThread]\ncontext_format_version: %d\n" % CONTEXT_FORMAT_VERSION)
+
+    def test_build_does_not_mutate_its_inputs(self, tmp_path):
+        db = tmp_path / "l0.db"
+        store = Store(db)
+        tid = store.thread_create(repo_root=str(tmp_path), title="t", goal="g")
+        src = tmp_path / "s.jsonl"
+        src.write_text("{}", encoding="utf-8")
+        session = new_session(
+            id="claude:l0", provider="claude", native_session_id="l0", title="s",
+            started_at=10.0, updated_at=20.0,
+            repo_root=str(tmp_path), cwd=str(tmp_path))
+        store.replace_session(
+            session,
+            [new_event(sid="claude:l0", seq=1, kind="user", ts=10.0,
+                       content="hello")],
+            "claude", src)
+        store.thread_attach(tid, "claude:l0")
+
+        thread_row = store.thread_get(tid)
+        members = store.thread_member_sessions(tid)
+        thread_before = dict(thread_row)
+        members_before = [dict(m) for m in members]
+        stats_before = store.stats()
+
+        out = build_thread_state(thread_row, members)
+
+        assert "goal: g" in out
+        assert dict(store.thread_get(tid)) == thread_before
+        assert [dict(m) for m in store.thread_member_sessions(tid)] == \
+            members_before
+        assert store.stats() == stats_before
