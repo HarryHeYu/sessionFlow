@@ -32,13 +32,15 @@ from typing import Any, Dict, Optional
 try:
     from voyager.store import Store
     from voyager.startup import startup_continuity
+    from voyager.continuity import CONTEXT_FORMAT_TIERED
 except ImportError:
     # Running as standalone module, parent is voyager dir
     import os
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    
+
     from voyager.store import Store
     from voyager.startup import startup_continuity
+    from voyager.continuity import CONTEXT_FORMAT_TIERED
 
 
 # Hook traces are the only way to tell "the hook never ran" apart from "the hook
@@ -156,7 +158,7 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
     Returns:
         {
             "status": "context_ready" | "no_thread" | "error",
-            "context": str,      # Continuation bundle markdown (optional if success)
+            "context": str,      # tiered-v1 continuation context (optional if success)
             "thread": {          # WorkThread info (optional)
                 "id": str,
                 "title": str,
@@ -201,14 +203,16 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
         
         # Use unified startup continuity primitive - pass native session_id for auto-attach
         # Budget is tunable because this hook runs on every session start and
-        # blocks it. `auto` compiles a ~79 KB bundle in ~13 s; `compact` is
-        # noticeably faster. Override with VOYAGER_CLAUDE_HOOK_BUDGET.
+        # blocks it. Since Step G2 the document is tiered-v1 (~16 KB: L0 +
+        # Runtime State + retrieval hint + bounded L1), so `auto` is cheap
+        # again; override with VOYAGER_CLAUDE_HOOK_BUDGET if ever needed.
         result = startup_continuity(
             provider="claude",
             cwd=cwd,
             native_session_id=session_id,  # Pass Claude's native session ID
             auto_attach=True,  # Try to auto-attach via SessionStart
             budget=os.environ.get("VOYAGER_CLAUDE_HOOK_BUDGET", "auto"),
+            context_format=CONTEXT_FORMAT_TIERED,
         )
         
         _log_debug("claude", "startup_continuity_result",

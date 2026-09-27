@@ -693,5 +693,125 @@ def test_native_start_pending_does_not_resolve_to_a_different_session(
     store.close()
 
 
+# ---------------------------------------------------------------------------
+# tiered-v1 transport (Step G2)
+# ---------------------------------------------------------------------------
+
+class TestTieredTransport(HookTestCase):
+    """The hook serves the tiered-v1 document, and the transport contract
+    (the 9000-UTF-16-unit head plus the spill file) must keep the
+    authoritative sections on the model-visible side of the cut."""
+
+    def _world(self, big: bool):
+        """Isolated store + real git repo + seeded WorkThread; the hook's
+        startup_continuity is wrapped so it compiles against this store while
+        everything else (compile chain, envelope, cap, spill) stays real."""
+        os.environ["VOYAGER_NO_SYNC"] = "1"
+        self.addCleanup(os.environ.pop, "VOYAGER_NO_SYNC", None)
+        log_dir = Path(self._tmp.name) / "logs"
+        os.environ["VOYAGER_LOG_DIR"] = str(log_dir)
+        self.addCleanup(os.environ.pop, "VOYAGER_LOG_DIR", None)
+
+        from voyager.model import new_event, new_session
+        from voyager.store import Store
+
+        repo = Path(self._tmp.name) / "workrepo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)],
+                       capture_output=True, timeout=30)
+
+        store = Store(Path(self._tmp.name) / "hook.db")
+        self.addCleanup(store.close)
+        self.store = store
+        tid = store.thread_create(repo_root=str(repo), title="tiered transport",
+                                  goal="continue across agents")
+        self.tid = tid
+        src = Path(self._tmp.name) / "s.jsonl"
+        src.write_text("{}", encoding="utf-8")
+        sess = new_session(id="codex:seed", provider="codex",
+                           native_session_id="seed", title="seeded",
+                           started_at=1.0, updated_at=2.0,
+                           repo_root=str(repo), cwd=str(repo))
+        store.replace_session(
+            sess,
+            [new_event(sid="codex:seed", seq=1, kind="user", ts=1.0,
+                       content="what we are doing"),
+             new_event(sid="codex:seed", seq=2, kind="assistant", ts=2.0,
+                       content="T" * 20000 if big else "short working state")],
+            "codex", src)
+        store.thread_attach(tid, "codex:seed")
+
+        real = hook.startup_continuity
+
+        def with_store(**kwargs):
+            kwargs["store"] = store
+            return real(**kwargs)
+
+        hook.startup_continuity = with_store
+        self.addCleanup(setattr, hook, "startup_continuity", real)
+        return str(repo)
+
+    def _run_hook(self, repo):
+        payload = json.dumps({"session_id": "sess-transport", "cwd": repo})
+        with mock.patch.object(sys, "stdin", io.StringIO(payload)):
+            return hook.handle_claude_session_start()
+
+    def _emit(self, result):
+        code, out, _ = self._capture(
+            lambda: hook.emit_claude_hook_output(result))
+        self.assertEqual(code, 0)
+        return json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+    def test_short_tiered_context_is_injected_whole(self):
+        repo = self._world(big=False)
+        result = self._run_hook(repo)
+        self.assertEqual(result["status"], "context_ready", result.get("message"))
+        ctx = result["context"]
+        self.assertIn("format: tiered-v1", ctx)
+        for section in ("[WorkThread]", "[Runtime State]",
+                        "[Historical Evidence]", "[L1 Active Working Context]"):
+            self.assertIn(section, ctx)
+        self.assertNotIn("# Continuation Bundle", ctx)
+        # under the cap: the model receives the document whole, no spill
+        emitted = self._emit(result)
+        self.assertEqual(emitted, ctx)
+        self.assertNotIn("Continuation bundle truncated", emitted)
+        self.assertFalse(list(self.spill_dir.glob("claude-sessionstart-*"))
+                         if self.spill_dir.exists() else False)
+
+    def test_long_tiered_context_keeps_head_and_spills_tail(self):
+        repo = self._world(big=True)
+        result = self._run_hook(repo)
+        self.assertEqual(result["status"], "context_ready", result.get("message"))
+        full = result["context"]
+        self.assertGreater(hook._payload_len(full), 9000)
+        emitted = self._emit(result)
+        # the cap engaged and said so
+        self.assertIn("Continuation bundle truncated", emitted)
+        self.assertIn("Full bundle: ", emitted)
+        # everything authoritative survives the head cut
+        for marker in ("format: tiered-v1", "[L0 Thread State]",
+                       "[Runtime State]", "[Historical Evidence]",
+                       "retrieve with:", "[L1 Active Working Context]"):
+            self.assertIn(marker, emitted)
+        # the spill file carries the overflow: the complete document
+        spill = Path(emitted.split("Full bundle: ", 1)[1].split("\n", 1)[0])
+        self.assertTrue(spill.is_file(), emitted)
+        self.assertEqual(spill.read_text(encoding="utf-8"), full)
+
+    def test_transport_migration_leaves_the_attach_chain_untouched(self):
+        repo = self._world(big=False)
+        result = self._run_hook(repo)
+        # the hook session is unknown to the index, so it went the pending
+        # route -- exactly as before G2; the format change touches nothing here
+        self.assertEqual(result["attach_status"], "pending_resolve")
+        rows = self.store.pending_open(thread_id=self.tid)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["provider"], "claude")
+        self.assertEqual(rows[0]["native_session_id"], "sess-transport")
+        self.assertEqual(result["continuity_info"]["context_source"],
+                         "fresh_compile")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
