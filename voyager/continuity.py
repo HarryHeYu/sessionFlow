@@ -134,10 +134,10 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
 CONTEXT_FORMAT_VERSION = 1
 
 #: Format identifiers for the context cache identity.  ``flat`` is the existing
-#: continuation bundle; ``tiered-v1`` is L0 composed with a bounded L1
-#: (``build_working_context``) plus an L2 pointer.  They are different
-#: documents for the same thread/provider/budget, so they must never share a
-#: cache entry.
+#: continuation bundle; ``tiered-v1`` is L0 + a bounded live Runtime State
+#: section + a retrieval hint + a bounded L1 (``build_working_context``).
+#: They are different documents for the same thread/provider/budget, so they
+#: must never share a cache entry.
 CONTEXT_FORMAT_FLAT = "flat"
 CONTEXT_FORMAT_TIERED = "tiered-v1"
 
@@ -278,14 +278,29 @@ def _utf8_tail(text: str, limit: int) -> str:
 
 
 def _l1_event_line(ev: Any, provider: str, native_id: str) -> str:
-    """One provenance-bound line; empty when the event carries no evidence."""
+    """Provenance-bound lines; empty when the event carries no evidence.
+
+    Structured metadata renders as indented field lines under the event:
+    ``file_path`` (which file the event touched) and ``exit_code`` (whether
+    the command succeeded).  Both are plain facts, not heuristics.  stdout,
+    stderr and diff are deliberately not rendered -- they are unbounded free
+    text, and the byte budget is the only cap a transcript needs.
+    """
     body = text_of(ev["content"]) or (ev["command"] or "")
     body = body.strip()
-    if not body:
+    file_path = ev["file_path"]
+    exit_code = ev["exit_code"]
+    if not body and file_path is None and exit_code is None:
         return ""
     seq = ev["seq"] if ev["seq"] is not None else "-"
-    return "[{0}:{1} #{2}] {3}: {4}".format(
-        provider, native_id, seq, ev["kind"], body)
+    lines = ["[{0}:{1} #{2}] {3}:".format(provider, native_id, seq, ev["kind"])]
+    if body:
+        lines[0] += " " + body
+    if file_path is not None:
+        lines.append("  file_path: {0}".format(file_path))
+    if exit_code is not None:
+        lines.append("  exit_code: {0}".format(exit_code))
+    return "\n".join(lines)
 
 
 def _l1_turn_texts(store: Store, session_rows: List[Any]) -> List[str]:
@@ -316,6 +331,30 @@ def _l1_header(hard_max: int) -> str:
         "complete turns only",
         "budget: %d bytes hard; when the newest turn alone exceeds it, older "
         "events of that turn are dropped with a marker" % hard_max,
+        "",
+    ])
+
+
+def _runtime_state(repo_hint: Optional[str], max_field_chars: int) -> str:
+    """Bounded live machine state at compile time.
+
+    Deliberately outside L0/L1/L2: nothing here comes from session history.
+    A missing or failed git probe degrades to ``unknown`` -- a runtime probe
+    must never be able to fail the continuation -- and the same snapshot
+    always renders byte-identically.  The dirty *count* is included, the
+    dirty file list is not: the count already says "not a clean tree".
+    """
+    if repo_hint:
+        snap = get_git_snapshot(repo_hint)
+    else:
+        snap = {"is_git": False, "branch": "", "commit": "", "dirty_count": 0}
+    return "\n".join([
+        "[Runtime State]",
+        "repository: %s" % _l0_field(repo_hint, max_field_chars),
+        "branch: %s" % _l0_field(snap["branch"], max_field_chars),
+        "HEAD: %s" % _l0_field(snap["commit"], max_field_chars),
+        "dirty: %s" % ("%d file(s)" % snap["dirty_count"]
+                       if snap["is_git"] else "unknown"),
         "",
     ])
 
@@ -641,21 +680,30 @@ def build_tiered_bundle(
     max_field_chars: int = L0_FIELD_MAX_CHARS,
     l1_hard_max: int = L1_DEFAULT_HARD_MAX_BYTES,
 ) -> str:
-    """Compose tiered-v1: authoritative L0 + bounded L1 + an L2 pointer.
+    """Compose tiered-v1: L0 + Runtime State + retrieval hint + bounded L1.
 
-    tiered-v1 = L0 + L1 (+ pointer).  The L1 primitive is trusted for event
-    selection, but the *session order* is established here, at the composition
-    boundary, so production correctness never depends on the caller remembering
-    to sort: ``session_rows`` are ordered by the WorkThread's own membership
-    order (``thread_sessions.ord``), and events within a session stay in store
-    order (``seq, id``).  Rows that are not thread members keep their given
-    order after the members.  Timestamps are never consulted for ordering.
+    tiered-v1 = authoritative L0, a bounded live Runtime State section, ONE
+    authoritative retrieval hint, and the bounded L1 working window.
 
-    Boundedness: L0 is field-capped, the L1 section is under ``l1_hard_max``
-    bytes, and the L2 pointer is a few fixed lines -- older evidence stays
-    retrievable (show / search / a flat bundle), never silently gone.  There
-    is deliberately no live-git section and no goal-ranked evidence here:
-    selection is recency-only, and the thread's goal lives in L0.
+    The *session order* is established here, at the composition boundary, so
+    production correctness never depends on the caller remembering to sort:
+    the composition layer establishes canonical session order from
+    ``thread_sessions.ord`` (via ``store.thread_member_ids``), and events
+    within a session stay in store order (``seq, id``).  Rows that are not
+    thread members keep their given order after the members.  Timestamps are
+    never consulted for ordering.
+
+    Section order is a graceful-degradation contract, not cosmetics: the
+    document leads with everything a head-truncating surface (the Claude
+    SessionStart hook keeps the first 9000 UTF-16 code units and spills the
+    rest) must not lose -- L0, Runtime State and the retrieval hint -- and
+    only then spends bytes on the L1 transcript window.  The hint appears
+    exactly once; it is never duplicated at the tail.
+
+    Boundedness: L0 is field-capped, Runtime State is a fixed five-line
+    section, the hint is two fixed lines, and the L1 section is under
+    ``l1_hard_max`` bytes.  A failed or missing git probe reads ``unknown``
+    and the document still compiles.
     """
     rows = list(session_rows or ())
     rank = {sid: i
@@ -663,27 +711,33 @@ def build_tiered_bundle(
     rows.sort(key=lambda r: rank.get(r["id"], len(rank)))
 
     l0 = build_thread_state(thread, members, max_field_chars=max_field_chars)
-    l1 = build_working_context(store, rows, hard_max=l1_hard_max)
+    latest = _l0_latest_member(list(members))
+    repo_hint = (_l0_get(thread, "repo_root")
+                 or (_l0_get(latest, "repo_root") or _l0_get(latest, "cwd")
+                     if latest is not None else None))
+    runtime = _runtime_state(repo_hint, max_field_chars)
     event_count = sum(len(store.events(r["id"])) for r in rows)
-
-    l2 = "\n".join([
-        "[L2 Historical Evidence]",
-        "historical store contains %d session(s) / %d event(s) for this "
-        "thread." % (len(rows), event_count),
-        "only the bounded L1 working window above is inlined.",
+    hint = "\n".join([
+        "[Historical Evidence]",
+        "full history is not inlined: the store holds %d session(s) / %d "
+        "event(s) for this thread." % (len(rows), event_count),
         "retrieve with: voyager thread show %s / voyager search \"<query>\" / "
         "voyager merge (compiles the flat bundle with the full evidence)"
         % thread["id"],
     ])
+    l1 = build_working_context(store, rows, hard_max=l1_hard_max)
+
     return "\n".join([
         "format: %s" % CONTEXT_FORMAT_TIERED,
         "",
         "[L0 Thread State]",
         l0.rstrip("\n"),
         "",
-        l1,
+        runtime.rstrip("\n"),
         "",
-        l2,
+        hint,
+        "",
+        l1,
     ])
 
 

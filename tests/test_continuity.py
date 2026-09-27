@@ -416,19 +416,23 @@ class TestTieredBundle:
         by_id = {r["id"]: dict(r) for r in store.sessions()}
         return [by_id[sid] for sid in sids]
 
-    def test_marker_l0_l1_and_l2_pointer(self, tmp_path):
+    def test_sections_and_order(self, tmp_path):
         store, thread, members, rows = self._fixture(tmp_path)
         out = build_tiered_bundle(store, thread, members, rows)
         assert out.startswith("format: %s\n" % CONTEXT_FORMAT_TIERED)
         assert "[L0 Thread State]" in out
         assert "goal: complete the roadmap" in out
         assert "context_format_version: %d" % CONTEXT_FORMAT_VERSION in out
+        assert "[Runtime State]" in out
+        assert "[Historical Evidence]" in out
         assert "[L1 Active Working Context]" in out
         assert "[claude:tb #3] error: boom: TypeError" in out
-        assert "[L2 Historical Evidence]" in out
-        assert "historical store contains 1 session(s)" in out
-        assert "only the bounded L1 working window above is inlined" in out
-        assert "voyager thread show" in out
+        # graceful-degradation order: head-truncating surfaces keep L0,
+        # Runtime State and the retrieval hint before any transcript bytes
+        assert out.index("[Runtime State]") < out.index("[Historical Evidence]")
+        assert out.index("[Historical Evidence]") < \
+            out.index("[L1 Active Working Context]")
+        assert out.count("[Historical Evidence]") == 1   # never duplicated
 
     def test_flat_path_remains_byte_identical(self, tmp_path, monkeypatch):
         """Formal invariant 1: the tiered work left the flat builder's document
@@ -481,7 +485,7 @@ class TestTieredBundle:
                             "## Evidence & Provenance"):
             assert flat_marker in flat       # the flat path still carries them
             assert flat_marker not in out    # ...and the tiered path inlines none of it
-        l1 = out.split("[L1 Active Working Context]\n", 1)[1].split("\n[L2 ", 1)[0]
+        l1 = out.split("[L1 Active Working Context]\n", 1)[1]
         assert len(l1.encode("utf-8")) <= L1_DEFAULT_HARD_MAX_BYTES
 
     def test_composition_orders_by_membership_not_timestamps(self, tmp_path):
@@ -516,6 +520,105 @@ class TestTieredBundle:
         assert "[codex:bbb #2] assistant: conclusion B" in out
         assert "conclusion A" not in out
         assert "task A" not in out
+
+    def test_runtime_state_degrades_without_git(self, tmp_path):
+        store, thread, members, rows = self._fixture(tmp_path)
+        out = build_tiered_bundle(store, thread, members, rows)
+        rs = out.split("[Runtime State]\n", 1)[1].split("\n\n[", 1)[0]
+        assert rs.startswith("repository: %s" % tmp_path)
+        assert "branch: unknown" in rs
+        assert "HEAD: unknown" in rs
+        assert "dirty: unknown" in rs
+        # same probe -> same bytes: the fallback is deterministic
+        assert build_tiered_bundle(store, thread, members, rows) == out
+
+    def test_runtime_state_reflects_a_real_repository(self, tmp_path):
+        import subprocess
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        def git(*args):
+            subprocess.run(["git", *args], cwd=repo, check=True,
+                           capture_output=True)
+
+        git("init", "-b", "branch_x")
+        git("config", "user.name", "voyager-test")
+        git("config", "user.email", "voyager@test")
+        git("commit", "--allow-empty", "-m", "init")
+        (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+
+        store = Store(tmp_path / "rt.db")
+        tid = store.thread_create(repo_root=str(repo), title="t", goal="g")
+        src = tmp_path / "rt.jsonl"
+        src.write_text("{}", encoding="utf-8")
+        session = new_session(id="codex:rt", provider="codex",
+                              native_session_id="rt", title="S",
+                              started_at=1.0, updated_at=2.0,
+                              repo_root=str(repo), cwd=str(repo))
+        store.replace_session(
+            session,
+            [new_event(sid="codex:rt", seq=1, kind="user", ts=1.0,
+                       content="runtime probe")],
+            "codex", src)
+        store.thread_attach(tid, "codex:rt")
+        thread = store.thread_get(tid)
+        members = store.thread_member_sessions(tid)
+        rows = self._rows(store, ["codex:rt"])
+
+        out = build_tiered_bundle(store, thread, members, rows)
+        rs = out.split("[Runtime State]\n", 1)[1].split("\n\n[", 1)[0]
+        assert rs.startswith("repository: %s" % repo)
+        assert "branch: branch_x" in rs
+        head = [ln for ln in rs.splitlines() if ln.startswith("HEAD: ")][0]
+        assert head != "HEAD: unknown"
+        assert "dirty: 1 file(s)" in rs
+        # same snapshot -> byte-identical runtime state
+        assert build_tiered_bundle(store, thread, members, rows) == out
+
+    def test_runtime_state_is_bounded(self, tmp_path):
+        store, thread, members, rows = self._fixture(tmp_path)
+        out = build_tiered_bundle(store, thread, members, rows,
+                                  max_field_chars=100)
+        rs = out.split("[Runtime State]\n", 1)[1].split("\n\n[", 1)[0]
+        lines = rs.splitlines()
+        assert len(lines) == 4          # repository / branch / HEAD / dirty
+        for line in lines:
+            assert len(line) <= 120     # label + max_field_chars + marker
+
+    def test_head_cap_keeps_l0_runtime_and_retrieval(self, tmp_path):
+        """Claude's SessionStart hook keeps the first 9000 UTF-16 code units
+        of additionalContext and spills the rest.  The document must lead
+        with what has to survive that cut: L0, Runtime State and the
+        retrieval hint -- the transcript window is the spill material."""
+        store = Store(tmp_path / "cap.db")
+        tid = store.thread_create(repo_root=str(tmp_path), title="t", goal="g")
+        self._add(store, tmp_path, "codex:big", "codex",
+                  [new_event(sid="codex:big", seq=1, kind="user", ts=1.0,
+                             content="big working session"),
+                   new_event(sid="codex:big", seq=2, kind="assistant", ts=2.0,
+                             content="T" * 20000)])
+        store.thread_attach(tid, "codex:big")
+        thread = store.thread_get(tid)
+        members = store.thread_member_sessions(tid)
+        rows = self._rows(store, ["codex:big"])
+
+        out = build_tiered_bundle(store, thread, members, rows)
+
+        # keep the head the way Claude Code measures it (UTF-16 code units)
+        kept = out
+        units = 0
+        for i, ch in enumerate(out):
+            units += 2 if ch > "\uffff" else 1
+            if units > 9000:
+                kept = out[:i]
+                break
+        assert units > 9000                       # the cap actually engaged
+        assert len(kept) < len(out)
+        assert "[L0 Thread State]" in kept
+        assert "[Runtime State]" in kept
+        assert "[Historical Evidence]" in kept
+        assert "retrieve with:" in kept
+        assert "[L1 Active Working Context]" in kept   # the banner survives too
 
     def test_same_input_is_byte_identical(self, tmp_path):
         store, thread, members, rows = self._fixture(tmp_path)
@@ -755,3 +858,67 @@ class TestL1WorkingContext:
         # an empty user line vanishes, but it still splits the turn: the
         # assistant conclusion below it is its own turn, not the command's
         assert "[codex:c #3] user:" not in out
+
+    def test_file_path_and_exit_code_are_rendered(self, tmp_path):
+        store = Store(tmp_path / "l1.db")
+        self._add(store, tmp_path, "codex:m", "codex",
+                  [new_event(sid="codex:m", seq=1, kind="user", ts=1.0,
+                             content="fix the flaky test"),
+                   new_event(sid="codex:m", seq=2, kind="tool_call", ts=2.0,
+                             tool_name="shell", command="pytest -q",
+                             exit_code=1, file_path="tests/test_x.py"),
+                   new_event(sid="codex:m", seq=3, kind="file", ts=3.0,
+                             file_path="voyager/continuity.py")])
+        rows = self._rows(store, ["codex:m"])
+
+        out = build_working_context(store, rows, hard_max=10 ** 6)
+
+        assert "[codex:m #2] tool_call: pytest -q" in out
+        assert "  exit_code: 1" in out
+        assert "  file_path: tests/test_x.py" in out
+        # a file event with no text still carries its path as evidence
+        assert "[codex:m #3] file:" in out
+        assert "  file_path: voyager/continuity.py" in out
+
+    def test_stdout_stderr_and_diff_are_not_inlined(self, tmp_path):
+        store = Store(tmp_path / "l1.db")
+        self._add(store, tmp_path, "codex:q", "codex",
+                  [new_event(sid="codex:q", seq=1, kind="tool_result", ts=1.0,
+                             tool_call_id="c1",
+                             stdout="OUT" * 500,
+                             stderr="ERR" * 500),
+                   new_event(sid="codex:q", seq=2, kind="file", ts=2.0,
+                             file_path="a.py",
+                             diff="DIFF" * 500,
+                             old_content="OLD" * 500,
+                             new_content="NEW" * 500)])
+        rows = self._rows(store, ["codex:q"])
+
+        out = build_working_context(store, rows, hard_max=10 ** 6)
+
+        assert "OUTOUT" not in out
+        assert "ERRERR" not in out
+        assert "DIFFDIFF" not in out
+        assert "OLDOLD" not in out
+        assert "NEWNEW" not in out
+        # the file event still shows its structured path
+        assert "  file_path: a.py" in out
+
+    def test_metadata_stays_inside_the_hard_byte_bound(self, tmp_path):
+        store = Store(tmp_path / "l1.db")
+        self._add(store, tmp_path, "codex:meta", "codex",
+                  [new_event(sid="codex:meta", seq=1, kind="user", ts=1.0,
+                             content="huge metadata turn"),
+                   new_event(sid="codex:meta", seq=2, kind="tool_call", ts=2.0,
+                             tool_name="edit", command="apply patch",
+                             exit_code=0,
+                             file_path="P" * 4000)])
+        rows = self._rows(store, ["codex:meta"])
+        base = self._header_len(store)
+
+        out = build_working_context(store, rows, hard_max=base + 500)
+
+        assert len(out.encode("utf-8")) <= base + 500
+        assert L1_TRUNCATION_MARKER in out   # metadata counted toward the budget
+        assert "huge metadata turn" not in out   # the head of the turn is gone
+        assert out.endswith("exit_code: 0")      # the metadata tail survives
