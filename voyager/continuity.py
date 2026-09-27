@@ -134,9 +134,10 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
 CONTEXT_FORMAT_VERSION = 1
 
 #: Format identifiers for the context cache identity.  ``flat`` is the existing
-#: continuation bundle; ``tiered-v1`` is L0 composed with that bundle as a
-#: compatibility payload.  They are different documents for the same
-#: thread/provider/budget, so they must never share a cache entry.
+#: continuation bundle; ``tiered-v1`` is L0 composed with a bounded L1
+#: (``build_working_context``) plus an L2 pointer.  They are different
+#: documents for the same thread/provider/budget, so they must never share a
+#: cache entry.
 CONTEXT_FORMAT_FLAT = "flat"
 CONTEXT_FORMAT_TIERED = "tiered-v1"
 
@@ -252,6 +253,9 @@ def build_thread_state(
 L1_TRUNCATION_MARKER = (
     "[L1: older events of the newest turn dropped to fit the byte budget]")
 
+#: Default hard byte budget of the L1 section inside a tiered-v1 document.
+L1_DEFAULT_HARD_MAX_BYTES = 16384
+
 
 def _utf8_len(text: str) -> int:
     return len(text.encode("utf-8"))
@@ -307,8 +311,9 @@ def _l1_header(hard_max: int) -> str:
     the budget splits exactly between header and payload."""
     return "\n".join([
         "[L1 Active Working Context]",
-        "selection: newest-first over canonical event order (sessions in the "
-        "order given, events by seq then id), complete turns only",
+        "selection: newest-first over canonical event order (sessions follow "
+        "the canonical order supplied by the caller, events by seq then id), "
+        "complete turns only",
         "budget: %d bytes hard; when the newest turn alone exceeds it, older "
         "events of that turn are dropped with a marker" % hard_max,
         "",
@@ -329,8 +334,9 @@ def build_working_context(
 
     Deterministic contracts (pinned by tests, no importance scoring):
 
-    - selection order is the canonical event order -- sessions in the order
-      given, events by ``seq, id``; timestamps never decide what is newest;
+    - selection order is the canonical event order -- sessions follow the
+      canonical order supplied by the caller, events by ``seq, id``;
+      timestamps never decide what is newest;
     - the packing unit is a complete turn; a turn that does not fit whole is
       dropped entirely (older turns are L2 material, not partially inlined);
     - ``hard_max`` is a hard UTF-8 byte bound on the whole document;
@@ -632,32 +638,52 @@ def build_tiered_bundle(
     members: Any = (),
     session_rows: Optional[List[Any]] = None,
     *,
-    goal: Optional[str] = None,
-    live_git: bool = True,
     max_field_chars: int = L0_FIELD_MAX_CHARS,
+    l1_hard_max: int = L1_DEFAULT_HARD_MAX_BYTES,
 ) -> str:
-    """Compose L0 with the existing flat bundle as the compatibility payload.
+    """Compose tiered-v1: authoritative L0 + bounded L1 + an L2 pointer.
 
-    This is a composition layer, not a second implementation: the payload comes
-    from `build_continuation_bundle()` unchanged, so there is no session, event,
-    git or budget formatting here to drift away from the flat builder until L1
-    is wired into this composition.
+    tiered-v1 = L0 + L1 (+ pointer).  The L1 primitive is trusted for event
+    selection, but the *session order* is established here, at the composition
+    boundary, so production correctness never depends on the caller remembering
+    to sort: ``session_rows`` are ordered by the WorkThread's own membership
+    order (``thread_sessions.ord``), and events within a session stay in store
+    order (``seq, id``).  Rows that are not thread members keep their given
+    order after the members.  Timestamps are never consulted for ordering.
 
-    Step B does not shrink anything yet.  It exists to pin the format marker, the
-    composition boundary and -- with `CONTEXT_FORMAT_TIERED` in the cache key --
-    the fact that a tiered document and a flat one are not interchangeable.
+    Boundedness: L0 is field-capped, the L1 section is under ``l1_hard_max``
+    bytes, and the L2 pointer is a few fixed lines -- older evidence stays
+    retrievable (show / search / a flat bundle), never silently gone.  There
+    is deliberately no live-git section and no goal-ranked evidence here:
+    selection is recency-only, and the thread's goal lives in L0.
     """
-    payload = build_continuation_bundle(
-        store, session_rows or [], goal=goal, live_git=live_git)
+    rows = list(session_rows or ())
+    rank = {sid: i
+            for i, sid in enumerate(store.thread_member_ids(thread["id"]))}
+    rows.sort(key=lambda r: rank.get(r["id"], len(rank)))
+
+    l0 = build_thread_state(thread, members, max_field_chars=max_field_chars)
+    l1 = build_working_context(store, rows, hard_max=l1_hard_max)
+    event_count = sum(len(store.events(r["id"])) for r in rows)
+
+    l2 = "\n".join([
+        "[L2 Historical Evidence]",
+        "historical store contains %d session(s) / %d event(s) for this "
+        "thread." % (len(rows), event_count),
+        "only the bounded L1 working window above is inlined.",
+        "retrieve with: voyager thread show %s / voyager search \"<query>\" / "
+        "voyager merge (compiles the flat bundle with the full evidence)"
+        % thread["id"],
+    ])
     return "\n".join([
         "format: %s" % CONTEXT_FORMAT_TIERED,
         "",
         "[L0 Thread State]",
-        build_thread_state(
-            thread, members, max_field_chars=max_field_chars).rstrip("\n"),
+        l0.rstrip("\n"),
         "",
-        "[L1 Compatibility Payload]",
-        payload,
+        l1,
+        "",
+        l2,
     ])
 
 

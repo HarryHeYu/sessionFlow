@@ -14,6 +14,7 @@ from voyager.continuity import (
     CONTEXT_FORMAT_TIERED,
     CONTEXT_FORMAT_VERSION,
     CONTINUATION_INSTRUCTION,
+    L1_DEFAULT_HARD_MAX_BYTES,
     L1_TRUNCATION_MARKER,
     PROMPT_TARGETS,
     build_continuation_bundle,
@@ -362,14 +363,19 @@ class TestL0ThreadState:
         assert store.stats() == stats_before
 
 
-# --- Step B: tiered bundle skeleton ----------------------------------------
+# --- Step D: tiered-v1 = L0 + bounded L1 (+ L2 pointer) ---------------------
 
-class TestTieredBundleSkeleton:
-    """Step B pins the format and the composition boundary. Nothing shrinks yet.
+class TestTieredBundle:
+    """Step D wires the real L1 into the composition.
 
-    The payload is the flat builder's own output rather than a re-implementation,
-    so there is no second set of session/event/git/budget formatting to drift
-    away while L1 is still being designed.
+    tiered-v1 = authoritative L0 + bounded L1 + an L2 pointer.  The two formal
+    invariants that replace the retired Step B compatibility golden:
+
+    - the flat path keeps its byte-identical document;
+    - the tiered path no longer embeds the complete flat payload.
+
+    The composition boundary -- not the caller -- establishes canonical
+    session order from the WorkThread's membership order.
     """
 
     def _fixture(self, tmp_path):
@@ -397,35 +403,130 @@ class TestTieredBundleSkeleton:
         return (store, store.thread_get(tid), store.thread_member_sessions(tid),
                 [dict(r) for r in store.sessions()])
 
-    def test_marker_and_authoritative_l0(self, tmp_path):
+    def _add(self, store, tmp_path, sid, provider, events, updated_at=2.0):
+        src = tmp_path / (sid.replace(":", "_") + ".jsonl")
+        src.write_text("{}", encoding="utf-8")
+        session = new_session(
+            id=sid, provider=provider, native_session_id=sid.split(":", 1)[1],
+            title="Session " + sid, started_at=1.0, updated_at=updated_at,
+            repo_root=str(tmp_path), cwd=str(tmp_path))
+        store.replace_session(session, events, provider, src)
+
+    def _rows(self, store, sids):
+        by_id = {r["id"]: dict(r) for r in store.sessions()}
+        return [by_id[sid] for sid in sids]
+
+    def test_marker_l0_l1_and_l2_pointer(self, tmp_path):
         store, thread, members, rows = self._fixture(tmp_path)
-        out = build_tiered_bundle(store, thread, members, rows, live_git=False)
+        out = build_tiered_bundle(store, thread, members, rows)
         assert out.startswith("format: %s\n" % CONTEXT_FORMAT_TIERED)
         assert "[L0 Thread State]" in out
         assert "goal: complete the roadmap" in out
         assert "context_format_version: %d" % CONTEXT_FORMAT_VERSION in out
-        assert "[L1 Compatibility Payload]" in out
+        assert "[L1 Active Working Context]" in out
+        assert "[claude:tb #3] error: boom: TypeError" in out
+        assert "[L2 Historical Evidence]" in out
+        assert "historical store contains 1 session(s)" in out
+        assert "only the bounded L1 working window above is inlined" in out
+        assert "voyager thread show" in out
 
-    def test_payload_is_byte_identical_to_the_flat_builder(self, tmp_path):
+    def test_flat_path_remains_byte_identical(self, tmp_path, monkeypatch):
+        """Formal invariant 1: the tiered work left the flat builder's document
+        byte-identical.  Timestamps render through the same _fmt_ts call
+        (pinned here to a fixed token) and tmp paths are masked; everything
+        else must match byte for byte."""
         store, thread, members, rows = self._fixture(tmp_path)
-        out = build_tiered_bundle(store, thread, members, rows, live_git=False)
-        payload = out.split("[L1 Compatibility Payload]\n", 1)[1]
-        assert payload == build_continuation_bundle(store, rows, live_git=False)
-        # ...and it still carries the evidence the flat bundle carried
-        assert "pytest -q" in payload
-        assert "boom: TypeError" in payload
+        monkeypatch.setattr("voyager.continuity._fmt_ts", lambda ts: "TS")
+        out = build_continuation_bundle(store, rows, live_git=False)
+        out = out.replace(str(tmp_path), "<TMP>")
+        assert out == (
+            "# Continuation Bundle\n"
+            "\n"
+            "## Goal\n"
+            "\n"
+            "**Initial request** ([claude:tb] at TS):\n"
+            "\n"
+            "Ship the tiered bundle skeleton.\n"
+            "\n"
+            "## Current verified state\n"
+            "\n"
+            "(no assistant conclusion captured in the active session)\n"
+            "\n"
+            "## Files touched across sessions\n"
+            "\n"
+            "- `voyager/continuity.py`\n"
+            "\n"
+            "## Commands executed\n"
+            "\n"
+            "- `pytest -q`\n"
+            "\n"
+            "## Errors encountered\n"
+            "\n"
+            "- [TS] boom: TypeError\n"
+            "\n"
+            "## Evidence & Provenance\n"
+            "\n"
+            "Compiled from 1 session(s):\n"
+            "\n"
+            "- **claude** `tb`: Session tb (0 msgs / 0 tools, TS → TS repo=`<TMP>`)\n"
+        )
+
+    def test_tiered_no_longer_embeds_the_flat_payload(self, tmp_path):
+        """Formal invariant 2: the tiered path inlines none of the flat body."""
+        store, thread, members, rows = self._fixture(tmp_path)
+        flat = build_continuation_bundle(store, rows, live_git=False)
+        out = build_tiered_bundle(store, thread, members, rows)
+        for flat_marker in ("# Continuation Bundle",
+                            "## Current verified state",
+                            "## Evidence & Provenance"):
+            assert flat_marker in flat       # the flat path still carries them
+            assert flat_marker not in out    # ...and the tiered path inlines none of it
+        l1 = out.split("[L1 Active Working Context]\n", 1)[1].split("\n[L2 ", 1)[0]
+        assert len(l1.encode("utf-8")) <= L1_DEFAULT_HARD_MAX_BYTES
+
+    def test_composition_orders_by_membership_not_timestamps(self, tmp_path):
+        """The composition boundary re-establishes canonical session order from
+        thread_sessions.ord: ord=1 A, ord=2 B, A carrying the newer timestamps,
+        rows passed in reverse membership order -- B must still be the newer
+        canonical working session."""
+        store = Store(tmp_path / "ord.db")
+        tid = store.thread_create(repo_root=str(tmp_path), title="t", goal="g")
+        self._add(store, tmp_path, "codex:aaa", "codex",
+                  [new_event(sid="codex:aaa", seq=1, kind="user", ts=900.0,
+                             content="task A"),
+                   new_event(sid="codex:aaa", seq=2, kind="assistant", ts=950.0,
+                             content="conclusion A " + "A" * 6000)],
+                  updated_at=9999.0)
+        self._add(store, tmp_path, "codex:bbb", "codex",
+                  [new_event(sid="codex:bbb", seq=1, kind="user", ts=120.0,
+                             content="task B"),
+                   new_event(sid="codex:bbb", seq=2, kind="assistant", ts=100.0,
+                             content="conclusion B")],
+                  updated_at=1.0)
+        store.thread_attach(tid, "codex:aaa")     # ord=1: canonically older
+        store.thread_attach(tid, "codex:bbb")     # ord=2: canonically newer
+        thread = store.thread_get(tid)
+        members = store.thread_member_sessions(tid)
+        rows = self._rows(store, ["codex:bbb", "codex:aaa"])   # reversed
+
+        out = build_tiered_bundle(store, thread, members, rows,
+                                  l1_hard_max=4096)
+
+        assert "[codex:bbb #1] user: task B" in out
+        assert "[codex:bbb #2] assistant: conclusion B" in out
+        assert "conclusion A" not in out
+        assert "task A" not in out
 
     def test_same_input_is_byte_identical(self, tmp_path):
         store, thread, members, rows = self._fixture(tmp_path)
-        assert (build_tiered_bundle(store, thread, members, rows, live_git=False)
-                == build_tiered_bundle(store, thread, members, rows,
-                                       live_git=False))
+        assert (build_tiered_bundle(store, thread, members, rows)
+                == build_tiered_bundle(store, thread, members, rows))
 
     def test_tiered_build_does_not_mutate_state(self, tmp_path):
         store, thread, members, rows = self._fixture(tmp_path)
         stats_before = store.stats()
         thread_before = dict(store.thread_get(thread["id"]))
-        build_tiered_bundle(store, thread, members, rows, live_git=False)
+        build_tiered_bundle(store, thread, members, rows)
         assert store.stats() == stats_before
         assert dict(store.thread_get(thread["id"])) == thread_before
 
