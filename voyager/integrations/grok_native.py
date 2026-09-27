@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..store import Store
+from ..continuity import CONTEXT_FORMAT_TIERED
 from ..startup import startup_continuity
 
 #: Name of the generated rule file inside the Grok rules directory.
@@ -113,10 +114,12 @@ def write_context_rules(
 ) -> Dict[str, Any]:
     """Compile the continuation context for ``cwd`` into Grok's rules dir.
 
-    Called by the launcher *before* the real binary starts, so the rule is on
-    disk by the time Grok reads its rules. When there is no active WorkThread
-    the file is removed instead of written, so a launch in an unrelated repo
-    cannot inherit the previous repo's context.
+    Since Step G1 the context is the tiered-v1 document (L0 + Runtime State +
+    retrieval hint + bounded L1); the flat bundle remains available through
+    the manual surfaces.  Called by the launcher *before* the real binary
+    starts, so the rule is on disk by the time Grok reads its rules. When
+    there is no active WorkThread the file is removed instead of written, so
+    a launch in an unrelated repo cannot inherit the previous repo's context.
 
     ``clear`` separates the two callers by what they actually know:
 
@@ -134,7 +137,8 @@ def write_context_rules(
     """
     path = context_rules_path(home)
     try:
-        result = startup_continuity(provider="grok", cwd=cwd, store=store)
+        result = startup_continuity(provider="grok", cwd=cwd, store=store,
+                                    context_format=CONTEXT_FORMAT_TIERED)
     except Exception as exc:  # launcher must never block the agent
         return {"status": "error", "message": str(exc), "path": str(path)}
 

@@ -32,8 +32,10 @@ from urllib.parse import quote
 import pytest
 
 from voyager.cli import main, run_scan
+from voyager.continuity import CONTEXT_FORMAT_TIERED, L1_DEFAULT_HARD_MAX_BYTES
 from voyager.integrations import grok_native
 from voyager.model import new_event, new_session
+from voyager.startup import startup_continuity
 from voyager.store import Store
 
 #: A real Grok session id, in the shape the CLI hands a SessionStart hook.
@@ -277,3 +279,99 @@ def test_a_scan_refreshes_the_rule_without_re_entering_compilation(
     assert main(["--db", str(store.db_path), "scan",
                  "--platform", "grok"]) == 0
     assert len(seen) == 1, "the sync command must refresh the rule"
+
+
+# ---------------------------------------------------------------------------
+# 4. The Grok rules file carries tiered-v1 (Step G1)
+# ---------------------------------------------------------------------------
+
+def test_grok_rules_file_is_tiered_v1(store, tmp_path, git_repo):
+    """The writer consumes the tiered representation now.
+
+    Pins: the file announces tiered-v1 and carries every tiered section; no
+    flat-only section leaks back in; the writer's wrong-repo warning (a
+    dispatch concern of Grok's global rules, not of the document itself)
+    survives; and the file sits far below what the flat bundle spent at the
+    same auto budget.
+    """
+    repo = str(git_repo)
+    tid = store.thread_create(repo_root=repo, title="tiered rules")
+    _seed_session(store, "claude:aaa", "claude", "aaa", repo, time.time(),
+                  content="SENTINEL-CONTINUATION-PAYLOAD")
+    store.thread_attach(tid, "claude:aaa")
+
+    home = tmp_path / "userhome"
+    assert main(["hook", "grok-context", "--cwd", repo, "--home", str(home),
+                 "--db", str(store.db_path), "--quiet"]) == 0
+
+    rules = grok_native.context_rules_path(home)
+    body = rules.read_text(encoding="utf-8")
+    assert "format: %s" % CONTEXT_FORMAT_TIERED in body
+    for section in ("[WorkThread]", "[Runtime State]",
+                    "[Historical Evidence]", "[L1 Active Working Context]"):
+        assert section in body
+    assert "SENTINEL-CONTINUATION-PAYLOAD" in body
+    for flat_only in ("# Continuation Bundle", "## Current verified state",
+                      "## Evidence & Provenance"):
+        assert flat_only not in body
+    # the wrong-repo warning belongs to the writer header and must survive
+    assert "If your working directory is not that repository" in body
+    # retrieval hint before the transcript: head-cap surfaces keep it
+    assert body.index("[Historical Evidence]") < \
+        body.index("[L1 Active Working Context]")
+    assert len(body.encode("utf-8")) <= L1_DEFAULT_HARD_MAX_BYTES + 4096
+
+
+def test_context_format_is_part_of_the_cache_identity(store, tmp_path,
+                                                      git_repo):
+    """A flat compile and a tiered compile for the same thread must neither
+    serve nor overwrite each other's cached document."""
+    repo = str(git_repo)
+    store.thread_create(repo_root=repo, title="cache identity")
+    _seed_session(store, "claude:aaa", "claude", "aaa", repo, time.time())
+
+    flat = startup_continuity(provider="grok", cwd=repo, store=store)
+    tiered = startup_continuity(provider="grok", cwd=repo, store=store,
+                                context_format=CONTEXT_FORMAT_TIERED)
+    assert flat.context_format == "flat"
+    assert tiered.context_format == CONTEXT_FORMAT_TIERED
+    assert "# Continuation Bundle" in flat.context
+    assert "format: %s" % CONTEXT_FORMAT_TIERED in tiered.context
+
+    flat_again = startup_continuity(provider="grok", cwd=repo, store=store)
+    tiered_again = startup_continuity(provider="grok", cwd=repo, store=store,
+                                      context_format=CONTEXT_FORMAT_TIERED)
+    assert flat_again.context == flat.context
+    assert tiered_again.context == tiered.context
+    assert "# Continuation Bundle" in flat_again.context
+    assert "format: %s" % CONTEXT_FORMAT_TIERED in tiered_again.context
+
+
+def test_tiered_context_write_leaves_the_attach_chain_untouched(
+        store, tmp_path, git_repo):
+    """Format migration ≠ attach migration.
+
+    The writer now compiles tiered-v1, and the pending/attach state machine
+    must behave exactly as before: a plain compile records no pending and
+    attaches nothing (the writer has no native session to attach), and the
+    SessionStart path still leaves the open row the scan resolves.
+    """
+    repo = str(git_repo)
+    tid = store.thread_create(repo_root=repo, title="format split")
+    _seed_session(store, "claude:aaa", "claude", "aaa", repo, time.time())
+    store.thread_attach(tid, "claude:aaa")
+
+    home = tmp_path / "userhome"
+    assert main(["hook", "grok-context", "--cwd", repo, "--home", str(home),
+                 "--db", str(store.db_path), "--quiet"]) == 0
+    assert store.pending_open(thread_id=tid) == []
+    assert store.thread_member_ids(tid) == ["claude:aaa"]
+
+    result = grok_native.session_start(session_id=GROK_SID, cwd=repo,
+                                       store=store)
+    assert result["pending_recorded"] is True
+    assert result["context_source"] == "none"
+    rows = store.pending_open(thread_id=tid)
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "grok"
+    assert rows[0]["native_session_id"] == GROK_SID

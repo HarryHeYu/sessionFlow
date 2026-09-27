@@ -52,7 +52,7 @@ def _fake_compiler(context, calls):
 
     def _compile(store=None, cwd=None, provider=None, native_session_id=None,
                  thread_id=None, repo=None, goal=None, budget=None,
-                 target=None, sync=True):
+                 target=None, sync=True, context_format=None):
         calls.append({"thread_id": thread_id, "budget": budget})
         return {"continuity_available": True, "context": context}
 

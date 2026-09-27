@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .adapters.base import git_info
-from .continuity import CONTEXT_FORMAT_FLAT
+from .continuity import CONTEXT_FORMAT_FLAT, CONTEXT_FORMAT_TIERED
 from .store import Store
 
 
@@ -121,6 +121,7 @@ def startup_continuity(
     budget: str = "auto",
     store: Optional[Store] = None,
     compile_context: bool = True,
+    context_format: str = CONTEXT_FORMAT_FLAT,
 ) -> StartupContinuityResult:
     """Unified startup continuity primitive.
     
@@ -187,6 +188,9 @@ def startup_continuity(
             passive lifecycle hook — so it still records the pending attach
             without paying for a bundle nobody can read. ``context`` is then
             None and ``context_source`` is "none".
+        context_format: Document shape of the compiled context — ``flat``
+            (default) or ``tiered-v1``. Part of the cache key, so a flat
+            document is never served for a tiered request or the reverse.
     
     Returns:
         StartupContinuityResult with all discovery/attach/context state
@@ -365,7 +369,8 @@ def startup_continuity(
         # reported `context_source` was always "fresh_compile" even when
         # nothing had changed.
         members = store.thread_members(tid)
-        cached = (_load_context_cache(store, tid, provider, budget)
+        cached = (_load_context_cache(store, tid, provider, budget,
+                                      context_format=context_format)
                   if compile_context else {"compiled_at": 0, "context": None})
         last_compiled_at = cached["compiled_at"]
         context = cached["context"]
@@ -430,6 +435,7 @@ def startup_continuity(
                     budget=budget,
                     target=provider,
                     sync=True,
+                    context_format=context_format,
                 )
                 if ctx_result.get("continuity_available"):
                     fresh_context = ctx_result.get("context")
@@ -441,7 +447,8 @@ def startup_continuity(
                 context = fresh_context
                 compiled_at = time.time()
                 _save_context_cache(store, tid, provider, budget,
-                                    fresh_context, compiled_at)
+                                    fresh_context, compiled_at,
+                                    context_format=context_format)
             elif context:
                 # Compilation failed but we still hold a usable bundle. Serving
                 # a known-stale bundle beats injecting nothing, as long as the
@@ -466,6 +473,7 @@ def startup_continuity(
             "context": context,
             "context_stale": context_stale,
             "context_source": context_source,  # "fresh_compile" | "cached"
+            "context_format": context_format,
             "recommended_action": ("use_context" if context else
                                   "continue_from_memory" if members else "none"),
             "auto_attach_reason": auto_attach_reason,

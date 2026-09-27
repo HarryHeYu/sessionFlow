@@ -269,12 +269,18 @@ def get_continuation_context(store: Optional[Store] = None,
                              goal: Optional[str] = None,
                              budget: Optional[str] = None,
                              target: Optional[str] = None,
-                             sync: bool = True) -> Dict[str, Any]:
+                             sync: bool = True,
+                             context_format: str = "flat") -> Dict[str, Any]:
     """Compile the continuation context for the work in `cwd`/`thread`.
 
     Shared core surface for CLI / MCP / Skill / local API. Deterministic:
     scan (D12) → discover → rank (Phase 3) → budget (Phase 4) → context.
     No LLM, no network. Provenance is preserved end to end.
+
+    ``context_format`` selects the document shape: ``flat`` is the historical
+    full-evidence bundle; ``tiered-v1`` is L0 + Runtime State + retrieval
+    hint + a bounded L1.  The format must ride into the context cache key so
+    a flat document is never served for a tiered request (or the reverse).
     """
     from .budget import apply_budget, auto_budget, parse_budget
     from .ranker import extract_candidate_facts, rank_candidates
@@ -318,8 +324,12 @@ def get_continuation_context(store: Optional[Store] = None,
         tokens = parse_budget(budget)
         if tokens is None and budget and budget.strip().lower() == "auto":
             tokens = auto_budget(target)
-        from .continuity import build_continuation_bundle
-        raw_bundle = build_continuation_bundle(store, members, goal=goal)
+        from .continuity import (build_continuation_bundle,
+                                 build_tiered_bundle, CONTEXT_FORMAT_TIERED)
+        if context_format == CONTEXT_FORMAT_TIERED:
+            raw_bundle = build_tiered_bundle(store, thread, members, members)
+        else:
+            raw_bundle = build_continuation_bundle(store, members, goal=goal)
         packed, info = apply_budget(raw_bundle, tokens, target=target)
         store._continuity_log("context-compiled", thread=tid,
                               provider=provider, budget=info["budget"])
