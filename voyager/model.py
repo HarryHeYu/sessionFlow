@@ -67,8 +67,12 @@ EVENT_FIELDS = [
 #: says who really produced it, which is the distinction that lets a real user
 #: turn be told apart from a provider's injected pseudo-user record.
 #:
-#: NULL in the DB means "not enriched yet" and is normalised to "unknown" at the
-#: API layer -- the two states are deliberately not both stored.
+#: NULL in the DB means "not classified".  The literal `unknown` is a classifier
+#: sentinel and is never stored, so `origin IS NOT NULL` always means "classified"
+#: and there is exactly one representation of the unknown state.  A consumer that
+#: exposes the raw column should render NULL as `"unknown"`; none does today --
+#: the current readers (enrichment, coverage, session banding) all treat NULL as
+#: unknown internally, which is why no API-level normaliser exists yet.
 #: The sentinel a classifier returns when it cannot decide.  It is *not* a stored
 #: state: `new_event` folds it back to NULL so the store has exactly one
 #: representation of "not classified".

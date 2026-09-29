@@ -75,7 +75,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # full dev env: 374 collected, 372 passed, 2 skipped
+python -m pytest tests/ -q     # full dev env: 546 collected, 543 passed, 2 skipped, 1 deselected
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -212,7 +212,7 @@ of the previous session's hidden tool state.
 |---|---|---|
 | Claude Code | native `SessionStart` | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-24) |
 | Grok CLI | native `SessionStart` | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-25) |
-| Codex | native `SessionStart` (`~/.codex/hooks.json`) | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-28) |
+| Codex | native `SessionStart` (`~/.codex/hooks.json`) | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-28, session `01a0e7a2-6b1f-7011-ad65-103e17fb1094`: the tiered-v1 developer message arrived before the first `继续`, and that turn made zero `voyager_*` calls; the run's trace is in `~/.voyager/logs/codex-hooks.jsonl`) |
 | ZCode | native hooks (`~/.zcode/cli/config.json`, `hooks.events.SessionStart`) | **UNIT_VERIFIED** — configured, and the handler was driven end to end with a real payload; a provider-fired run is still pending |
 | Cursor | native hooks (`~/.cursor/hooks.json`, `sessionStart`) | **UNIT_VERIFIED** — same |
 | Kiro | native hooks (`SessionStart` / `AgentSpawn`, `.kiro/hooks/*.json`) | **UNIT_VERIFIED** — handler written and driven end to end; hooks are project-scoped, so installing is a per-project choice |
@@ -343,12 +343,19 @@ tests/
 ├── test_cursor.py  test_kiro.py  test_antigravity.py  test_adapters.py
 ├── test_store.py  test_export.py  test_handoff.py  test_cli.py  test_mcp.py
 ├── test_claude_session_start_hook.py   # the SessionStart entrypoint: protocol, size cap, spill, logging
+├── test_codex_session_start.py         # Codex envelope, rollout-authoritative cwd
+├── test_zcode_session_start.py         # ZCode envelope, camelCase payload aliases
+├── test_cursor_session_start.py        # Cursor top-level additional_context, workspace_roots
+├── test_kiro_antigravity_session_start.py  # Kiro raw stdout, Antigravity injectSteps gating
+├── test_hook_payload.py                # the shared UTF-16 cap, both-ends cut, spill
+├── test_provenance.py                  # origin classification and the NULL sentinel
+├── test_l1_bands.py                    # STRONG/WEAK/UNKNOWN/BOOTSTRAP_ONLY and the scheduler
 └── test_context_cache.py               # the persisted context cache, incl. hostile input
 ```
 
 ```sh
-python -m pytest tests/ -q                # full dev env: 374 collected, 372 passed, 2 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration
-python scripts/run_tests_core_only.py     # core-only simulated: 374 collected, 356 passed, 18 skipped
+python -m pytest tests/ -q                # full dev env: 546 collected, 543 passed, 2 skipped, 1 deselected — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
+python scripts/run_tests_core_only.py     # core-only simulated: a subset that skips the DB-backed suites
 ```
 
 The two environments skip for different reasons, and the two numbers are not

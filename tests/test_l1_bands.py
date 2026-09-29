@@ -326,7 +326,4 @@ class TestNonEvictingReserve:
         st, tid = self._fixture(tmp_path, weak_bytes=9000, unknown_bytes=80)
         out = self._l1(st, tid)
         assert "STRONG-WORK-5" in out, "real work is the core of L1"
-        assert out.index("STRONG-WORK-5") < len(out) // 2 or True
-        strong_bytes = sum(len(("STRONG-WORK-%d" % i).encode()) for i in range(6))
-        assert strong_bytes > 0
         assert "W" * 100 not in out, "the recovery-shaped turn is not inlined"

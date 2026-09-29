@@ -495,11 +495,14 @@ def build_l1_banded(store: Store, rows: Any, *, hard_max: int) -> str:
         if band in by_band:
             by_band[band].append((ri, ti))
 
-    # Phase A0 -- STRONG fairness minimum.  Every STRONG session contributes its
-    # newest complete turn before any session contributes a second one, taken in
-    # canonical session order so the oldest sessions are served first.  Without
-    # this a tight budget starves them outright: measured on the live thread, a
-    # 16 KB window gave zcode 17 turns while an 8.9 KB window gave it zero.
+    # Phase A0 -- STRONG fairness.  Every STRONG session *attempts* to contribute
+    # its newest complete turn before any session contributes a second one, taken
+    # in canonical session order so the oldest sessions are served first.  This is
+    # best-effort, not an entitlement: a session whose newest turn does not fit in
+    # the remaining room is still skipped, and a tight enough budget can still
+    # starve the newest sessions.  It exists because the alternative was measured
+    # to be worse -- a 16 KB window gave zcode 17 turns while an 8.9 KB window
+    # gave it zero -- not because it guarantees anything.
     newest_per_session: Dict[int, Tuple[int, int]] = {}
     for key in reversed(by_band["STRONG"]):        # newest turn first per session
         newest_per_session.setdefault(key[0], key)

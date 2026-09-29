@@ -215,6 +215,10 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
             auto_attach=True,  # Try to auto-attach via SessionStart
             budget=os.environ.get("VOYAGER_CLAUDE_HOOK_BUDGET", "auto"),
             context_format=CONTEXT_FORMAT_TIERED,
+            # Build the L1 inside Claude's 10,000-character cap.  Without this
+            # the window is built at the default 16 KB and then head-cut, which
+            # drops the newest L1 turns -- the exact failure Codex had.
+            l1_hard_max=PROVIDER_L1_BUDGET,
         )
         
         _log_debug("claude", "startup_continuity_result",
@@ -308,6 +312,10 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
 # the cut live in `voyager.integrations.hook_payload` so every provider's handler
 # applies identical semantics.
 MAX_ADDITIONAL_CONTEXT_CHARS = hook_payload.MAX_ADDITIONAL_CONTEXT_CHARS
+
+#: Claude Code caps the injected string at 10,000 characters.  Leave room for the
+#: preamble (L0 + Runtime State + retrieval hint) and the truncation note.
+PROVIDER_L1_BUDGET = 7600
 
 _payload_len = hook_payload.payload_len
 

@@ -55,11 +55,16 @@ def _seed(store, tmp_path, repo, provider, content="把测试标记写进上下�
 
 # --- Kiro ------------------------------------------------------------------
 
-def test_kiro_cwd_is_the_process_or_workspace(tmp_path, monkeypatch):
+def test_kiro_cwd_prefers_the_project_root(tmp_path, monkeypatch):
+    """Kiro runs command hooks in the project root, so the process cwd is the
+    authoritative repository; a payload path is only a fallback."""
     monkeypatch.chdir(tmp_path)
     assert ki.normalize_event("{}")["cwd"] == str(tmp_path)
+    # even when the payload carries paths, the project root wins
     p = ki.normalize_event(json.dumps({"workspacePaths": ["E:/repo", "E:/other"]}))
-    assert p["cwd"] == "E:/repo"
+    assert p["cwd"] == str(tmp_path)
+    # an explicit argument still wins over everything
+    assert ki.normalize_event("{}", cwd="E:/explicit")["cwd"] == "E:/explicit"
 
 
 def test_kiro_normalize_degrades_without_crashing():
@@ -74,7 +79,8 @@ def test_kiro_emits_plain_text_not_an_envelope(repo_store, tmp_path, monkeypatch
     _seed(store, tmp_path, repo, "kiro")
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"workspacePaths": [repo]})))
 
-    result = ki.handle_kiro_session_start(store=store)
+    # the repository comes from the project root, so it is passed explicitly here
+    result = ki.handle_kiro_session_start(cwd=repo, store=store)
     assert result["status"] == "context_ready", result.get("message")
 
     out = io.StringIO()
@@ -136,10 +142,21 @@ def test_antigravity_normalize_degrades_without_crashing():
     assert ag.normalize_event("not json {{{", cwd="E:/r")["native_session_id"] is None
     assert ag.normalize_event("", cwd="E:/r")["invocation_num"] is None
     # a non-int invocation number is not trusted
+    # a numeric counter in any JSON shape must still gate: 2.0 and "2" are not
+    # the first call, and reading them as None would re-inject every turn
     assert ag.normalize_event(json.dumps({"invocationNum": "3"}),
-                              cwd="E:/r")["invocation_num"] is None
+                              cwd="E:/r")["invocation_num"] == 3
+    assert ag.normalize_event(json.dumps({"invocationNum": 2.0}),
+                              cwd="E:/r")["invocation_num"] == 2
+    assert ag.normalize_event(json.dumps({"invocationNum": "0"}),
+                              cwd="E:/r")["invocation_num"] == 0
+    # a value that is present but unusable must NOT be read as "first"
     assert ag.normalize_event(json.dumps({"invocationNum": True}),
-                              cwd="E:/r")["invocation_num"] is None
+                              cwd="E:/r")["invocation_num"] == -1
+    assert ag.normalize_event(json.dumps({"invocationNum": "later"}),
+                              cwd="E:/r")["invocation_num"] == -1
+    # only an absent field means "treat as first"
+    assert ag.normalize_event(json.dumps({}), cwd="E:/r")["invocation_num"] is None
 
 
 def test_antigravity_emits_inject_steps(repo_store, tmp_path, monkeypatch):

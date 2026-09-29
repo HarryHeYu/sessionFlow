@@ -25,6 +25,8 @@ diagnostics go to ``~/.voyager/logs/cursor-hooks.jsonl``.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -103,14 +105,23 @@ def normalize_event(stdin_raw: str,
     raw_roots = event.get("workspace_roots")
     if isinstance(raw_roots, list):
         roots = [r for r in raw_roots if isinstance(r, str) and r.strip()]
+    # No `cwd` on sessionStart: the repository comes from workspace_roots, then
+    # from the provider's own environment.  The process fallback is ~/.cursor/,
+    # where user hooks run -- it resolves to no thread rather than the wrong one,
+    # which is the failure mode that matters.
     cwd = (roots[0] if roots
            else env.get("CURSOR_PROJECT_DIR")
            or env.get("CLAUDE_PROJECT_DIR")
            or os.getcwd())
     return {
         "cwd": cwd,
+        # Cursor documents session_id as the identity; conversation_id is the same
+        # value and is carried alongside, so it is accepted as a fallback rather
+        # than silently losing the session identity.
         "native_session_id": (event.get("session_id")
-                              or event.get("sessionId") or None),
+                              or event.get("sessionId")
+                              or event.get("conversation_id")
+                              or event.get("conversationId") or None),
         "workspace_roots": roots,
         "composer_mode": event.get("composer_mode"),
         "is_background_agent": event.get("is_background_agent"),
@@ -135,16 +146,19 @@ def handle_cursor_session_start(
     session_id = payload["native_session_id"]
 
     try:
-        result = startup_continuity(
-            provider=PROVIDER,
-            cwd=cwd,
-            native_session_id=session_id,
-            auto_attach=True,
-            store=store,
-            context_format=CONTEXT_FORMAT_TIERED,
-            # Build the L1 inside this provider's cap instead of letting the
-            # provider cut the document afterwards: a cut drops whole sessions.
-            l1_hard_max=PROVIDER_L1_BUDGET,
+        # Anything the core prints would splice into our protocol stdout, so the
+        # call is buffered; the envelope is written afterwards, on purpose.
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = startup_continuity(
+                provider=PROVIDER,
+                cwd=cwd,
+                native_session_id=session_id,
+                auto_attach=True,
+                store=store,
+                context_format=CONTEXT_FORMAT_TIERED,
+                # Build the L1 inside this provider's cap instead of letting the
+                # provider cut the document afterwards: a cut drops whole sessions.
+                l1_hard_max=PROVIDER_L1_BUDGET,
         )
     except Exception as e:
         _log_event({"ts": time.time(), "event": "startup_continuity_error",
@@ -152,18 +166,29 @@ def handle_cursor_session_start(
         return {"status": "error", "message": str(e)}
 
     if not result.continuity_available or not result.context:
-        out = {
-            "status": "no_thread",
-            "attach_status": getattr(result, "attach_status", None),
-            "continuity_info": {
-                "context_source": getattr(result, "context_source", None),
-                "recommended_action": getattr(result, "recommended_action", None),
-            },
+        attach_status = getattr(result, "attach_status", None) or ""
+        continuity_info = {
+            "context_source": getattr(result, "context_source", None),
+            "recommended_action": getattr(result, "recommended_action", None),
         }
+        # Ambiguity -- several active WorkThreads in this repo -- is a real,
+        # actionable failure.  Reporting it as "no_thread" would hide it and
+        # contradict the core's own contract (exact repo + 0 threads -> nothing to
+        # continue; + 1 -> continue it; + more than one -> refuse to choose).
+        # Nothing is auto-selected and nothing is injected on this path.
+        if attach_status.startswith("ERROR_") or "ambiguous" in attach_status.lower():
+            _log_event({"ts": time.time(), "event": "ambiguous", "cwd": cwd,
+                        "session_id": session_id, "attach_status": attach_status})
+            return {"status": "error", "attach_status": attach_status,
+                    "message": ("voyager could not resolve a WorkThread for %s (%s). "
+                                "Pick one explicitly with `voyager continue --thread <id>`."
+                                % (cwd, attach_status)),
+                    "continuity_info": continuity_info}
         _log_event({"ts": time.time(), "event": "no_context",
                     "cwd": cwd, "session_id": session_id,
-                    "attach_status": out["attach_status"]})
-        return out
+                    "attach_status": attach_status})
+        return {"status": "no_thread", "attach_status": attach_status,
+                "continuity_info": continuity_info}
 
     out = {
         "status": "context_ready",

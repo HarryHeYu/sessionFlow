@@ -17,6 +17,8 @@ import hashlib
 import json
 import os
 import sqlite3
+
+from .model import ORIGIN_UNKNOWN
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -261,6 +263,16 @@ def _truncate(s: Optional[str], limit: int) -> Optional[str]:
     return s[:limit] + f"\n... [truncated {len(s) - limit} chars; full text at source]"
 
 
+def _fold_origin(origin: Any) -> Any:
+    """`UNKNOWN` is a classifier sentinel, never a stored state.
+
+    `new_event` folds it, but `replace_session` writes event dicts directly, so
+    the same rule has to hold here or a hand-built row could store the literal
+    and make `origin IS NOT NULL` stop meaning "classified".
+    """
+    return None if origin == ORIGIN_UNKNOWN else origin
+
+
 class Store:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path) if db_path else default_db_path()
@@ -395,7 +407,7 @@ class Store:
                         ev.get("model"),
                         json.dumps(ev.get("usage") or {}, ensure_ascii=False)
                         if ev.get("usage") else None,
-                        ev.get("origin"),
+                        (_fold_origin(ev.get("origin"))),
                         _truncate(
                             json.dumps(ev.get("raw_event"), ensure_ascii=False)
                             if ev.get("raw_event") is not None else None,

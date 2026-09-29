@@ -179,12 +179,14 @@ def cap_tiered_with_note(
         # The preamble alone busts the cap; keep its head and the note.
         return truncate_to_budget(context, room) + note, spilled_path
 
-    # Keep both ends of the window and drop the middle, which is what the
-    # provider itself does -- but with a deliberate shape.  The scheduler puts
-    # "one newest turn per session, oldest session first" at the head, and the
-    # newest turns overall at the tail, so keeping both ends preserves the
-    # per-session minimum *and* the most recent work; only the middle (older
-    # sessions' extra turns) is dropped.
+    # Keep both ends of the window and drop the middle, which is what the provider
+    # itself does -- but with a deliberate shape.  The scheduler gives every STRONG
+    # session its newest turn first, and the window is then rendered in grouped
+    # canonical order, so the head is the earliest sessions' newest turns and the
+    # tail is the latest work.  Keeping both ends therefore preserves a footprint
+    # for the older sessions *and* the most recent turns; what gets dropped is the
+    # middle, i.e. the middle sessions' content.  (This is why the provider
+    # budget matters more than this cut: it is a safety net, not the plan.)
     elision = "\n\n[... older L1 turns elided; full bundle spilled ...]\n\n"
     room_for_l1 = room - head_len - payload_len(elision)
     if room_for_l1 <= 0:

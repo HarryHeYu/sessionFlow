@@ -382,7 +382,8 @@ def startup_continuity(
         members = store.thread_members(tid)
         cached = (_load_context_cache(store, tid, provider, budget,
                                       context_format=context_format,
-                                      l1_hard_max=l1_hard_max)
+                                      l1_hard_max=l1_hard_max,
+                                      session_key=native_session_id)
                   if compile_context else {"compiled_at": 0, "context": None})
         last_compiled_at = cached["compiled_at"]
         context = cached["context"]
@@ -470,7 +471,8 @@ def startup_continuity(
                                     fresh_context, compiled_at,
                                     member_count=len(members),
                                     context_format=context_format,
-                                    l1_hard_max=l1_hard_max)
+                                    l1_hard_max=l1_hard_max,
+                                    session_key=native_session_id)
             elif context:
                 # Compilation failed but we still hold a usable bundle. Serving
                 # a known-stale bundle beats injecting nothing, as long as the
@@ -525,7 +527,8 @@ CONTEXT_TTL_SECONDS = 300  # 5 minutes
 
 def _context_cache_key(tid: str, provider: str, budget: str,
                        context_format: str = CONTEXT_FORMAT_FLAT,
-                       l1_hard_max: Optional[int] = None) -> str:
+                       l1_hard_max: Optional[int] = None,
+                       session_key: Optional[str] = None) -> str:
     """Cache identity for a compiled bundle.
 
     `context_format` belongs in the key, not beside it: a flat bundle and a
@@ -538,12 +541,18 @@ def _context_cache_key(tid: str, provider: str, budget: str,
     key = f"{CONTEXT_CACHE_PREFIX}{tid}:{provider}:{budget}:{context_format}"
     if l1_hard_max is not None:
         key += f":l1={l1_hard_max}"
+    if session_key:
+        # The tiered document excludes the calling session's own echo, so it is
+        # session-specific: without this dimension a second session in the same
+        # thread could be served the first one's bundle within the TTL.
+        key += f":s={session_key}"
     return key
 
 
 def _load_context_cache(store: Store, tid: str, provider: str, budget: str,
                         context_format: str = CONTEXT_FORMAT_FLAT,
-                        l1_hard_max: Optional[int] = None) -> Dict[str, Any]:
+                        l1_hard_max: Optional[int] = None,
+                        session_key: Optional[str] = None) -> Dict[str, Any]:
     """Load a cached continuation bundle.
 
     Returns {"compiled_at": float, "context": str | None}. Anything malformed,
@@ -560,7 +569,7 @@ def _load_context_cache(store: Store, tid: str, provider: str, budget: str,
     try:
         raw = store.meta_get(
             _context_cache_key(tid, provider, budget, context_format,
-                               l1_hard_max))
+                               l1_hard_max, session_key))
         if not raw:
             return miss
         payload = json.loads(raw)
@@ -594,7 +603,8 @@ def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
                         context: str, compiled_at: float,
                         context_format: str = CONTEXT_FORMAT_FLAT,
                         member_count: Optional[int] = None,
-                        l1_hard_max: Optional[int] = None) -> bool:
+                        l1_hard_max: Optional[int] = None,
+                        session_key: Optional[str] = None) -> bool:
     """Persist a compiled bundle. Returns False if it could not be stored.
 
     Never raises. `ensure_ascii=True` is deliberate: session text can contain a
@@ -611,7 +621,7 @@ def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
             payload["member_count"] = member_count
         return bool(store.meta_set(
             _context_cache_key(tid, provider, budget, context_format,
-                               l1_hard_max),
+                               l1_hard_max, session_key),
             json.dumps(payload, ensure_ascii=True),
         ))
     except Exception:

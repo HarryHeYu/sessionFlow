@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -119,6 +120,11 @@ def canonical_cwd_from_rollout(session_id: Optional[str]) -> Optional[str]:
     ``CODEX_HOME`` is honoured because that is Codex's own override.
     """
     if not session_id:
+        return None
+    # The id comes from stdin, and it is interpolated into a glob pattern: a `*`
+    # or `?` in it would match another session's rollout and return the wrong
+    # repository.  Only the documented id alphabet is accepted.
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", session_id):
         return None
     try:
         root = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))

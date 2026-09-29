@@ -779,25 +779,62 @@ class TestTieredTransport(HookTestCase):
         self.assertFalse(list(self.spill_dir.glob("claude-sessionstart-*"))
                          if self.spill_dir.exists() else False)
 
-    def test_long_tiered_context_keeps_head_and_spills_tail(self):
+    def test_oversized_history_still_delivers_the_tiered_document(self):
+        """The provider budget is what keeps the document intact.
+
+        With a 20 KB historical turn the naive path built a 16 KB window and then
+        head-cut it, which drops the newest L1 turns -- the exact failure Codex
+        had.  The handler now asks for a window that fits Claude's 10,000
+        character cap, so the model receives the document as built: every section
+        present, the newest evidence present, and no transport-side truncation.
+        """
         repo = self._world(big=True)
         result = self._run_hook(repo)
         self.assertEqual(result["status"], "context_ready", result.get("message"))
-        full = result["context"]
-        self.assertGreater(hook._payload_len(full), 9000)
         emitted = self._emit(result)
-        # the cap engaged and said so
-        self.assertIn("Continuation bundle truncated", emitted)
-        self.assertIn("Full bundle: ", emitted)
-        # everything authoritative survives the head cut
-        for marker in ("format: tiered-v1", "[L0 Thread State]",
-                       "[Runtime State]", "[Historical Evidence]",
-                       "retrieve with:", "[L1 Active Working Context]"):
+
+        # 1. it fits Claude's cap, so nothing was cut on the way out
+        self.assertLessEqual(hook._payload_len(emitted),
+                             hook.MAX_ADDITIONAL_CONTEXT_CHARS)
+        self.assertNotIn("Continuation bundle truncated", emitted,
+                         "the provider budget must make the transport cut unnecessary")
+
+        # 2. the authoritative preamble survives in full
+        for marker in ("format: tiered-v1", "[L0 Thread State]", "[Runtime State]",
+                       "[Historical Evidence]", "retrieve with:",
+                       "[L1 Active Working Context]"):
             self.assertIn(marker, emitted)
-        # the spill file carries the overflow: the complete document
-        spill = Path(emitted.split("Full bundle: ", 1)[1].split("\n", 1)[0])
-        self.assertTrue(spill.is_file(), emitted)
-        self.assertEqual(spill.read_text(encoding="utf-8"), full)
+
+        # 3. the newest evidence survives.  A 20 KB turn cannot fit a 7.6 KB
+        #    window whole, so the builder keeps its tail behind its own marker --
+        #    what must never happen is the *transport* deciding what to drop.
+        self.assertIn("T" * 100, emitted)
+
+        # 4. nothing needed spilling: the document was built to fit, not repaired
+        self.assertFalse(list(self.spill_dir.glob("claude-sessionstart-*"))
+                         if self.spill_dir.exists() else False)
+
+    def test_the_handler_asks_for_the_provider_window(self):
+        """The 7600 budget is the fix, so it is pinned directly: without it the
+        window is built at the 16 KB default and the transport cut returns."""
+        from voyager.integrations import claude_session_start as mod
+
+        self.assertEqual(mod.PROVIDER_L1_BUDGET, 7600)
+        repo = self._world(big=True)
+        seen = {}
+        real = hook.startup_continuity
+
+        def spy(**kwargs):
+            seen.update(kwargs)
+            return real(**kwargs)
+
+        hook.startup_continuity = spy
+        try:
+            self._run_hook(repo)
+        finally:
+            hook.startup_continuity = real
+        self.assertEqual(seen.get("l1_hard_max"), mod.PROVIDER_L1_BUDGET)
+        self.assertEqual(seen.get("context_format"), "tiered-v1")
 
     def test_transport_migration_leaves_the_attach_chain_untouched(self):
         repo = self._world(big=False)

@@ -385,7 +385,7 @@ Recorded so the findings are not lost while implementation stays frozen.
   Priority to be set after live acceptance; no production change now.
 
 ### Notes
-- Test suite, current collection: `386` — twelve tests added across the follow-ups
+- Test suite, current collection: `546` — the provider-hook work added the bulk of it
   (`374` before): three for Grok's zero-touch chain, one pinning `run_scan`
   re-entrancy, two for Grok's reported capability, one for Claude's stale
   `native_session_id_at_start`, and five for the L0 thread state.
