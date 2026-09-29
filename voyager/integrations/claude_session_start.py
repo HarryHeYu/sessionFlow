@@ -34,6 +34,7 @@ try:
     from voyager.startup import startup_continuity
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations import hook_payload
+    from voyager.integrations.hook_result import build_result, classify
 except ImportError:
     # Running as standalone module, parent is voyager dir
     import os
@@ -43,6 +44,7 @@ except ImportError:
     from voyager.startup import startup_continuity
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations import hook_payload
+    from voyager.integrations.hook_result import build_result, classify
 
 
 # Hook traces are the only way to tell "the hook never ran" apart from "the hook
@@ -231,31 +233,19 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
         # Check for valid WorkThread with available context
         # Note: context_stale=True just means we compiled fresh; context is still usable
         if not result.continuity_available or not result.context:
-            attach_status = result.attach_status or ""
-            # Ambiguity (several active WorkThreads in this repo) is a real,
-            # actionable failure. Reporting it as "no_thread" hides it from the
-            # user and contradicts startup.py's own "ambiguity = explicit error"
-            # contract, so surface it instead. Exit 2 is non-blocking here.
-            if attach_status.startswith("ERROR_") or "ambiguous" in attach_status.lower():
-                return {
-                    "status": "error",
-                    "message": (
-                        f"voyager could not resolve a WorkThread for {cwd} "
-                        f"({attach_status}). Pick one explicitly with "
-                        f"`voyager continue --thread <id>`."
-                    ),
-                    "attach_status": attach_status,
-                }
-            return {
-                "status": "no_thread",
-                "message": "No active WorkThread found" if not result.continuity_available else "Context not available",
-                "attach_status": attach_status,
-                "continuity_info": {
-                    "context_source": result.context_source,
-                    "context_stale_cached": result.context_stale,
-                    "recommended_action": result.recommended_action,
-                },
-            }
+            # One classification, shared with the other provider handlers:
+            # `no_thread` is a *confirmed* absence, `ambiguous` refuses to choose,
+            # and any other failure is an error.  Reporting an engine failure, or
+            # ambiguity, as "no thread" hides both from the user.  Exit 2 is
+            # non-blocking here.
+            classification = classify(result)
+            out = build_result(result, classification, cwd)
+            if classification == "no_thread":
+                out["message"] = ("No active WorkThread found"
+                                  if not result.continuity_available
+                                  else "Context not available")
+            out["continuity_info"]["context_stale_cached"] = result.context_stale
+            return out
             
         # Return structured status - separate from attach decision
         # Context is ready regardless of auto_attach status

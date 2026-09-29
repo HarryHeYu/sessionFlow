@@ -35,11 +35,13 @@ from typing import Any, Dict, Optional
 try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
+    from voyager.integrations.hook_result import build_result, classify
     from voyager.startup import startup_continuity
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
+    from voyager.integrations.hook_result import build_result, classify
     from voyager.startup import startup_continuity
 
 PROVIDER = "kiro"
@@ -143,27 +145,15 @@ def handle_kiro_session_start(
 
     if not result.continuity_available or not result.context:
         attach_status = getattr(result, "attach_status", None) or ""
-        continuity_info = {
-            "context_source": getattr(result, "context_source", None),
-            "recommended_action": getattr(result, "recommended_action", None),
-        }
-        # Ambiguity -- several active WorkThreads in this repo -- is a real,
-        # actionable failure.  Reporting it as "no_thread" would hide it and
-        # contradict the core's own contract (exact repo + 0 threads -> nothing to
-        # continue; + 1 -> continue it; + more than one -> refuse to choose).
-        # Nothing is auto-selected and nothing is injected on this path.
-        if attach_status.startswith("ERROR_") or "ambiguous" in attach_status.lower():
-            _log_event({"ts": time.time(), "event": "ambiguous", "cwd": payload["cwd"],
-                        "session_id": session_id, "attach_status": attach_status})
-            return {"status": "error", "attach_status": attach_status,
-                    "message": ("voyager could not resolve a WorkThread for %s (%s). "
-                                "Pick one explicitly with `voyager continue --thread <id>`."
-                                % (payload["cwd"], attach_status)),
-                    "continuity_info": continuity_info}
-        _log_event({"ts": time.time(), "event": "no_context", "cwd": payload["cwd"],
-                    "session_id": session_id, "attach_status": attach_status})
-        return {"status": "no_thread", "attach_status": attach_status,
-                "continuity_info": continuity_info}
+        # One shared classification: `no_thread` means the core confirmed there is
+        # nothing here, `ambiguous` means several threads matched and none may be
+        # chosen, and any other failure is an `error`.  They are not the same claim,
+        # and folding them together is what used to hide both.
+        classification = classify(result)
+        _log_event({"ts": time.time(), "event": classification,
+                    "cwd": payload["cwd"], "session_id": session_id,
+                    "attach_status": attach_status})
+        return build_result(result, classification, payload["cwd"])
 
     _log_event({"ts": time.time(), "event": "context_ready", "cwd": payload["cwd"],
                 "session_id": session_id, "thread_id": result.thread_id,
