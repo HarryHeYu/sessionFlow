@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -18,9 +19,11 @@ class CursorIntegration:
     def __init__(self, home: Optional[Path] = None):
         self.home = home or Path.home()
         self.capabilities: Optional[Any] = None
-        # Cursor uses settings.json at ~/.cursor/ or project-level .cursor/
-        self.global_settings = self.home / ".cursor/settings.json"
-        self.project_settings = Path.cwd() / ".cursor/settings.json" if Path.cwd().exists() else None
+        # Cursor reads hooks from hooks.json, not settings.json:
+        # user scope is ~/.cursor/hooks.json (relative paths resolve against
+        # ~/.cursor/), project scope is <project>/.cursor/hooks.json.
+        self.global_settings = self.home / ".cursor/hooks.json"
+        self.project_settings = Path.cwd() / ".cursor/hooks.json" if Path.cwd().exists() else None
     
     def install(self) -> Dict[str, Any]:
         """Install Cursor sessionStart hook.
@@ -73,34 +76,37 @@ class CursorIntegration:
                 if isinstance(session_hooks, list):
                     hooks["sessionStart"] = [
                         h for h in session_hooks
-                        if not (isinstance(h, dict) and h.get("name") == "voyager-session-start")
+                        if not (isinstance(h, dict)
+                                and "cursor_session_start.py" in str(h.get("command", "")))
                     ]
             
-            # Step 5: Add Voyager sessionStart hook
+            # Step 5: Add the Voyager sessionStart hook in Cursor's real schema.
+            #
+            # Cursor's per-hook fields are exactly: command (a shell string),
+            # type ("command"|"prompt"), timeout (seconds), failClosed,
+            # loop_limit, matcher.  Anything else is ignored, so an invented
+            # shape would silently never run.
+            handler = (Path(__file__).resolve().parent / "cursor_session_start.py")
+            python = sys.executable or "python"
             voyager_entry = {
-                "name": "voyager-session-start",
-                "description": "Automatically attach to WorkThread using Voyager MCP",
-                "event": "sessionStart",
-                "priority": 100,
-                "command": "voyager hook startup --provider cursor --cwd '$WORKSPACE_DIRECTORY'",
-                "returns": {
-                    "type": "json",
-                    "fields": ["additional_context"],
-                },
-                "timeout_ms": 15000,
-                "on_error": "ignore",  # Don't block session if hook fails
+                "command": '"%s" "%s"' % (python, handler),
+                "type": "command",
+                "timeout": 30,
             }
-            
+
             # Ensure sessionStart list exists
             if "sessionStart" not in hooks:
                 hooks["sessionStart"] = []
-            
+
             if not isinstance(hooks["sessionStart"], list):
                 hooks["sessionStart"] = [hooks["sessionStart"]]
             
             hooks["sessionStart"].append(voyager_entry)
             
             # Step 6: Write back
+            # `version` is required by Cursor's schema; a file without it is
+            # not loaded at all.
+            config.setdefault("version", 1)
             target_file.parent.mkdir(parents=True, exist_ok=True)
             target_file.write_text(
                 json.dumps(config, indent=2, ensure_ascii=False),
