@@ -437,29 +437,38 @@ class TestCursorIntegration:
         assert "sessionStart" in str(result)
     
     def test_install_preserves_other_hooks(self, tmp_path):
+        """Cursor reads hooks.json (not settings.json) and its per-hook fields are
+        exactly command / type / timeout / failClosed / loop_limit / matcher."""
         from voyager.integrations.cursor import CursorIntegration
-        
-        settings_file = tmp_path / ".cursor/settings.json"
-        settings_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
+        hooks_file = tmp_path / ".cursor/hooks.json"
+        hooks_file.parent.mkdir(parents=True, exist_ok=True)
+
         existing = {
+            "version": 1,
             "hooks": {
                 "sessionStart": [
-                    {"name": "pre-existing", "event": "sessionStart"},
+                    {"command": "echo pre-existing", "type": "command", "timeout": 5},
                 ]
             },
         }
-        settings_file.write_text(json.dumps(existing))
-        
+        hooks_file.write_text(json.dumps(existing))
+
         cursor = CursorIntegration(home=tmp_path)
         cursor.install()
-        
-        config = json.loads(settings_file.read_text())
+
+        config = json.loads(hooks_file.read_text())
+        assert config["version"] == 1, "Cursor does not load a file without version"
         hooks = config["hooks"]["sessionStart"]
-        
-        assert len(hooks) >= 2
-        assert any(h.get("name") == "pre-existing" for h in hooks)
-        assert any(h.get("name") == "voyager-session-start" for h in hooks)
+
+        assert len(hooks) >= 2, "the pre-existing hook must survive"
+        assert any(h.get("command") == "echo pre-existing" for h in hooks)
+        voyager = [h for h in hooks if "cursor_session_start.py" in str(h.get("command", ""))]
+        assert voyager, hooks
+        assert set(voyager[0]) <= {"command", "type", "timeout", "failClosed",
+                                   "loop_limit", "matcher"}, voyager[0]
+        assert voyager[0]["type"] == "command"
+        assert isinstance(voyager[0]["timeout"], int)
     
     def test_returns_additional_context_format(self, tmp_path):
         """Verify hook configuration supports additional_context response."""

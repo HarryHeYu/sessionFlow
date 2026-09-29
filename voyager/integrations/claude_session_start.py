@@ -33,6 +33,7 @@ try:
     from voyager.store import Store
     from voyager.startup import startup_continuity
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations import hook_payload
 except ImportError:
     # Running as standalone module, parent is voyager dir
     import os
@@ -41,6 +42,7 @@ except ImportError:
     from voyager.store import Store
     from voyager.startup import startup_continuity
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations import hook_payload
 
 
 # Hook traces are the only way to tell "the hook never ran" apart from "the hook
@@ -302,42 +304,14 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
 
 # Claude Code caps hook JSON string fields (additionalContext, systemMessage,
 # initialUserMessage and plain-text stdout) at 10,000 characters. Stay under it
-# and spill the full bundle to a file so nothing is lost.
-MAX_ADDITIONAL_CONTEXT_CHARS = 9000
+# and spill the full bundle to a file so nothing is lost. The measurement and
+# the cut live in `voyager.integrations.hook_payload` so every provider's handler
+# applies identical semantics.
+MAX_ADDITIONAL_CONTEXT_CHARS = hook_payload.MAX_ADDITIONAL_CONTEXT_CHARS
 
+_payload_len = hook_payload.payload_len
 
-def _payload_len(text: str) -> int:
-    """Length the way Claude Code measures it.
-
-    Claude Code is a JavaScript program, so its `String.length` counts UTF-16
-    code units: an astral character (an emoji, say) counts as 2. Python's
-    `len()` counts code points. Measuring with `len()` means a payload of 9000
-    emoji looks safe here while actually occupying 18,000 units — i.e. the cap
-    would silently fail to cap. Comparing like with like is the only way this
-    limit means anything.
-    """
-    if text.isascii():  # C-level fast path for the overwhelmingly common case
-        return len(text)
-    return len(text) + sum(1 for ch in text if ch > "\uffff")
-
-
-def _truncate_to_budget(text: str, budget: int) -> str:
-    """Cut `text` so its `_payload_len` is at most `budget`. Never raises.
-
-    Walks character by character rather than slicing first: an overflow measured
-    in UTF-16 units cannot be subtracted from a code-point count, because an
-    astral character contributes two units but occupies one code point. Slicing
-    by the unit overflow removes up to twice as much as needed — for all-astral
-    text it removed everything.
-    """
-    if budget <= 0:
-        return ""
-    total = 0
-    for index, char in enumerate(text):
-        total += 2 if char > "\uffff" else 1
-        if total > budget:
-            return text[:index]
-    return text
+_truncate_to_budget = hook_payload.truncate_to_budget
 
 # Spilled bundles are diagnostic artefacts, not state — keep the newest few.
 SPILL_KEEP = 10

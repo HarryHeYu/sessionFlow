@@ -69,6 +69,11 @@ EVENT_FIELDS = [
 #:
 #: NULL in the DB means "not enriched yet" and is normalised to "unknown" at the
 #: API layer -- the two states are deliberately not both stored.
+#: The sentinel a classifier returns when it cannot decide.  It is *not* a stored
+#: state: `new_event` folds it back to NULL so the store has exactly one
+#: representation of "not classified".
+ORIGIN_UNKNOWN = "unknown"
+
 EVENT_ORIGINS = {
     "human",               # a real, user-authored turn
     "provider_bootstrap",  # AGENTS.md / skills / user_info style injections
@@ -92,6 +97,15 @@ def new_event(**kw) -> Dict[str, Any]:
         ev[k] = v
     if ev["kind"] not in EVENT_KINDS:
         raise ValueError(f"bad event kind: {ev['kind']}")
+    # One representation for "not classified": DB NULL.  A classifier that cannot
+    # decide returns its UNKNOWN sentinel and callers pass it straight through, so
+    # normalise it here rather than letting a literal string reach the store --
+    # otherwise `origin IS NOT NULL` stops meaning "classified" and two encodings
+    # of the same state drift apart.  The API layer still renders NULL as
+    # "unknown".  Spelled as a literal because the vocabulary constant lives in
+    # `provenance`, which imports this module.
+    if ev["origin"] == ORIGIN_UNKNOWN:
+        ev["origin"] = None
     if ev["origin"] is not None and ev["origin"] not in EVENT_ORIGINS:
         raise ValueError(f"bad event origin: {ev['origin']}")
     return ev

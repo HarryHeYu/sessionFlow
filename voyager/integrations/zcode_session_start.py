@@ -36,13 +36,19 @@ from typing import Any, Dict, Optional
 
 try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
 
 PROVIDER = "zcode"
+#: The providers cap the injected string at 10,000 characters; leave room for
+#: the preamble (L0 + Runtime State + retrieval hint) and the truncation note.
+PROVIDER_L1_BUDGET = 7600
+
 LOG_MAX_BYTES = 1_000_000
 LOG_KEEP_BYTES = 200_000
 
@@ -122,6 +128,9 @@ def handle_zcode_session_start(
             auto_attach=True,
             store=store,
             context_format=CONTEXT_FORMAT_TIERED,
+            # Build the L1 inside this provider's cap instead of letting the
+            # provider cut the document afterwards: a cut drops whole sessions.
+            l1_hard_max=PROVIDER_L1_BUDGET,
         )
     except Exception as e:
         _log_event({"ts": time.time(), "event": "startup_continuity_error",
@@ -164,12 +173,24 @@ def handle_zcode_session_start(
 
 
 def emit(result: Dict[str, Any]) -> int:
-    """Write the protocol envelope; always exit 0 (fail-open)."""
+    """Write the protocol envelope; always exit 0 (fail-open).
+
+    ZCode documents ``maxOutputBytes`` (32 KB by default) for hook stdout, but a
+    capped payload is still the better trade: the shared cap keeps the tiered
+    document coherent and spills the full bundle instead of letting the provider
+    cut it wherever it likes.
+    """
     try:
         if result.get("status") == "context_ready" and result.get("context"):
+            context, spilled = cap_tiered_with_note(result["context"], "zcode")
+            if spilled:
+                _log_event({"ts": time.time(), "event": "payload_capped",
+                            "original_chars": payload_len(result["context"]),
+                            "delivered_chars": payload_len(context),
+                            "spilled": str(spilled)})
             payload = {"hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": result["context"],
+                "additionalContext": context,
             }}
             # ensure_ascii: a GBK console must never corrupt the context, and
             # escaped JSON decodes back to the exact same string.

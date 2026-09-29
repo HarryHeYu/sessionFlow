@@ -123,6 +123,7 @@ def startup_continuity(
     store: Optional[Store] = None,
     compile_context: bool = True,
     context_format: str = CONTEXT_FORMAT_FLAT,
+    l1_hard_max: Optional[int] = None,
 ) -> StartupContinuityResult:
     """Unified startup continuity primitive.
     
@@ -380,7 +381,8 @@ def startup_continuity(
         # nothing had changed.
         members = store.thread_members(tid)
         cached = (_load_context_cache(store, tid, provider, budget,
-                                      context_format=context_format)
+                                      context_format=context_format,
+                                      l1_hard_max=l1_hard_max)
                   if compile_context else {"compiled_at": 0, "context": None})
         last_compiled_at = cached["compiled_at"]
         context = cached["context"]
@@ -437,19 +439,24 @@ def startup_continuity(
             fresh_context = None
             try:
                 from .auto import get_continuation_context
-                ctx_result = get_continuation_context(
-                    store=store,
-                    cwd=cwd,
-                    provider=provider,
-                    native_session_id=native_session_id,
-                    thread_id=tid,
-                    repo=git_root,
-                    goal=None,  # Let ranking decide relevance
-                    budget=budget,
-                    target=provider,
-                    sync=True,
-                    context_format=context_format,
-                )
+                compile_kwargs: Dict[str, Any] = {
+                    "store": store,
+                    "cwd": cwd,
+                    "provider": provider,
+                    "native_session_id": native_session_id,
+                    "thread_id": tid,
+                    "repo": git_root,
+                    "goal": None,  # Let ranking decide relevance
+                    "budget": budget,
+                    "target": provider,
+                    "sync": True,
+                    "context_format": context_format,
+                }
+                if l1_hard_max is not None:
+                    # Only sent when a provider asked for a specific window, so
+                    # existing callers and stand-ins keep the exact old signature.
+                    compile_kwargs["l1_hard_max"] = l1_hard_max
+                ctx_result = get_continuation_context(**compile_kwargs)
                 if ctx_result.get("continuity_available"):
                     fresh_context = ctx_result.get("context")
             except Exception as e:
@@ -462,7 +469,8 @@ def startup_continuity(
                 _save_context_cache(store, tid, provider, budget,
                                     fresh_context, compiled_at,
                                     member_count=len(members),
-                                    context_format=context_format)
+                                    context_format=context_format,
+                                    l1_hard_max=l1_hard_max)
             elif context:
                 # Compilation failed but we still hold a usable bundle. Serving
                 # a known-stale bundle beats injecting nothing, as long as the
@@ -516,7 +524,8 @@ CONTEXT_TTL_SECONDS = 300  # 5 minutes
 
 
 def _context_cache_key(tid: str, provider: str, budget: str,
-                       context_format: str = CONTEXT_FORMAT_FLAT) -> str:
+                       context_format: str = CONTEXT_FORMAT_FLAT,
+                       l1_hard_max: Optional[int] = None) -> str:
     """Cache identity for a compiled bundle.
 
     `context_format` belongs in the key, not beside it: a flat bundle and a
@@ -526,11 +535,15 @@ def _context_cache_key(tid: str, provider: str, budget: str,
     writers are migrated deliberately; adding the dimension does mean the rows
     written before it are misses once, which just rebuilds them.
     """
-    return f"{CONTEXT_CACHE_PREFIX}{tid}:{provider}:{budget}:{context_format}"
+    key = f"{CONTEXT_CACHE_PREFIX}{tid}:{provider}:{budget}:{context_format}"
+    if l1_hard_max is not None:
+        key += f":l1={l1_hard_max}"
+    return key
 
 
 def _load_context_cache(store: Store, tid: str, provider: str, budget: str,
-                        context_format: str = CONTEXT_FORMAT_FLAT) -> Dict[str, Any]:
+                        context_format: str = CONTEXT_FORMAT_FLAT,
+                        l1_hard_max: Optional[int] = None) -> Dict[str, Any]:
     """Load a cached continuation bundle.
 
     Returns {"compiled_at": float, "context": str | None}. Anything malformed,
@@ -546,7 +559,8 @@ def _load_context_cache(store: Store, tid: str, provider: str, budget: str,
     miss = {"compiled_at": 0.0, "context": None}
     try:
         raw = store.meta_get(
-            _context_cache_key(tid, provider, budget, context_format))
+            _context_cache_key(tid, provider, budget, context_format,
+                               l1_hard_max))
         if not raw:
             return miss
         payload = json.loads(raw)
@@ -579,7 +593,8 @@ def _load_context_cache(store: Store, tid: str, provider: str, budget: str,
 def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
                         context: str, compiled_at: float,
                         context_format: str = CONTEXT_FORMAT_FLAT,
-                        member_count: Optional[int] = None) -> bool:
+                        member_count: Optional[int] = None,
+                        l1_hard_max: Optional[int] = None) -> bool:
     """Persist a compiled bundle. Returns False if it could not be stored.
 
     Never raises. `ensure_ascii=True` is deliberate: session text can contain a
@@ -595,7 +610,8 @@ def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
         if isinstance(member_count, int) and not isinstance(member_count, bool):
             payload["member_count"] = member_count
         return bool(store.meta_set(
-            _context_cache_key(tid, provider, budget, context_format),
+            _context_cache_key(tid, provider, budget, context_format,
+                               l1_hard_max),
             json.dumps(payload, ensure_ascii=True),
         ))
     except Exception:

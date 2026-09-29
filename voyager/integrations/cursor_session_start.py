@@ -34,13 +34,19 @@ from typing import Any, Dict, List, Optional
 
 try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
 
 PROVIDER = "cursor"
+#: The providers cap the injected string at 10,000 characters; leave room for
+#: the preamble (L0 + Runtime State + retrieval hint) and the truncation note.
+PROVIDER_L1_BUDGET = 7600
+
 LOG_MAX_BYTES = 1_000_000
 LOG_KEEP_BYTES = 200_000
 
@@ -136,6 +142,9 @@ def handle_cursor_session_start(
             auto_attach=True,
             store=store,
             context_format=CONTEXT_FORMAT_TIERED,
+            # Build the L1 inside this provider's cap instead of letting the
+            # provider cut the document afterwards: a cut drops whole sessions.
+            l1_hard_max=PROVIDER_L1_BUDGET,
         )
     except Exception as e:
         _log_event({"ts": time.time(), "event": "startup_continuity_error",
@@ -182,11 +191,19 @@ def emit(result: Dict[str, Any]) -> int:
     """Write Cursor's envelope; always exit 0 (fail-open).
 
     Cursor reads a top-level ``additional_context``; ``hookSpecificOutput`` is
-    not part of its contract.
+    not part of its contract.  Its docs document no size limit for the field, so
+    the shared cap is applied defensively: a coherent capped document plus a
+    spilled full copy beats an unknown provider-side cut.
     """
     try:
         if result.get("status") == "context_ready" and result.get("context"):
-            payload = {"additional_context": result["context"]}
+            context, spilled = cap_tiered_with_note(result["context"], "cursor")
+            if spilled:
+                _log_event({"ts": time.time(), "event": "payload_capped",
+                            "original_chars": payload_len(result["context"]),
+                            "delivered_chars": payload_len(context),
+                            "spilled": str(spilled)})
+            payload = {"additional_context": context}
             # ensure_ascii: a GBK console must never corrupt the context, and
             # escaped JSON decodes back to the exact same string.
             sys.stdout.write(json.dumps(payload, ensure_ascii=True))

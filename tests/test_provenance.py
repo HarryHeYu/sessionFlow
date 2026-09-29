@@ -227,3 +227,39 @@ def test_coverage_report_shape(tmp_path):
     assert rows["codex"]["enriched"] == 2
     assert rows["codex"]["human"] == 1
     assert rows["codex"]["coverage_pct"] == 100.0
+
+
+# --- one stored representation for "not classified" -------------------------
+
+def test_new_event_folds_the_unknown_sentinel_to_null():
+    """A classifier's UNKNOWN must not reach the store as a literal string.
+
+    Two encodings of the same state (`NULL` and `'unknown'`) would make
+    `origin IS NOT NULL` stop meaning "classified" and drift apart over time.
+    """
+    from voyager.model import ORIGIN_UNKNOWN, new_event
+
+    ev = new_event(sid="s", seq=1, kind="user", origin=ORIGIN_UNKNOWN)
+    assert ev["origin"] is None, "UNKNOWN must be stored as NULL"
+
+    ev2 = new_event(sid="s", seq=2, kind="user", origin="human")
+    assert ev2["origin"] == "human", "real origins still round-trip"
+
+    ev3 = new_event(sid="s", seq=3, kind="user", origin=None)
+    assert ev3["origin"] is None
+
+
+def test_a_genuinely_bad_origin_still_raises():
+    import pytest as _pytest
+
+    from voyager.model import new_event
+
+    with _pytest.raises(ValueError):
+        new_event(sid="s", seq=1, kind="user", origin="nonsense")
+
+
+def test_provenance_unknown_matches_the_model_vocabulary():
+    from voyager.model import ORIGIN_UNKNOWN
+    from voyager.provenance import UNKNOWN
+
+    assert UNKNOWN == ORIGIN_UNKNOWN == "unknown"

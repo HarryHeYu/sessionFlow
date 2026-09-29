@@ -35,11 +35,17 @@ from typing import Any, Dict, Optional
 
 try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
+    from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
+
+#: The providers cap the injected string at 10,000 characters; leave room for
+#: the preamble (L0 + Runtime State + retrieval hint) and the truncation note.
+PROVIDER_L1_BUDGET = 7600
 
 LOG_MAX_BYTES = 1_000_000
 LOG_KEEP_BYTES = 200_000
@@ -99,6 +105,44 @@ def normalize_event(stdin_raw: str) -> Dict[str, Any]:
     }
 
 
+def canonical_cwd_from_rollout(session_id: Optional[str]) -> Optional[str]:
+    """The session's cwd as Codex itself recorded it, or None.
+
+    The hook payload can carry a non-ASCII ``cwd`` mangled by the console
+    encoding, and guessing an encoding back is exactly the kind of heuristic
+    that silently produces a wrong repository.  Codex already knows the answer:
+    its rollout for the session starts with a ``session_meta`` record whose
+    ``cwd`` is authoritative, and the rollout's filename contains the session id,
+    so the lookup is a glob.  Nothing here inspects text for "mojibake" — the
+    structured source either resolves or it does not.
+
+    ``CODEX_HOME`` is honoured because that is Codex's own override.
+    """
+    if not session_id:
+        return None
+    try:
+        root = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
+        for path in (root / "sessions").glob("**/rollout-*%s.jsonl" % session_id):
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for _ in range(20):          # session_meta is the first record
+                    line = fh.readline()
+                    if not line:
+                        break
+                    try:
+                        record = json.loads(line)
+                    except Exception:
+                        continue
+                    if record.get("type") != "session_meta":
+                        continue
+                    cwd = (record.get("payload") or {}).get("cwd")
+                    if isinstance(cwd, str) and cwd.strip():
+                        return cwd
+                    return None
+    except Exception:
+        return None
+    return None
+
+
 def handle_codex_session_start(
     cwd: Optional[str] = None,
     store: Optional[Any] = None,
@@ -112,8 +156,11 @@ def handle_codex_session_start(
     if stdin_raw is None:
         stdin_raw = _read_stdin()
     payload = normalize_event(stdin_raw)
-    cwd = cwd or payload["cwd"]
     session_id = payload["native_session_id"]
+    # Order matters: an explicit cwd (tests, callers) wins, then Codex's own
+    # rollout record, and only then the hook payload -- whose cwd can arrive
+    # mangled when the path is non-ASCII.
+    cwd = cwd or canonical_cwd_from_rollout(session_id) or payload["cwd"]
 
     try:
         result = startup_continuity(
@@ -123,6 +170,9 @@ def handle_codex_session_start(
             auto_attach=True,
             store=store,
             context_format=CONTEXT_FORMAT_TIERED,
+            # Build the L1 inside this provider's cap instead of letting the
+            # provider cut the document afterwards: a cut drops whole sessions.
+            l1_hard_max=PROVIDER_L1_BUDGET,
         )
     except Exception as e:
         _log_event({"ts": time.time(), "event": "startup_continuity_error",
@@ -165,12 +215,26 @@ def handle_codex_session_start(
 
 
 def emit(result: Dict[str, Any]) -> int:
-    """Write the protocol envelope; always exit 0 (fail-open)."""
+    """Write the protocol envelope; always exit 0 (fail-open).
+
+    The payload is capped here rather than left to the provider.  Codex caps the
+    injected string at 10,000 characters and, when a payload exceeds it, keeps
+    the head and the tail while eliding the middle -- for tiered-v1 that removes
+    the newest L1 turns, which is exactly what the model needs.  Staying under
+    the cap keeps the document coherent, and the full bundle is spilled to
+    ~/.voyager/context/ so nothing is actually lost.
+    """
     try:
         if result.get("status") == "context_ready" and result.get("context"):
+            context, spilled = cap_tiered_with_note(result["context"], "codex")
+            if spilled:
+                _log_event({"ts": time.time(), "event": "payload_capped",
+                            "original_chars": payload_len(result["context"]),
+                            "delivered_chars": payload_len(context),
+                            "spilled": str(spilled)})
             payload = {"hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": result["context"],
+                "additionalContext": context,
             }}
             # ensure_ascii: a GBK console must never corrupt the context, and
             # escaped JSON decodes back to the exact same string.

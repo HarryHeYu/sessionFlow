@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .model import EVENT_ORIGINS
+from .model import EVENT_ORIGINS, ORIGIN_UNKNOWN
 
-UNKNOWN = "unknown"
+UNKNOWN = ORIGIN_UNKNOWN   # one sentinel, defined with the vocabulary in `model`
 
 
 def normalise(origin: Optional[str]) -> str:

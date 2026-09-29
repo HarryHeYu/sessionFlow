@@ -270,7 +270,8 @@ def get_continuation_context(store: Optional[Store] = None,
                              budget: Optional[str] = None,
                              target: Optional[str] = None,
                              sync: bool = True,
-                             context_format: str = "flat") -> Dict[str, Any]:
+                             context_format: str = "flat",
+                             l1_hard_max: Optional[int] = None) -> Dict[str, Any]:
     """Compile the continuation context for the work in `cwd`/`thread`.
 
     Shared core surface for CLI / MCP / Skill / local API. Deterministic:
@@ -335,8 +336,14 @@ def get_continuation_context(store: Optional[Store] = None,
             # the hint's full-history scale are untouched.
             exclude_sid = (f"{provider}:{native_session_id}"
                            if provider and native_session_id else None)
+            tiered_kwargs: Dict[str, Any] = {"exclude_session_id": exclude_sid}
+            if l1_hard_max is not None:
+                # Providers that cap the injected string need a smaller window:
+                # the L1 must be built inside their budget so nothing has to be
+                # cut afterwards, which would starve whole sessions.
+                tiered_kwargs["l1_hard_max"] = l1_hard_max
             raw_bundle = build_tiered_bundle(store, thread, members, members,
-                                             exclude_session_id=exclude_sid)
+                                             **tiered_kwargs)
         else:
             raw_bundle = build_continuation_bundle(store, members, goal=goal)
         packed, info = apply_budget(raw_bundle, tokens, target=target)

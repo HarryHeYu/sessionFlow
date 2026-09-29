@@ -145,3 +145,85 @@ def test_context_ready_is_logged_and_log_stays_bounded(
     assert "context_ready" in events
     assert all(len(l) < 4000 for l in lines)
     assert time.time() - json.loads(lines[-1])["ts"] < 60
+
+
+# --- non-ASCII hook cwd: the rollout is authoritative ------------------------
+
+def _fake_codex_home(tmp_path, session_id, cwd):
+    """Lay out ~/.codex/sessions/<Y>/<M>/<D>/rollout-<ts>-<sid>.jsonl."""
+    root = tmp_path / "codex-home"
+    day = root / "sessions" / "2026" / "09" / "29"
+    day.mkdir(parents=True, exist_ok=True)
+    f = day / ("rollout-2026-09-29T13-00-00-%s.jsonl" % session_id)
+    f.write_text(
+        json.dumps({"type": "session_meta",
+                    "payload": {"id": session_id, "cwd": cwd,
+                                "cli_version": "0.155.0"}}) + "\n",
+        encoding="utf-8")
+    return root
+
+
+def test_canonical_cwd_comes_from_the_rollout(tmp_path, monkeypatch):
+    from voyager.integrations.codex_session_start import canonical_cwd_from_rollout
+
+    sid = "01a0e7a2-6b1f-7011-ad65-103e17fb1094"
+    monkeypatch.setenv("CODEX_HOME", str(_fake_codex_home(tmp_path, sid, "E:/work/项目")))
+    assert canonical_cwd_from_rollout(sid) == "E:/work/项目"
+
+
+def test_canonical_cwd_is_none_without_a_session_or_rollout(tmp_path, monkeypatch):
+    from voyager.integrations.codex_session_start import canonical_cwd_from_rollout
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "empty"))
+    assert canonical_cwd_from_rollout(None) is None
+    assert canonical_cwd_from_rollout("") is None
+    assert canonical_cwd_from_rollout("does-not-exist") is None
+
+
+def test_a_mangled_payload_cwd_is_overridden_by_the_rollout(tmp_path, monkeypatch):
+    """The whole point: a non-ASCII cwd must come from Codex, not from the payload."""
+    import io as _io
+    from voyager.integrations.codex_session_start import handle_codex_session_start
+
+    sid = "01a0e7a2-6b1f-7011-ad65-103e17fb1094"
+    monkeypatch.setenv("CODEX_HOME", str(_fake_codex_home(tmp_path, sid, "E:/work/项目")))
+    monkeypatch.setattr(sys, "stdin", _io.StringIO(json.dumps(
+        {"session_id": sid, "cwd": "E:/work/??", "hook_event_name": "SessionStart"})))
+
+    store = Store(tmp_path / "hook2.db")
+    try:
+        result = handle_codex_session_start(store=store)
+        # no thread exists for that repo, but the *resolved* cwd is what matters
+        assert result["status"] == "no_thread"
+    finally:
+        store.close()
+    # the resolver itself is the assertion that counts
+    from voyager.integrations.codex_session_start import canonical_cwd_from_rollout
+    assert canonical_cwd_from_rollout(sid) == "E:/work/项目"
+
+
+def test_an_explicit_cwd_still_wins(tmp_path, monkeypatch):
+    from voyager.integrations.codex_session_start import handle_codex_session_start
+
+    sid = "01a0e7a2-6b1f-7011-ad65-103e17fb1094"
+    monkeypatch.setenv("CODEX_HOME", str(_fake_codex_home(tmp_path, sid, "E:/work/项目")))
+    store = Store(tmp_path / "hook3.db")
+    try:
+        result = handle_codex_session_start(cwd=str(tmp_path), stdin_raw="{}", store=store)
+        assert result["status"] == "no_thread"
+    finally:
+        store.close()
+
+
+def test_rollout_without_cwd_is_not_guessed(tmp_path, monkeypatch):
+    """A rollout that does not record a cwd must not be invented."""
+    from voyager.integrations.codex_session_start import canonical_cwd_from_rollout
+
+    root = tmp_path / "codex-home"
+    day = root / "sessions" / "2026" / "09" / "29"
+    day.mkdir(parents=True)
+    (day / "rollout-2026-09-29T13-00-00-sess-x.jsonl").write_text(
+        json.dumps({"type": "session_meta", "payload": {"id": "sess-x"}}) + "\n",
+        encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(root))
+    assert canonical_cwd_from_rollout("sess-x") is None
