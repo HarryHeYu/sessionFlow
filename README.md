@@ -160,16 +160,41 @@ explicitly instead of pretending.
 ## Startup Continuity — product status
 
 **Core functionality**: Complete and operational.  
-**Runtime auto-trigger**: Claude Code has a native `SessionStart` hook, and Voyager registers one. Claude Code firing it is **live-verified as of 2026-09-24** — the provider's own `session_id` reached the hook, and that session then attached itself to its WorkThread with no Voyager command.
+**Runtime auto-trigger**: Claude Code, Grok and Codex have native `SessionStart` hooks, and Voyager registers them. Claude Code firing its hook is **live-verified as of 2026-09-24**, Grok as of 2026-09-25, and **Codex as of 2026-09-28**: a normally launched Codex session in the same repo received the `tiered-v1` context before its first turn and continued the current WorkThread on a bare `继续`.
 
 The `startup_continuity()` function correctly discovers WorkThreads, auto-attaches sessions, and compiles continuation context. What varies per provider is whether a session start can reach that function *without the user doing anything*.
 
 **Provider classification**:
 
+Codex is now on the native-hook path: `voyager integrate install codex` writes
+`~/.codex/hooks.json`, and the fail-open handler emits the shared
+`hookSpecificOutput.additionalContext` envelope with `tiered-v1` context before
+the first turn. Its handler, identity propagation, and idempotent lifecycle
+are covered by integration tests, and a live provider firing is **verified**
+(2026-09-28): hook delivery, native auto-attach, and zero-touch continuation.
+
+**Codex zero-touch continuity — live-verified 2026-09-28**:
+
+| Capability | Status |
+|---|---|
+| native SessionStart hook | PASS |
+| tiered-v1 context delivery | PASS |
+| zero-touch cross-agent continuity | PASS |
+| native auto-attach | PASS |
+
+Open Codex normally in the same repo and type nothing but `继续`: it continues
+the current WorkThread without calling `voyager_startup`, `voyager_continue`,
+or any retrieval command.
+
+**Boundary**: this is **semantic continuity**, not native transcript
+teleportation. The provider still starts a new native conversation; Voyager
+supplies the goal, the recent real work and the repository state — not a replay
+of the previous session's hidden tool state.
+
 | Provider | Skill | MCP | Status                | What it means                          |
 |----------|-------|-----|-----------------------|----------------------------------------|
 | Claude   | Y     | R   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-24). `H` is a static capability reading, not live evidence |
-| Codex    | Y     | R   | `A` — startup-assisted | No native hook; needs an explicit call |
+| Codex    | Y     | R   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-28) and a bare `继续` continued the WorkThread with no Voyager command |
 | Grok CLI | Y     | N   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-25). `H` is a static capability reading, not live evidence |
 | DSH      | Y     | N   | `N` — no mechanism    | Best effort                            |
 
@@ -177,9 +202,9 @@ Legend: **Y** = installed, **R** = registered, **N** = unsupported, **A** = avai
 
 Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered, **`A`** = startup-assisted, **`N`** = no hook. The letter is derived from **static capability and configuration only** — Voyager keeps no persisted live-evidence state, so the CLI cannot report a manual observation, and nothing prints `Y`. Both Claude Code's trigger (2026-09-24) and Grok's (2026-09-25) *have* been observed live, and both still report `H`. Run `voyager integrate status` for the configuration answer on your machine.
 
-### How Claude Code hooks work here
+### How native hooks work here
 
-Claude Code reads `SessionStart` hooks from `~/.claude/settings.json`. Voyager writes the documented shape:
+Claude Code reads `SessionStart` hooks from `~/.claude/settings.json`. Codex reads them from `~/.codex/hooks.json`. Voyager writes the documented nested shape for each provider and preserves unrelated hooks:
 
 ```json
 {
@@ -197,6 +222,8 @@ Claude Code reads `SessionStart` hooks from `~/.claude/settings.json`. Voyager w
 ```
 
 `voyager integrate install claude` writes this for you (it is additive — your own hooks are preserved, and the file is backed up first). The installed command uses absolute paths, so it does not depend on the interpreter being on `PATH`.
+
+For Codex, `voyager integrate install codex` registers an absolute `SessionStart` command in `~/.codex/hooks.json`. Codex passes its native `session_id` and `cwd` on stdin; Voyager responds with `hookSpecificOutput.additionalContext` using the shared `tiered-v1` continuation format. The hook is fail-open and never blocks a Codex session if the index is unavailable.
 
 **Three things are verified.** The handler is verified end-to-end: it emits a protocol-valid payload, caps the injected context at 9,000 UTF-16 code units, spills the full bundle to `~/.voyager/context/`, and exits 0. The *registration* is verified: `voyager integrate status` reads the file back. And the **provider firing the hook is verified too** (2026-09-24) — the manual run below recorded a `SessionStart` whose `session_id` belongs to Claude Code itself, not the verifier's synthetic one:
 
@@ -224,7 +251,7 @@ Recommended workflows:
 3. **MCP-assisted**: in-agent tool call `voyager_startup(provider="codex", cwd="$PWD")`
 4. **Skill guidance**: read `SKILL.md` in the agent's skill directory
 
-**`A` (startup-assisted) means**: the runtime will not reach Voyager on its own. Codex does not automatically call `voyager_startup` at session start — you must invoke it via one of the workflows above. MCP registration is fully automated; startup invocation is not.
+**`A` (startup-assisted) means**: the runtime will not reach Voyager on its own, so you must invoke it via one of the workflows above. For Codex this no longer applies once `voyager integrate install codex` has registered the native `SessionStart` hook (live-verified 2026-09-28): the hook reaches Voyager before the first turn, so `voyager_startup` is not needed and should not be called — startup context is the hook's job, and the skill is retrieval-only.
 
 ```sh
 voyager integrate install claude   # skill + MCP + native SessionStart hook

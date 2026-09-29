@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .base import Adapter, finish_session, git_info, register
+from .. import provenance
 from ..model import new_event, new_session, text_of
 
 HOME = Path.home()
@@ -85,6 +86,9 @@ class ClaudeAdapter(Adapter):
                     session["git_branch"] = row.get("gitBranch")
 
                 def ev(**kw):
+                    # Claude marks meta records natively; a tool_result carried on
+                    # a user-role record is a tool result, not a user turn.
+                    kw.setdefault("origin", provenance.claude_origin(row))
                     e = new_event(sid=sid, ts=ts, seq=seq, raw_event=row, **kw)
                     events.append(e)
                     return e

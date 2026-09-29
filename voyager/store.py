@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS events (
     files_json  TEXT,
     model       TEXT,
     usage_json  TEXT,
+    origin      TEXT,
     raw_json    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(sid);
@@ -292,6 +293,12 @@ class Store:
                 if col not in pend_cols:
                     self.con.execute(
                         f"ALTER TABLE thread_pending ADD COLUMN {col} {decl}")
+        # additive migration: provenance.  Pre-provenance rows keep NULL, which
+        # the API layer surfaces as "unknown"; nothing is backfilled here -- that
+        # is the deterministic enrichment pass, and it only ever fills NULLs.
+        ev_cols = [r[1] for r in self.con.execute("PRAGMA table_info(events)")]
+        if ev_cols and "origin" not in ev_cols:
+            self.con.execute("ALTER TABLE events ADD COLUMN origin TEXT")
         self.con.executescript(SCHEMA)
         if not _fts_has_sid(self.con):
             _rebuild_fts(self.con)
@@ -371,8 +378,8 @@ class Store:
                            tool_name, tool_call_id, tool_input, tool_output,
                            command, stdout, stderr, exit_code,
                            file_path, old_content, new_content, diff,
-                           files_json, model, usage_json, raw_json)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           files_json, model, usage_json, origin, raw_json)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         sid, ev.get("ts"), ev.get("seq"), ev.get("kind"),
                         ev.get("role"),
@@ -388,6 +395,7 @@ class Store:
                         ev.get("model"),
                         json.dumps(ev.get("usage") or {}, ensure_ascii=False)
                         if ev.get("usage") else None,
+                        ev.get("origin"),
                         _truncate(
                             json.dumps(ev.get("raw_event"), ensure_ascii=False)
                             if ev.get("raw_event") is not None else None,

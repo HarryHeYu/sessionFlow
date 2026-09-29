@@ -22,8 +22,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .model import text_of
+from .provenance import order_rows_for_l1, session_band
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import Store
+from .winsubprocess import background_subprocess_kwargs
 
 PROMPT_TARGETS = {
     "claude": "claude",
@@ -75,14 +77,16 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
     try:
         res_inside = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=cwd, capture_output=True, text=True, timeout=2)
+            cwd=cwd, capture_output=True, text=True, timeout=2,
+            **background_subprocess_kwargs())
         if res_inside.returncode != 0 or res_inside.stdout.strip() != "true":
             return snapshot
         snapshot["is_git"] = True
         # symbolic-ref works even on an unborn branch (fresh git init)
         res_branch = subprocess.run(
             ["git", "symbolic-ref", "--short", "HEAD"],
-            cwd=cwd, capture_output=True, text=True, timeout=2)
+            cwd=cwd, capture_output=True, text=True, timeout=2,
+            **background_subprocess_kwargs())
         if res_branch.returncode == 0:
             snapshot["branch"] = res_branch.stdout.strip()
 
@@ -92,6 +96,7 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=2,
+            **background_subprocess_kwargs(),
         )
         if res_commit.returncode == 0:
             snapshot["commit"] = res_commit.stdout.strip()
@@ -102,6 +107,7 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=2,
+            **background_subprocess_kwargs(),
         )
         if res_st.returncode == 0:
             lines = [ln for ln in res_st.stdout.splitlines() if ln.strip()]
@@ -420,6 +426,106 @@ def build_working_context(
     return header + payload
 
 
+def _l1_turns_indexed(store: Store, rows: Any) -> List[Tuple[int, int, str]]:
+    """[(row_index, turn_index, turn_text)] oldest-first.
+
+    Mirrors ``_l1_turn_texts`` exactly, but keeps the coordinates so the caller
+    can decide *which* turns to keep and then render them in canonical order.
+    """
+    out: List[Tuple[int, int, str]] = []
+    for ri, row in enumerate(rows):
+        provider, native = row["provider"], row["native_id"]
+        current: List[str] = []
+        ti = 0
+        for ev in store.events(row["id"]):        # canonical: ORDER BY seq, id
+            if ev["kind"] == "user" and current:
+                out.append((ri, ti, "\n".join(current)))
+                current = []
+                ti += 1
+            line = _l1_event_line(ev, provider, native)
+            if line:
+                current.append(line)
+        if current:
+            out.append((ri, ti, "\n".join(current)))
+    return out
+
+
+def build_l1_banded(store: Store, rows: Any, *, hard_max: int) -> str:
+    """Band-prioritized L1 with a NON-EVICTING reserve.
+
+    Invariant: if STRONG content fits in L1, adding a WEAK/UNKNOWN reserve must
+    never make that STRONG content disappear.  The reserve is *best effort*, not
+    an entitlement; when it does not fit alongside STRONG it is skipped.
+
+    Priority is therefore STRONG > UNKNOWN coverage > WEAK coverage, and it only
+    decides *which turns are selected*.  Rendering is always canonical order --
+    band priority never rewrites the historical sequence.
+
+    Phase A  STRONG core (whole turns, newest first, under the full budget)
+    Phase B  one complete turn each for the newest UNKNOWN / newest WEAK, added
+             only if it does not evict an already-selected STRONG turn
+    Phase C  leftover fill: remaining STRONG -> UNKNOWN -> WEAK
+
+    BOOTSTRAP_ONLY never contributes.  Deterministic, offline, and the hard
+    UTF-8 bound is always respected.
+    """
+    row_list = list(rows)
+    bands = {r["id"]: session_band(store.con, r["id"])[0] for r in row_list}
+    indexed = _l1_turns_indexed(store, row_list)
+
+    header = _l1_header(hard_max)
+    room = hard_max - _utf8_len(header)
+    texts = {(ri, ti): text for ri, ti, text in indexed}
+
+    chosen: List[Tuple[int, int]] = []
+    used = 0
+
+    def _take(key: Tuple[int, int]) -> bool:
+        nonlocal used
+        cost = _utf8_len(texts[key]) + (2 if chosen else 0)
+        if used + cost > room:
+            return False
+        chosen.append(key)
+        used += cost
+        return True
+
+    by_band: Dict[str, List[Tuple[int, int]]] = {"STRONG": [], "UNKNOWN": [], "WEAK": []}
+    for ri, ti, _text in indexed:
+        band = bands[row_list[ri]["id"]]
+        if band in by_band:
+            by_band[band].append((ri, ti))
+
+    # Phase A -- STRONG core, newest turn first, whole turns only.
+    for key in reversed(by_band["STRONG"]):
+        _take(key)
+
+    # Phase B -- non-evicting diversity: one turn each for the newest UNKNOWN and
+    # the newest WEAK session, only when the room is there afterwards.
+    for band in ("UNKNOWN", "WEAK"):
+        candidates = by_band[band]
+        if not candidates:
+            continue
+        newest_row = max(ri for ri, _ti in candidates)
+        newest_turn = max((k for k in candidates if k[0] == newest_row),
+                          key=lambda k: k[1])
+        _take(newest_turn)                      # skipped cleanly if it does not fit
+
+    # Phase C -- leftover fill in the approved order.
+    for band in ("STRONG", "UNKNOWN", "WEAK"):
+        for key in reversed(by_band[band]):
+            if key in chosen:
+                continue
+            _take(key)
+
+    if not chosen:
+        # Nothing fit: fall back to the builder's own newest-turn handling, which
+        # keeps the newest evidence behind an explicit truncation marker.
+        return build_working_context(store, row_list, hard_max=hard_max)
+
+    parts = [texts[key] for key in sorted(chosen)]           # canonical order
+    return header + "\n\n".join(parts)
+
+
 def build_continuation_bundle(
     store: Store,
     session_rows: List[Any],
@@ -679,6 +785,7 @@ def build_tiered_bundle(
     *,
     max_field_chars: int = L0_FIELD_MAX_CHARS,
     l1_hard_max: int = L1_DEFAULT_HARD_MAX_BYTES,
+    exclude_session_id: Optional[str] = None,
 ) -> str:
     """Compose tiered-v1: L0 + Runtime State + retrieval hint + bounded L1.
 
@@ -700,8 +807,17 @@ def build_tiered_bundle(
     only then spends bytes on the L1 transcript window.  The hint appears
     exactly once; it is never duplicated at the tail.
 
+    ``exclude_session_id`` (identity-based, G3-B self-echo suppression):
+    at SessionStart the *calling* session is a thread member whose only
+    content is provider bootstrap echo (AGENTS.md instructions, permission
+    notices) -- it is not recent work.  When its exact voyager session id is
+    given, that session is dropped from the L1 input only.  Membership,
+    pending attach and the hint's full-history scale are untouched, and no
+    store row is modified or deleted.  The exclusion is by exact id -- a
+    different session with similar-looking content is never filtered.
+
     Boundedness: L0 is field-capped, Runtime State is a fixed five-line
-    section, the hint is two fixed lines, and the L1 section is under
+    section, the hint is a few fixed lines, and the L1 section is under
     ``l1_hard_max`` bytes.  A failed or missing git probe reads ``unknown``
     and the document still compiles.
     """
@@ -721,11 +837,23 @@ def build_tiered_bundle(
         "[Historical Evidence]",
         "full history is not inlined: the store holds %d session(s) / %d "
         "event(s) for this thread." % (len(rows), event_count),
+        "Do not retrieve older history before acting when the L0/L1 context "
+        "above is sufficient.",
+        "Only use Voyager retrieval when:",
+        "- the current context is insufficient to continue safely, or",
+        "- the user explicitly asks for older history or provenance.",
         "retrieve with: voyager thread show %s / voyager search \"<query>\" / "
         "voyager merge (compiles the flat bundle with the full evidence)"
         % thread["id"],
     ])
-    l1 = build_working_context(store, rows, hard_max=l1_hard_max)
+
+    l1_rows = ([r for r in rows if r["id"] != exclude_session_id]
+               if exclude_session_id else rows)
+    # Phase P2: the band decides which sessions get the limited L1 budget.
+    # `build_l1_banded` reserves one turn each for the newest WEAK and newest
+    # UNKNOWN session and then hands the rest to the same builder, so turn
+    # boundaries, whole-turn preference and the byte bound are unchanged.
+    l1 = build_l1_banded(store, l1_rows, hard_max=l1_hard_max)
 
     return "\n".join([
         "format: %s" % CONTEXT_FORMAT_TIERED,

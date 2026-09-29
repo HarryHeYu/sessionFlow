@@ -95,11 +95,14 @@ def test_switch_cross_provider_bundle(continuity_store):
 
 
 def test_skill_startup_protocol():
+    """G3-B: the old "Startup protocol" section (first-turn voyager_startup
+    calls) is retired -- startup authority moved to the native SessionStart
+    hook, and the skill is retrieval-only with an explicit prohibition."""
     from voyager.skill import skill_source
     text = skill_source().read_text(encoding="utf-8")
-    assert "Startup protocol" in text
-    # New startup uses voyager_startup MCP tool instead of manual CLI commands
-    assert "voyager_startup" in text or "Startup protocol" in text
+    assert "## Startup protocol" not in text
+    assert "Call `voyager_startup`" not in text
+    assert "Do NOT call" in text and "`voyager_startup`" in text
     assert "NEVER" in text
 
 

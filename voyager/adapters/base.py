@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from ..model import new_session
+from ..winsubprocess import background_subprocess_kwargs
 
 # provider name -> module-level `scan(store_changed_check) -> iterable of
 # (session, events, source_path, extra_sources)` factories are registered by
@@ -74,6 +75,7 @@ def git_info(cwd: Optional[str]) -> dict:
         r = subprocess.run(
             ["git", "-C", key, "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=10,
+            **background_subprocess_kwargs(),
         )
         if r.returncode == 0:
             root = r.stdout.strip()
@@ -81,18 +83,21 @@ def git_info(cwd: Optional[str]) -> dict:
             b = subprocess.run(
                 ["git", "-C", key, "rev-parse", "--abbrev-ref", "HEAD"],
                 capture_output=True, text=True, timeout=10,
+                **background_subprocess_kwargs(),
             )
             if b.returncode == 0:
                 out["branch"] = b.stdout.strip() or None
             c = subprocess.run(
                 ["git", "-C", key, "rev-parse", "HEAD"],
                 capture_output=True, text=True, timeout=10,
+                **background_subprocess_kwargs(),
             )
             if c.returncode == 0:
                 out["commit"] = c.stdout.strip() or None
             rem = subprocess.run(
                 ["git", "-C", key, "remote", "get-url", "origin"],
                 capture_output=True, text=True, timeout=10,
+                **background_subprocess_kwargs(),
             )
             if rem.returncode == 0:
                 out["remote"] = rem.stdout.strip() or None

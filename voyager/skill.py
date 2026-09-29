@@ -34,7 +34,10 @@ PROVIDER_CONFIG = {
         "name": "Codex",
         "skill_enabled": True,
         "mcp_enabled": True,
-        "has_startup_hook": False,
+        # Codex 0.15x+ ships Claude-compatible lifecycle hooks; the Voyager
+        # SessionStart hook is registered and was live-verified end to end
+        # in G3-A/G3-B (dispatch, delivery, identity, model recitation).
+        "has_startup_hook": True,
         "config_file": ".codex/config.toml",
         "mcp_config": ".codex/config.toml",
     },
@@ -272,31 +275,31 @@ def _register_claude_mcp(home: Path) -> Tuple[str, Optional[str]]:
 
 def _install_codex_bootstrap(target_dir: Path,
                              home: Optional[Path] = None) -> Tuple[str, Optional[str]]:
-    """Generate Codex startup bootstrap with actual startup hook instructions."""
-    # Codex doesn't have native startup hooks, so provide best-available mechanism
-    # The Skill file serves as the primary guidance
+    """Generate the Codex bootstrap doc for the native-hook era (G3-B).
+
+    The hook injects the tiered-v1 context before the first turn, so this
+    document deliberately contains NO first-turn startup instructions —
+    only retrieval guidance for history older than the injected window.
+    """
     bootstrap_content = """# Voyager Startup Continuity for Codex
 
-Status: N (no native session-start hook; first-turn / Skill guidance)
+Status: H (native SessionStart hook registered; live-verified end to end)
 
-Codex CLI does not provide a native session-start hook mechanism, so there is
-nothing for Voyager to register. Continuity still works, but it is the agent
-following an instruction rather than the platform firing a hook.
+Codex 0.15x+ reads Claude-compatible hooks from ~/.codex/hooks.json.
+Voyager registers a SessionStart hook there whose additionalContext is the
+tiered-v1 document (WorkThread state + repository runtime state + a
+retrieval hint + the recent working window), injected before the first
+turn. The native session id from the hook payload also drives the
+automatic WorkThread attach.
 
-Best available option:
+Install or repair the hook:
+   voyager integrate install codex
 
-1. Install Voyager Skill (already done by `voyager integrate install codex`):
-   This instructs Codex to call voyager_startup at session start.
+Do NOT call voyager_startup or voyager continue at session start to
+"recover" context — it is already in your context; continue the work.
 
-2. Configure MCP connection in ~/.codex/config.toml:
-   Copy-paste the output of: voyager integrate status --json | jq '.[] | select(.provider=="codex") | .mcp'
-
-3. In each Codex session, before asking user questions:
-   Call tool: voyager_startup(provider="codex", cwd="$PWD", native_session_id="<session-id>")
-
-The Skill.md file contains exact invocation instructions.
-
-Note: This relies on agent following instruction - not fully automatic at runtime.
+For history older than the injected window, use the retrieval surfaces
+documented in the Voyager Skill (search / show / brief).
 """
     try:
         bootstrap_file = target_dir / "voyager_codex_bootstrap.md"
@@ -536,6 +539,20 @@ def install_integration(provider: str, force: bool = False,
                 "native SessionStart hook not installed: "
                 + str(hook_result.get("message") or hook_result.get("status"))
             )
+    elif provider == "codex":
+        # G3-B: Codex gained a native SessionStart hook (Claude-compatible
+        # hooks.json + hookSpecificOutput.additionalContext, live-verified).
+        # Registering it here is what moves Codex from `A` (startup-assisted)
+        # to `H` (native hook), the same as the Claude and Grok branches.
+        from .integrations.codex import CodexIntegration
+
+        hook_result = CodexIntegration(home=home).install()
+        result["hook"] = hook_result
+        if hook_result.get("status") != "installed":
+            result.setdefault("warnings", []).append(
+                "native SessionStart hook not installed: "
+                + str(hook_result.get("message") or hook_result.get("status"))
+            )
 
     # Step 3: Generate startup instructions
     bootstrap_funcs = {
@@ -675,11 +692,17 @@ def uninstall_integration(provider: str, home: Optional[Path] = None) -> Dict[st
             else:
                 result["mcp"] = {"status": "not-found", "path": str(mcp_file)}
     
-    # Step 2b: Remove the native lifecycle hook (Claude Code).
+    # Step 2b: Remove the native lifecycle hook (Claude Code, Codex).
     if provider == "claude":
         from .integrations.claude import ClaudeIntegration
 
         result["hook"] = ClaudeIntegration(home=home).remove()
+    elif provider == "codex":
+        # Also strips the managed AGENTS.md block (hooks.json + managed block
+        # are one Voyager-owned unit on Codex).
+        from .integrations.codex import CodexIntegration
+
+        result["hook"] = CodexIntegration(home=home).remove()
 
     # Step 3: Remove bootstrap files
     boot_marker = target.parent / f"voyager_{provider}_bootstrap.*"
@@ -803,6 +826,15 @@ def check_integration_status(providers: Optional[List[str]] = None,
             status["hook"]["registered"] = bool(
                 checks.get("hook_installed") and checks.get("hook_script"))
             status["hook"]["command"] = str(gi.hook_cmd)
+        elif provider == "codex":
+            from .integrations.codex import CodexIntegration
+
+            checks = CodexIntegration(home=home).verify().get("checks", {})
+            status["hook"]["registered"] = bool(
+                checks.get("hook_entrypoint_exists")
+                and checks.get("hooks_json_has_voyager"))
+            status["hook"]["command"] = str(
+                CodexIntegration(home=home).hook_command())
 
         # Determine startup_status based on platform capabilities
         if status["hook"]["registered"]:

@@ -620,6 +620,73 @@ class TestTieredBundle:
         assert "retrieve with:" in kept
         assert "[L1 Active Working Context]" in kept   # the banner survives too
 
+    def test_self_echo_excluded_by_identity_not_content(self, tmp_path):
+        """G3-B self-echo suppression: the calling session's own bootstrap
+        echo is dropped from L1 by EXACT session id -- while an older session
+        carrying similar-looking echo content survives (filter by identity
+        only), and membership/history scale stay untouched."""
+        store = Store(tmp_path / "echo.db")
+        tid = store.thread_create(repo_root=str(tmp_path),
+                                  title="echo suppression", goal="g")
+        src = tmp_path / "s.jsonl"
+        src.write_text("{}", encoding="utf-8")
+        echo_text = "# AGENTS.md instructions <INSTRUCTIONS> bootstrap echo"
+
+        def add(sid, provider, content):
+            sess = new_session(id=sid, provider=provider,
+                               native_session_id=sid.split(":", 1)[1],
+                               title=sid, started_at=1.0, updated_at=2.0,
+                               repo_root=str(tmp_path), cwd=str(tmp_path))
+            store.replace_session(
+                sess, [new_event(sid=sid, seq=1, kind="user", ts=1.0,
+                                 content=content)], provider, src)
+            store.thread_attach(tid, sid)
+
+        add("grok:realwork", "grok", "implement the parser end to end")
+        add("codex:self", "codex", echo_text)                 # calling session
+        add("claude:oldecho", "claude", echo_text)            # similar, NOT self
+
+        thread = store.thread_get(tid)
+        members = store.thread_member_sessions(tid)
+        rows = [dict(r) for r in store.sessions()]
+        members_before = [dict(m) for m in members]
+
+        out = build_tiered_bundle(store, thread, members, rows,
+                                  exclude_session_id="codex:self")
+
+        # real prior work stays in L1 ...
+        assert "implement the parser end to end" in out
+        l1 = out.split("[L1 Active Working Context]", 1)[1]
+        # ... the calling session's echo is gone, identified by PROVENANCE
+        assert "[codex:self" not in l1
+        # ... but the similar-looking OLDER session survives: filtering is by
+        # identity only, never by content resemblance
+        assert "[claude:oldecho #1] user: " + echo_text in l1
+        # membership and history scale are untouched by the exclusion
+        assert "[L0 Thread State]" in out
+        assert "members: 3" in out
+        assert "3 session(s)" in out
+        assert [dict(m) for m in store.thread_member_sessions(tid)] == \
+            members_before
+
+    def test_hint_gates_retrieval_until_needed(self, tmp_path):
+        """The retrieval hint must say: act on the injected context first;
+        retrieve only on insufficiency or explicit user request -- and the
+        retrieval surfaces stay listed."""
+        store = Store(tmp_path / "hint.db")
+        tid = store.thread_create(repo_root=str(tmp_path), title="t", goal="g")
+        thread = store.thread_get(tid)
+
+        out = build_tiered_bundle(store, thread, [], [])
+        hint = out.split("[Historical Evidence]", 1)[1].split(
+            "[L1 Active Working Context]", 1)[0]
+
+        assert "Do not retrieve older history before acting" in hint
+        assert "insufficient to continue safely" in hint
+        assert "the user explicitly asks" in hint
+        for surface in ("voyager thread show", "voyager search", "voyager merge"):
+            assert surface in hint
+
     def test_same_input_is_byte_identical(self, tmp_path):
         store, thread, members, rows = self._fixture(tmp_path)
         assert (build_tiered_bundle(store, thread, members, rows)

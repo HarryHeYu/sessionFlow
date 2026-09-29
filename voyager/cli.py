@@ -258,6 +258,49 @@ def cmd_scan(args) -> int:
     return 0
 
 
+def cmd_provenance(args) -> int:
+    """Inspect provenance coverage, or deterministically fill NULL origins."""
+    import json as _json
+
+    from .provenance import coverage, enrich
+
+    store = Store(args.db)
+    providers = args.provider.split(",") if args.provider else None
+
+    if args.action == "coverage":
+        rows = coverage(store.con)
+        if args.json:
+            print(_json.dumps(rows, ensure_ascii=False, indent=2))
+            return 0
+        print("%-8s %10s %10s %10s %10s %9s"
+              % ("provider", "user_evts", "enriched", "human", "unknown", "coverage"))
+        for r in rows:
+            print("%-8s %10d %10d %10d %10d %8.1f%%"
+                  % (r["provider"], r["user_events"], r["enriched"], r["human"],
+                     r["unknown"], r["coverage_pct"]))
+        return 0
+
+    report = enrich(store.con, dry_run=not args.apply, providers=providers)
+    if args.json:
+        print(_json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    mode = "APPLY" if args.apply else "DRY-RUN"
+    print("provenance enrich [%s]" % mode)
+    print("  candidates  : %d" % report["candidates"])
+    print("  classified  : %d" % report["classified"])
+    print("  left unknown: %d" % report["left_unknown"])
+    print("  applied     : %d" % report["applied"])
+    print("  %-8s %-11s %-11s %-10s" % ("provider", "user_evts", "classified", "coverage"))
+    for prov, stat in sorted(report["per_provider"].items()):
+        uc = stat.get("user_candidates", 0)
+        uk = stat.get("user_classified", 0)
+        print("    %-8s %-11d %-11d %s"
+              % (prov, uc, uk, ("%.1f%%" % (100.0 * uk / uc)) if uc else "—"))
+    if not args.apply and report["classified"]:
+        print("  (dry run: nothing written; re-run with --apply)")
+    return 0
+
+
 def _ensure_fresh(args, store: Store, providers: Optional[List[str]] = None) -> dict:
     """Phase 1b: incremental scan before compiling/reading sessions.
     Never --force; prints one freshness line so stale bundles are explicable.
@@ -1490,6 +1533,19 @@ def main(argv=None) -> int:
     sp.add_argument("--platform", help="comma list: codex,claude,zcode,dsh")
     sp.add_argument("--force", action="store_true", help="re-parse even if unchanged")
     sp.set_defaults(func=cmd_scan)
+
+    # provenance: structural origin of each event (who really produced it).
+    # Read-only by default; `enrich` only ever fills NULLs and only on --apply.
+    sp = sub.add_parser("provenance",
+                        help="inspect or fill per-event provenance (origin)")
+    sp.add_argument("action", nargs="?", default="coverage",
+                    choices=["coverage", "enrich"])
+    sp.add_argument("--apply", action="store_true",
+                    help="write the enrichment (default is a dry run)")
+    sp.add_argument("--provider", default=None,
+                    help="comma-separated provider filter")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_provenance)
 
     sp = sub.add_parser("list", help="list sessions", parents=[common])
     sp.add_argument("--platform")

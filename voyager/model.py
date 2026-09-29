@@ -57,8 +57,26 @@ EVENT_FIELDS = [
     "files",             # list of file paths touched by this event
     "model",
     "usage",             # dict {input,output,cache_read,cache_write,cost,...}
+    "origin",            # provenance: who actually produced this event.
+                         # NULL in storage == not enriched == surfaced as
+                         # "unknown"; see EVENT_ORIGINS.
     "raw_event",         # provider-native event (dict); store truncates huge blobs
 ]
+
+#: Provenance vocabulary.  `role` says what surface role a record carries; `origin`
+#: says who really produced it, which is the distinction that lets a real user
+#: turn be told apart from a provider's injected pseudo-user record.
+#:
+#: NULL in the DB means "not enriched yet" and is normalised to "unknown" at the
+#: API layer -- the two states are deliberately not both stored.
+EVENT_ORIGINS = {
+    "human",               # a real, user-authored turn
+    "provider_bootstrap",  # AGENTS.md / skills / user_info style injections
+    "provider_system",     # lifecycle records, aborts, meta
+    "hook_injection",      # context delivered by a lifecycle hook
+    "provider_synthetic",  # provider-generated pseudo-user records
+    "unknown",
+}
 
 EVENT_KINDS = {
     "user", "assistant", "reasoning", "tool_call", "tool_result",
@@ -74,6 +92,8 @@ def new_event(**kw) -> Dict[str, Any]:
         ev[k] = v
     if ev["kind"] not in EVENT_KINDS:
         raise ValueError(f"bad event kind: {ev['kind']}")
+    if ev["origin"] is not None and ev["origin"] not in EVENT_ORIGINS:
+        raise ValueError(f"bad event origin: {ev['origin']}")
     return ev
 
 

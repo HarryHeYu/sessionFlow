@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 
 from .adapters.base import git_info
 from .continuity import CONTEXT_FORMAT_FLAT, CONTEXT_FORMAT_TIERED
+from .winsubprocess import background_subprocess_kwargs
 from .store import Store
 
 
@@ -357,6 +358,15 @@ def startup_continuity(
                 else:
                     auto_attach_reason = "safety_checks_prevented_attachment"
 
+        # Refresh the thread row after the attach/pending-resolution phase.
+        # `thread_attach()` touches threads.updated_at, but `thread` was read
+        # before that phase.  Using the stale row here would miss a member-set
+        # change when the newly attached session itself has an older
+        # updated_at, allowing an incomplete cached bundle to be served.
+        refreshed_thread = store.thread_get(tid)
+        if refreshed_thread is not None:
+            thread = refreshed_thread
+
         # Step 8: Compile continuation context
         #
         # The cache lives in the store's `meta` table, not on the Store
@@ -374,6 +384,7 @@ def startup_continuity(
                   if compile_context else {"compiled_at": 0, "context": None})
         last_compiled_at = cached["compiled_at"]
         context = cached["context"]
+        cached_member_count = cached.get("member_count")
         context_stale = False
         context_source = ("none" if not compile_context
                           else "cached" if context else "fresh_compile")
@@ -408,6 +419,8 @@ def startup_continuity(
             time.time() - last_compiled_at > CONTEXT_TTL_SECONDS or
             latest_member_updated > last_compiled_at or
             thread_updated > last_compiled_at or
+            (cached_member_count is not None and
+             cached_member_count != len(members)) or
             git_head_changed or
             holder_changed
         )
@@ -448,6 +461,7 @@ def startup_continuity(
                 compiled_at = time.time()
                 _save_context_cache(store, tid, provider, budget,
                                     fresh_context, compiled_at,
+                                    member_count=len(members),
                                     context_format=context_format)
             elif context:
                 # Compilation failed but we still hold a usable bundle. Serving
@@ -555,12 +569,17 @@ def _load_context_cache(store: Store, tid: str, provider: str, budget: str,
             return miss
     except Exception:
         return miss
-    return {"compiled_at": compiled_at, "context": context}
+    result = {"compiled_at": compiled_at, "context": context}
+    member_count = payload.get("member_count")
+    if isinstance(member_count, int) and not isinstance(member_count, bool) and member_count >= 0:
+        result["member_count"] = member_count
+    return result
 
 
 def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
                         context: str, compiled_at: float,
-                        context_format: str = CONTEXT_FORMAT_FLAT) -> bool:
+                        context_format: str = CONTEXT_FORMAT_FLAT,
+                        member_count: Optional[int] = None) -> bool:
     """Persist a compiled bundle. Returns False if it could not be stored.
 
     Never raises. `ensure_ascii=True` is deliberate: session text can contain a
@@ -571,10 +590,13 @@ def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
     string exactly, lone surrogate included.
     """
     try:
+        payload = {"compiled_at": compiled_at, "budget": budget,
+                   "context": context}
+        if isinstance(member_count, int) and not isinstance(member_count, bool):
+            payload["member_count"] = member_count
         return bool(store.meta_set(
             _context_cache_key(tid, provider, budget, context_format),
-            json.dumps({"compiled_at": compiled_at, "budget": budget,
-                        "context": context}, ensure_ascii=True),
+            json.dumps(payload, ensure_ascii=True),
         ))
     except Exception:
         return False
@@ -707,7 +729,8 @@ def _git_head_changed_since(store: Store, tid: str, repo_root: str,
             cwd=repo_root,
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            **background_subprocess_kwargs(),
         )
         
         if result.returncode != 0:

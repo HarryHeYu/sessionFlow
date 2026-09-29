@@ -407,13 +407,13 @@ def test_startup_status_letters_match_the_legend(tmp_path, monkeypatch):
         }[provider]
         seen[provider] = entry["startup_status"]
 
-    # Both register a real native hook, so both report `H` -- never `Y`, because
-    # nothing has observed the provider firing it.
-    for provider in ("claude", "grok"):
+    # All three register a real native hook (Claude, Grok, and -- since G3-B --
+    # Codex), so all report `H` -- never `Y`, because nothing has observed the
+    # provider firing it.
+    for provider in ("claude", "grok", "codex"):
         assert seen[provider] == "H", (provider, seen[provider])
     # No hook surface => cannot be `H` or `Y`.
     assert seen["dsh"] == "N", seen["dsh"]
-    assert seen["codex"] in {"A", "N"}, seen["codex"]
     # `Y` needs a persisted live-evidence record; nothing may report it yet.
     assert "Y" not in seen.values(), seen
 
@@ -466,7 +466,9 @@ def test_already_registered_mcp_is_reported_as_registered(tmp_path, monkeypatch)
     result = skill.install_integration("codex", force=True, home=home)
 
     assert result["mcp"]["status"] == "registered"
-    assert result["startup_status"] == "A"
+    # G3-B: the registered native SessionStart hook outranks MCP-assisted,
+    # so the letter moved from `A` to `H` even when MCP was already set up.
+    assert result["startup_status"] == "H"
 
 
 def test_already_registered_mcp_reports_assisted_on_both_paths(tmp_path):
@@ -491,8 +493,9 @@ def test_already_registered_mcp_reports_assisted_on_both_paths(tmp_path):
     # is only possible if `home` reached `_check_mcp_support`.
     assert "already registered" in install_result["mcp"]["message"].lower()
     assert install_result["mcp"]["status"] == "registered"
-    assert install_result["startup_status"] == "A"
-    assert status_entry["startup_status"] == "A"
+    # G3-B: the registered native hook outranks MCP-assisted on both paths.
+    assert install_result["startup_status"] == "H"
+    assert status_entry["startup_status"] == "H"
 
 
 def test_check_mcp_support_honours_the_home_argument(tmp_path):

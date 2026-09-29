@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 from .base import Adapter, finish_session, git_info, register
+from .. import provenance
 from ..model import new_event, new_session, text_of
 
 def _resolve_home_path(home: Optional[Path] = None) -> Path:
@@ -246,6 +247,10 @@ class ZCodeAdapter(Adapter):
                         seq += 1
 
                         def ev(**kw):
+                            # ZCode exposes synthetic/source flags on the message
+                            # row; a session with a parent is a subagent child.
+                            kw.setdefault("origin", provenance.zcode_origin(
+                                md, {"parent_id": parent_id}))
                             e = new_event(sid=sid, ts=ts, seq=seq,
                                           raw_event=p, **kw)
                             events.append(e)

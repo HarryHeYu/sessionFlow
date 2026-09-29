@@ -9,7 +9,53 @@ All notable changes to Voyager are documented here. Format loosely follows
 > recorded under 0.3.0 was **wrong**, and the cause was in Voyager, not in the
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
+### Added
+- **Codex native SessionStart integration (G3-B → zero-touch)**: real nested
+  `~/.codex/hooks.json` registration plus a fail-open handler that normalizes
+  the native stdin payload and emits `hookSpecificOutput.additionalContext`
+  before the first turn; install/remove/verify is idempotent and preserves
+  user hooks.
+- **Zero-touch continuation across providers**: a normally launched Codex
+  session in the same repo continues the current WorkThread on a bare `继续`
+  with no Voyager command — `CODEX_ZERO_TOUCH_CROSS_AGENT_CONTINUITY = PASS`
+  (live-verified 2026-09-28), alongside the earlier Claude (2026-09-24) and
+  Grok (2026-09-25) legs.
+- **`tiered-v1` bounded context**: L0 Thread State + Runtime State + one
+  retrieval hint + a bounded L1, with the format riding in the cache key so a
+  flat document is never served for a tiered request.
+- **Provenance origin model**: `events.origin` distinguishes who *produced* an
+  event from the surface `role` — `human`, `provider_bootstrap`,
+  `provider_system`, `hook_injection`, `provider_synthetic` — with DB `NULL`
+  meaning unknown and a deterministic, offline, NULL-only enrichment pass
+  (`voyager provenance coverage` / `enrich`).
+- **Session banding**: `STRONG / WEAK / UNKNOWN / BOOTSTRAP_ONLY` derived from
+  provenance, with the invariant that `unknown` is never read as "confirmed no
+  human work".
+- **Non-evicting STRONG-first L1 scheduler**: WEAK/UNKNOWN reserves may use
+  spare budget but must never evict STRONG content that fits.
+- **Windows hidden relay and background subprocess suppression** for the
+  SessionStart handler and adapter git subprocesses.
+- **Cache invalidation on effective membership changes**: the thread row is
+  re-read after the attach/pending phase and a `member_count` fingerprint is
+  persisted, so a member lost to pruning also invalidates the bundle.
+
+### Known limitations
+- Codex may truncate a long `additionalContext` for the inline copy (head and
+  tail kept, middle elided) and spills the full bundle to
+  `%TEMP%\hook_outputs\`. Voyager generates the complete document correctly
+  (`CODEX_SESSIONSTART_CONTEXT_TRUNCATION`).
+- Non-ASCII hook `cwd` encoding issue (`CODEX_NON_ASCII_HOOK_CWD_ENCODING`).
+- External Codex runtime UX issue: the managed `app-server` daemon launches
+  `git` through ConPTY, which can surface Windows Terminal windows; window-level
+  attribution places this outside Voyager/sessionFlow.
+
 ### Fixed
+- **Codex native SessionStart integration (G3-B)**: added the real nested
+  `~/.codex/hooks.json` registration, a fail-open handler that normalizes the
+  native stdin payload and emits `hookSpecificOutput.additionalContext`, and
+  idempotent install/remove/verify behavior that preserves user hooks. The
+  handler passes the native session id into the shared pending-attach path and
+  injects the shared `tiered-v1` continuation context before the first turn.
 - **A native `SessionStart` could never auto-attach (dead end)** —
   `startup_continuity()` reported `attach_status="pending_resolve"` from the
   "native session not yet indexed" branch but wrote nothing at all.

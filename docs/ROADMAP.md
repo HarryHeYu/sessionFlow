@@ -14,6 +14,44 @@ Phase 7 is partially shipped (API/bridge/scaffold done; Composer webview + one-c
 
 > **Correction.** The original assessment classified Codex/Claude as **STARTUP_ASSISTED**, reasoning that "no automatic `voyager_startup` invocation happens at agent startup". The *observation* was real; the *cause* was not the platforms. Voyager's own installer wrote an invented flat hook schema **and was never wired into `voyager integrate install`**, so nothing was ever registered. With that fixed, Claude Code registers a real native `SessionStart` hook and reports **`H`**. As of 2026-09-24 the provider firing it is **live-verified** end to end (trigger → transcript discovered → scan → pending resolved → session attached to its WorkThread, with no Voyager command), so `SESSIONSTART_TRIGGER_LIVE_VERIFIED` is **true**. The letter stays `H` because it is derived from static capability and configuration, with no persisted live-evidence state behind it; no provider prints `Y`. Zero-Touch Final Acceptance was **CLOSED on 2026-09-25**: the cross-provider leg ran live (a private sentinel written only in Claude was recovered by a normally launched Grok session, whose native session then attached itself to the same WorkThread with no manual scan), so `CONTEXT_INJECTION_LIVE_VERIFIED`, `CROSS_PROVIDER_INVISIBLE_CONTINUITY` and `FULL_CONTINUITY_LIVE_VERIFIED` are **true**. See [`grok_continuity_verdict.md`](../grok_continuity_verdict.md#final-acceptance--closed-2026-09-25) and [`claude_continuity_verdict.md`](../claude_continuity_verdict.md).
 
+**Codex zero-touch continuity: `CODEX_ZERO_TOUCH_CROSS_AGENT_CONTINUITY = PASS`
+(live-verified 2026-09-28).** A normally launched Codex session in the same repo,
+given only `继续`, continued the current WorkThread with no Voyager command:
+`tiered-v1` arrived in the developer context **before** the first user turn, the
+native session auto-attached to its WorkThread, and the first assistant turn made
+**zero** `voyager_startup` / `voyager_continue` / `voyager_search` calls.
+
+Completed components behind that result:
+
+- native `SessionStart` hook (`~/.codex/hooks.json`, nested schema, fail-open)
+- native session id at start (stdin payload → pending → resolution → attach)
+- `tiered-v1` bounded context (L0 + Runtime State + retrieval hint + L1)
+- provenance-aware L1 (`origin`: human vs provider-injected vs unknown)
+- banding `STRONG / WEAK / UNKNOWN / BOOTSTRAP_ONLY` with the safety invariant
+  that `unknown` can never be read as "confirmed no human work"
+- **non-evicting STRONG-first scheduler** (a WEAK/UNKNOWN reserve may use spare
+  budget but must never evict STRONG content that fits)
+- native thread auto-attach
+
+Follow-up / debt — explicitly **not** blockers of the PASS above:
+
+- `CODEX_SESSIONSTART_CONTEXT_TRUNCATION` — Codex truncates a long
+  `additionalContext` for the inline copy (about 2.4k of 4.3k tokens; head and
+  tail kept, middle elided) and spills the full bundle to
+  `%TEMP%\hook_outputs\`. Voyager generates the complete document correctly.
+- `CODEX_NON_ASCII_HOOK_CWD_ENCODING` — non-ASCII hook `cwd` encoding issue.
+- `L1_STRONG_FAIRNESS` — a large STRONG session can still take only a few turns
+  while smaller STRONG sessions fill the budget; deferred, no quota yet.
+
+**External Codex runtime UX issue (not a Voyager/sessionFlow bug):** the managed
+Codex `app-server` daemon (`codex.exe … --managed-daemon`) launches `git` through
+ConPTY, which can surface Windows Terminal windows. Window-level attribution
+(`hwnd → owning PID → executable → parent chain`) confirms the visible host is
+`WindowsTerminal.exe`, the console child is `git.exe`, and every console child's
+parent is that daemon. **No Voyager or sessionFlow window appeared in the
+capture**, and the hidden relay is separately live-verified
+(`SESSIONFLOW_HIDDEN_RELAY_LIVE_VERIFIED = PASS`).
+
 **Phase 2 close-out audit (2026-09-18, checked against the code):**
 
 *Implemented and tested:* thread model (additive migration covered),

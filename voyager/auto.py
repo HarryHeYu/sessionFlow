@@ -327,7 +327,16 @@ def get_continuation_context(store: Optional[Store] = None,
         from .continuity import (build_continuation_bundle,
                                  build_tiered_bundle, CONTEXT_FORMAT_TIERED)
         if context_format == CONTEXT_FORMAT_TIERED:
-            raw_bundle = build_tiered_bundle(store, thread, members, members)
+            # G3-B self-echo suppression: at SessionStart the calling session
+            # is a member whose only content is provider bootstrap echo
+            # (AGENTS.md instructions, permission notices) -- not recent
+            # work.  Exclude it from the L1 input by exact identity
+            # (provider:native_session_id); membership, pending attach and
+            # the hint's full-history scale are untouched.
+            exclude_sid = (f"{provider}:{native_session_id}"
+                           if provider and native_session_id else None)
+            raw_bundle = build_tiered_bundle(store, thread, members, members,
+                                             exclude_session_id=exclude_sid)
         else:
             raw_bundle = build_continuation_bundle(store, members, goal=goal)
         packed, info = apply_budget(raw_bundle, tokens, target=target)

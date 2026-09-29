@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .base import Adapter, finish_session, git_info, register
+from .. import provenance
 from ..model import new_event, new_session, text_of
 
 HOME = Path.home()
@@ -224,6 +225,11 @@ class CodexAdapter(Adapter):
                                           native_session_id=source.stem)
 
                 def ev(**kw):
+                    # provenance is structural: who produced this record, not what
+                    # it says.  Session-level source matters because a subagent
+                    # session submits injected history through the user channel.
+                    kw.setdefault("origin", provenance.codex_origin(
+                        row, session.get("raw_metadata")))
                     e = new_event(sid=session["id"], ts=ts, seq=seq,
                                   raw_event=row, **kw)
                     events.append(e)
