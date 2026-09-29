@@ -16,6 +16,17 @@ All notable changes to Voyager are documented here. Format loosely follows
   Thin by design — the shared `startup_continuity` core does the work — and
   fail-open. Configured on this machine and driven end to end with a real
   payload; UNIT_VERIFIED until the provider itself is observed firing it.
+- **Kiro hook integration**: `voyager/integrations/kiro_session_start.py`. Kiro's
+  command action adds the hook's **stdout to the agent's context**, so the
+  handler writes the tiered-v1 document as plain text rather than filling a JSON
+  envelope. Kiro runs command hooks in the project root, and its hooks are
+  project-scoped (`.kiro/hooks/*.json`), so installing is a per-project choice.
+- **Antigravity hook integration**:
+  `voyager/integrations/antigravity_session_start.py`. Antigravity has **no
+  session-start event**; `PreInvocation` fires before every model call, so the
+  handler injects exactly once (`invocationNum` 0) through
+  `injectSteps[].ephemeralMessage` — the only channel that reaches the
+  conversation. Configured globally at `~/.gemini/config/hooks.json`.
 - **Cursor native `sessionStart` integration**:
   `voyager/integrations/cursor_session_start.py`, plus a correction to
   `voyager/integrations/cursor.py`, which had been writing an invented schema to
@@ -61,8 +72,7 @@ All notable changes to Voyager are documented here. Format loosely follows
 - ZCode and Cursor are configured and their handlers are exercised end to end
   with real payloads, but a provider-fired run has not been observed on this
   machine yet, so they are reported as UNIT_VERIFIED rather than LIVE_VERIFIED.
-- Kiro and Antigravity expose native hook surfaces (audited) that Voyager does
-  not implement yet; DSH exposes none and stays wrapper-only.
+- DSH exposes no native startup surface and stays wrapper-only.
 
 ### Fixed
 - **The hook payload now stays inside each provider's cap.** Codex caps the

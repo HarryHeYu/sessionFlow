@@ -215,14 +215,14 @@ of the previous session's hidden tool state.
 | Codex | native `SessionStart` (`~/.codex/hooks.json`) | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-28) |
 | ZCode | native hooks (`~/.zcode/cli/config.json`, `hooks.events.SessionStart`) | **UNIT_VERIFIED** — configured, and the handler was driven end to end with a real payload; a provider-fired run is still pending |
 | Cursor | native hooks (`~/.cursor/hooks.json`, `sessionStart`) | **UNIT_VERIFIED** — same |
-| Kiro | native hooks (`SessionStart` / `AgentSpawn`, `.kiro/hooks/*.json`) | **SUPPORTED** — audited, not implemented |
-| Antigravity | native hooks (`PreInvocation`, `~/.gemini/config/hooks.json`) | **SUPPORTED** — audited, not implemented |
+| Kiro | native hooks (`SessionStart` / `AgentSpawn`, `.kiro/hooks/*.json`) | **UNIT_VERIFIED** — handler written and driven end to end; hooks are project-scoped, so installing is a per-project choice |
+| Antigravity | native hooks (`PreInvocation`, `~/.gemini/config/hooks.json`) | **UNIT_VERIFIED** — same, and injecting only on the first invocation |
 | DSH | none found — profiles/plugins/ACP only | **SUPPORTED** — wrapper only |
 
-A unit test is never reported as a live verification here: ZCode and Cursor are
-*configured* and their handlers are exercised against real payloads, but until
-the provider has actually fired the hook on this machine they stay at
-UNIT_VERIFIED.
+A unit test is never reported as a live verification here: ZCode, Cursor, Kiro and
+Antigravity are *configured* and their handlers are exercised against real
+payloads, but until the provider has actually fired the hook on this machine they
+stay at UNIT_VERIFIED.
 
 Legend: **Y** = installed, **R** = registered, **N** = unsupported, **A** = available/manual setup needed.
 
