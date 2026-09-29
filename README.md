@@ -198,6 +198,32 @@ of the previous session's hidden tool state.
 | Grok CLI | Y     | N   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-25). `H` is a static capability reading, not live evidence |
 | DSH      | Y     | N   | `N` — no mechanism    | Best effort                            |
 
+**Verification levels** — these are deliberately *not* the same claim:
+
+| Level | Meaning |
+|---|---|
+| SUPPORTED | Voyager can read the provider's session data |
+| CONFIGURED | the provider's native startup hook is registered on this machine |
+| UNIT_VERIFIED | the handler and envelope are covered by tests, **and** a real payload was driven through it end to end |
+| LIVE_VERIFIED | the provider itself was observed firing the hook |
+| ZERO_TOUCH_LIVE_VERIFIED | that, **and** a bare `继续` continued the WorkThread with no Voyager command |
+
+| Provider | Startup surface | Level |
+|---|---|---|
+| Claude Code | native `SessionStart` | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-24) |
+| Grok CLI | native `SessionStart` | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-25) |
+| Codex | native `SessionStart` (`~/.codex/hooks.json`) | **ZERO_TOUCH_LIVE_VERIFIED** (2026-09-28) |
+| ZCode | native hooks (`~/.zcode/cli/config.json`, `hooks.events.SessionStart`) | **UNIT_VERIFIED** — configured, and the handler was driven end to end with a real payload; a provider-fired run is still pending |
+| Cursor | native hooks (`~/.cursor/hooks.json`, `sessionStart`) | **UNIT_VERIFIED** — same |
+| Kiro | native hooks (`SessionStart` / `AgentSpawn`, `.kiro/hooks/*.json`) | **SUPPORTED** — audited, not implemented |
+| Antigravity | native hooks (`PreInvocation`, `~/.gemini/config/hooks.json`) | **SUPPORTED** — audited, not implemented |
+| DSH | none found — profiles/plugins/ACP only | **SUPPORTED** — wrapper only |
+
+A unit test is never reported as a live verification here: ZCode and Cursor are
+*configured* and their handlers are exercised against real payloads, but until
+the provider has actually fired the hook on this machine they stay at
+UNIT_VERIFIED.
+
 Legend: **Y** = installed, **R** = registered, **N** = unsupported, **A** = available/manual setup needed.
 
 Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered, **`A`** = startup-assisted, **`N`** = no hook. The letter is derived from **static capability and configuration only** — Voyager keeps no persisted live-evidence state, so the CLI cannot report a manual observation, and nothing prints `Y`. Both Claude Code's trigger (2026-09-24) and Grok's (2026-09-25) *have* been observed live, and both still report `H`. Run `voyager integrate status` for the configuration answer on your machine.

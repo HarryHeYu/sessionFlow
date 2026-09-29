@@ -33,15 +33,32 @@ Completed components behind that result:
   budget but must never evict STRONG content that fits)
 - native thread auto-attach
 
-Follow-up / debt — explicitly **not** blockers of the PASS above:
+Follow-up / debt — the first three were blockers of *quality*, not of the PASS,
+and are now addressed:
 
-- `CODEX_SESSIONSTART_CONTEXT_TRUNCATION` — Codex truncates a long
-  `additionalContext` for the inline copy (about 2.4k of 4.3k tokens; head and
-  tail kept, middle elided) and spills the full bundle to
-  `%TEMP%\hook_outputs\`. Voyager generates the complete document correctly.
-- `CODEX_NON_ASCII_HOOK_CWD_ENCODING` — non-ASCII hook `cwd` encoding issue.
-- `L1_STRONG_FAIRNESS` — a large STRONG session can still take only a few turns
-  while smaller STRONG sessions fill the budget; deferred, no quota yet.
+- `CODEX_SESSIONSTART_CONTEXT_TRUNCATION` — **fixed.** Codex caps the injected
+  string at 10,000 characters and elides the middle of anything longer, which for
+  tiered-v1 removed the newest L1 turns. The handler had no cap at all. Two
+  changes: the window is now *built* inside the provider's budget
+  (`l1_hard_max` rides through `startup_continuity` → `get_continuation_context`
+  and into the cache key), and a shared `hook_payload` module caps and spills the
+  full bundle to `~/.voyager/context/` — never `%TEMP%`, which external processes
+  clean. Measured on the live thread: 8,247 characters delivered, no elision, no
+  spill, every STRONG session present.
+- `CODEX_NON_ASCII_HOOK_CWD_ENCODING` — **fixed, without guessing an encoding.**
+  `canonical_cwd_from_rollout()` reads the session's `cwd` from Codex's own
+  rollout `session_meta` (honouring `CODEX_HOME`); a rollout without a `cwd`
+  yields `None` rather than an invention. Precedence: explicit argument >
+  rollout > hook payload.
+- `L1_STRONG_FAIRNESS` — **mitigated by evidence, not by a quota.** Measured: a
+  16 KB window gave zcode 17 turns while an 8.9 KB window gave it zero, so whole
+  sessions could starve. `build_l1_banded` now gives every STRONG session its own
+  newest turn first, in canonical session order, before any session gets a second
+  one. No round-robin and no percentage split yet.
+- `PROVENANCE_LITERAL_UNKNOWN_NORMALIZATION` — **fixed.** `new_event` folds the
+  classifier's UNKNOWN sentinel to `NULL`, so the store keeps exactly one
+  representation of "not classified" and `origin IS NOT NULL` keeps meaning
+  "classified". The API layer still renders `NULL` as `unknown`.
 
 **External Codex runtime UX issue (not a Voyager/sessionFlow bug):** the managed
 Codex `app-server` daemon (`codex.exe … --managed-daemon`) launches `git` through

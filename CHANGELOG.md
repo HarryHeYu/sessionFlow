@@ -10,6 +10,21 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **ZCode native SessionStart integration**: `voyager/integrations/zcode_session_start.py`
+  speaks ZCode's documented hook contract (`hooks.events.SessionStart` in
+  `~/.zcode/cli/config.json`, with the Claude-compatible envelope on stdout).
+  Thin by design — the shared `startup_continuity` core does the work — and
+  fail-open. Configured on this machine and driven end to end with a real
+  payload; UNIT_VERIFIED until the provider itself is observed firing it.
+- **Cursor native `sessionStart` integration**:
+  `voyager/integrations/cursor_session_start.py`, plus a correction to
+  `voyager/integrations/cursor.py`, which had been writing an invented schema to
+  a file Cursor never reads. Cursor differs from the other providers in two ways
+  that fail silently: `sessionStart` carries **no `cwd`** (the repository comes
+  from `workspace_roots` or `CURSOR_PROJECT_DIR`) and its stdout is a **top-level
+  `additional_context`**, not the `hookSpecificOutput` envelope. The installer now
+  writes `~/.cursor/hooks.json` with `version: 1` and the real per-hook fields
+  (`command`, `type`, `timeout`), idempotently and preserving unrelated hooks.
 - **Codex native SessionStart integration (G3-B → zero-touch)**: real nested
   `~/.codex/hooks.json` registration plus a fail-open handler that normalizes
   the native stdin payload and emits `hookSpecificOutput.additionalContext`
@@ -40,16 +55,40 @@ All notable changes to Voyager are documented here. Format loosely follows
   persisted, so a member lost to pruning also invalidates the bundle.
 
 ### Known limitations
-- Codex may truncate a long `additionalContext` for the inline copy (head and
-  tail kept, middle elided) and spills the full bundle to
-  `%TEMP%\hook_outputs\`. Voyager generates the complete document correctly
-  (`CODEX_SESSIONSTART_CONTEXT_TRUNCATION`).
-- Non-ASCII hook `cwd` encoding issue (`CODEX_NON_ASCII_HOOK_CWD_ENCODING`).
 - External Codex runtime UX issue: the managed `app-server` daemon launches
   `git` through ConPTY, which can surface Windows Terminal windows; window-level
   attribution places this outside Voyager/sessionFlow.
+- ZCode and Cursor are configured and their handlers are exercised end to end
+  with real payloads, but a provider-fired run has not been observed on this
+  machine yet, so they are reported as UNIT_VERIFIED rather than LIVE_VERIFIED.
+- Kiro and Antigravity expose native hook surfaces (audited) that Voyager does
+  not implement yet; DSH exposes none and stays wrapper-only.
 
 ### Fixed
+- **The hook payload now stays inside each provider's cap.** Codex caps the
+  injected string at 10,000 characters and elides the middle of anything longer,
+  which for tiered-v1 removed the newest L1 turns; the handler had no cap at all.
+  The window is now built inside the provider's budget (`l1_hard_max` rides
+  through `startup_continuity` → `get_continuation_context` and into the cache
+  key) and a shared `voyager.integrations.hook_payload` module — used by all four
+  handlers, with the Claude handler aliasing it so the caps cannot drift — caps
+  and spills the full bundle to `~/.voyager/context/` rather than `%TEMP%`.
+  Measured on the live thread: 8,247 characters delivered, no elision, no spill,
+  every STRONG session present (`CODEX_SESSIONSTART_CONTEXT_TRUNCATION`).
+- **L1 fairness under a tight budget.** Measured starvation: a 16 KB window gave
+  the zcode session 17 turns while an 8.9 KB window gave it zero. Every STRONG
+  session now contributes its own newest turn first, in canonical session order,
+  before any session gets a second one (`L1_STRONG_FAIRNESS`).
+- **Non-ASCII hook `cwd`** is resolved from Codex's own rollout `session_meta`
+  (`canonical_cwd_from_rollout`, honouring `CODEX_HOME`) instead of trusting a
+  payload the console encoding may have mangled; no encoding guessing, and a
+  missing `cwd` yields `None` (`CODEX_NON_ASCII_HOOK_CWD_ENCODING`).
+- **One representation of "not classified"**: `new_event` folds the classifier's
+  UNKNOWN sentinel to `NULL`, so `origin IS NOT NULL` keeps meaning "classified"
+  (`PROVENANCE_LITERAL_UNKNOWN_NORMALIZATION`).
+- `_save_context_cache` gained the `l1_hard_max` parameter its body already
+  referenced; the resulting `NameError` had been swallowed by its own fail-open
+  handler, which silently broke every cache write.
 - **Codex native SessionStart integration (G3-B)**: added the real nested
   `~/.codex/hooks.json` registration, a fail-open handler that normalizes the
   native stdin payload and emits `hookSpecificOutput.additionalContext`, and
