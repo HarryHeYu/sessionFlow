@@ -91,8 +91,24 @@ def test_estimate_tokens_is_chars_over_four():
 
 
 def test_auto_budget_resolves_balanced_for_known_targets():
-    assert auto_budget("claude") == auto_budget("codex") == \
-        auto_budget("grok") == 20000
+    """`auto` is provider-aware now: a provider that declares a startup budget
+    gets that budget converted to tokens, and only an unknown target falls back
+    to the global default.  (This test used to assert a flat 20000 for every
+    provider, which is the behaviour the provider-aware budget replaced.)"""
+    from voyager.budget import PROVIDER_CONTEXT_BUDGETS
+
+    declared = 0
+    for provider, spec in PROVIDER_CONTEXT_BUDGETS.items():
+        chars = spec.get("startup_context_budget")
+        if not chars:
+            continue
+        declared += 1
+        assert auto_budget(provider) == max(1, chars // 4), provider
+    assert declared, "at least one provider must declare a startup budget"
+
+    # the providers that declare a budget agree with each other only when they
+    # declare the same budget -- which is exactly the point of the change
+    assert auto_budget("claude") == auto_budget("codex") == 1900
     assert auto_budget(None) == 20000
 
 

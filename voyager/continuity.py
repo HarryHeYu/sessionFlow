@@ -937,7 +937,7 @@ def handoff_thread(
 
     Never raises for expected paths — errors are in the result dict.
     """
-    from .budget import apply_budget, auto_budget, parse_budget
+    from .budget import apply_budget, parse_budget, resolve_auto_budget
 
     tid = thread["id"]
     res: Dict[str, Any] = {
@@ -1010,17 +1010,17 @@ def handoff_thread(
         return res
 
     # -- cross-provider: compile Continuation Bundle (D11 default) ---------
-    from .budget import apply_budget as _ab, parse_budget as _pb, auto_budget as _abud
+    from .budget import apply_budget as _ab, parse_budget as _pb, resolve_auto_budget
     tokens = _pb(budget)
     if tokens is None and budget and budget.strip().lower() == "auto":
-        tokens = _abud(target)
+        tokens = resolve_auto_budget(target)
     bundle = build_continuation_bundle(store, members, goal=goal)
     packed, info = _ab(bundle, tokens, target=target)
     out_dir = get_bundles_dir()
     out = Path(output) if output else out_dir / default_bundle_name(members)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(packed, encoding="utf-8")
-    
+
     # Record pending attach so the next scan can auto-resolve
     store.pending_record(
         tid, target,
@@ -1032,7 +1032,7 @@ def handoff_thread(
         goal=goal,
         lease_token=lease["lease_token"])
     res["pending_recorded"] = True
-    
+
     res["action"] = "bundle"
     res["argv"] = bundle_command(target, out)
     res["bundle_path"] = str(out.resolve())

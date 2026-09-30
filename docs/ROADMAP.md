@@ -12,6 +12,13 @@ Phase 7 is partially shipped (API/bridge/scaffold done; Composer webview + one-c
 
 **Final assessment (2026-09-20; classification corrected 2026-09-23)**: All roadmap phases complete. Zero-Touch Startup Continuity core implementation verified via pytest (`374 collected → 372 passed, 2 skipped` with the full dev extras; `356 passed, 18 skipped` simulated core-only).
 
+> **Update (2026-09-30).** The paragraph below is a historical record of the
+> 2026-09-24 assessment. One sentence in it — that there is "no persisted
+> live-evidence state" — is no longer true: `verification_events` now stores
+> append-only evidence and `voyager verify` derives the state from it. The letter
+> in the table above is still configuration-derived; the live claim lives in
+> `voyager verify`.
+
 > **Correction.** The original assessment classified Codex/Claude as **STARTUP_ASSISTED**, reasoning that "no automatic `voyager_startup` invocation happens at agent startup". The *observation* was real; the *cause* was not the platforms. Voyager's own installer wrote an invented flat hook schema **and was never wired into `voyager integrate install`**, so nothing was ever registered. With that fixed, Claude Code registers a real native `SessionStart` hook and reports **`H`**. As of 2026-09-24 the provider firing it is **live-verified** end to end (trigger → transcript discovered → scan → pending resolved → session attached to its WorkThread, with no Voyager command), so `SESSIONSTART_TRIGGER_LIVE_VERIFIED` is **true**. The letter stays `H` because it is derived from static capability and configuration, with no persisted live-evidence state behind it; no provider prints `Y`. Zero-Touch Final Acceptance was **CLOSED on 2026-09-25**: the cross-provider leg ran live (a private sentinel written only in Claude was recovered by a normally launched Grok session, whose native session then attached itself to the same WorkThread with no manual scan), so `CONTEXT_INJECTION_LIVE_VERIFIED`, `CROSS_PROVIDER_INVISIBLE_CONTINUITY` and `FULL_CONTINUITY_LIVE_VERIFIED` are **true**. See [`grok_continuity_verdict.md`](../grok_continuity_verdict.md#final-acceptance--closed-2026-09-25) and [`claude_continuity_verdict.md`](../claude_continuity_verdict.md).
 
 **Codex zero-touch continuity: `CODEX_ZERO_TOUCH_CROSS_AGENT_CONTINUITY = PASS`

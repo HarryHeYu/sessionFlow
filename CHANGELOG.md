@@ -10,6 +10,29 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **`voyager doctor`** — one command that answers "is this healthy, and why not":
+  store/schema, per-provider source paths, hook registration and config validity,
+  the last observed trigger, pending attaches, active WorkThreads, ambiguity,
+  context format, provider budgets, provenance coverage, cache age and the known
+  debts, each classified blocking / external / non-blocking. It reads the same
+  canonical capability matrix as the README, so the two cannot disagree.
+- **`voyager verify [provider] [--json]`** — declared vs observed vs effective
+  state per provider, derived from an **append-only** `verification_events` table.
+  Strictly read-only: it opens the database `mode=ro`, issues no DDL, and cannot
+  manufacture the evidence it reports. Evidence is grouped per correlation chain
+  (never per provider), so a hook in one session and a resolution in another can
+  never combine into a zero-touch claim.
+- **`voyager db check | backup | repair | compact [--json]`** — a database
+  surface with its semantics spelled out. `check` and `repair` are read-only
+  (`repair` prints a plan); `repair --apply` executes only `SAFE_DERIVED_REPAIR`
+  steps (FTS rebuild, which is derived from `events` and therefore deterministic);
+  `VACUUM` is `MAINTENANCE` and lives only in `compact`. Backups use SQLite's
+  online backup API — a `shutil.copy2` of a WAL database is not a backup — into a
+  temporary file that is verified, then atomically renamed, then described by
+  metadata. A CRITICAL integrity finding is never offered as an automatic repair.
+- **`voyager integrate status --deep`** — every capability dimension for every
+  provider, each with the evidence behind it.
+
 - **ZCode native SessionStart integration**: `voyager/integrations/zcode_session_start.py`
   speaks ZCode's documented hook contract (`hooks.events.SessionStart` in
   `~/.zcode/cli/config.json`, with the Claude-compatible envelope on stdout).

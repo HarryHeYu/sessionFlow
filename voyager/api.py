@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .budget import apply_budget, auto_budget, parse_budget
+from .budget import apply_budget, parse_budget, resolve_auto_budget
 from .continuity import build_continuation_bundle
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import Store, default_db_path
@@ -146,7 +146,8 @@ def bundle_preview(db: Optional[Path] = None,
     try:
         tokens = parse_budget(budget)
         if tokens is None and budget and budget.strip().lower() == "auto":
-            tokens = auto_budget(target)
+            # Use provider-aware auto budget resolution
+            tokens = resolve_auto_budget(target)
     except ValueError as e:
         store.close()
         return {"error": str(e)}

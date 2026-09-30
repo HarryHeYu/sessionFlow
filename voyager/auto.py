@@ -166,16 +166,16 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
 
     repo = repo or (git_info(cwd or os.getcwd()).get("repo_root")
                     or (cwd or os.getcwd()).replace("\\", "/"))
-    
+
     # Filter active threads for this repo
     active_threads = [t for t in store.thread_list("active")
                      if t["repo_root"] and _same_repo(t["repo_root"], repo)]
-    
+
     if thread_id:
         # Explicit thread override - single thread mode
         t = store.thread_get(thread_id)
         active_threads = [t] if t else []
-    
+
     result: Dict[str, Any] = {
         "repo_root": repo,
         "continuity_available": False,
@@ -190,11 +190,11 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
         "pending_attach": [],
         "recommended_action": "none",
     }
-    
+
     # SECURITY CHECK: multiple active threads = ambiguous
     if len(active_threads) == 0:
         return result
-    
+
     if len(active_threads) > 1:
         # AMBIGUOUS - do not auto-select
         result["status"] = "ambiguous"
@@ -210,14 +210,14 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
         result["continuity_available"] = False
         result["recommended_action"] = "resolve-ambiguity"
         return result
-    
+
     # Exactly one active thread - safe to use
     thread = active_threads[0]
     result["status"] = "success"
     result["continuity_available"] = True
     result["active_thread"] = dict(thread)
     result["current_goal"] = thread["goal"] or thread["title"]
-    
+
     lease = store.thread_lease_get(thread["id"])
     lst = lease_state(lease)
     result["lease_state"] = {"held": lst["held"], "expired": lst["expired"],
@@ -283,7 +283,7 @@ def get_continuation_context(store: Optional[Store] = None,
     hint + a bounded L1.  The format must ride into the context cache key so
     a flat document is never served for a tiered request (or the reverse).
     """
-    from .budget import apply_budget, auto_budget, parse_budget
+    from .budget import apply_budget, parse_budget, resolve_auto_budget
     from .ranker import extract_candidate_facts, rank_candidates
 
     own_store = store is None
@@ -324,7 +324,9 @@ def get_continuation_context(store: Optional[Store] = None,
 
         tokens = parse_budget(budget)
         if tokens is None and budget and budget.strip().lower() == "auto":
-            tokens = auto_budget(target)
+            # Use provider-aware auto budget resolution
+            from .budget import resolve_auto_budget
+            tokens = resolve_auto_budget(target)
         from .continuity import (build_continuation_bundle,
                                  build_tiered_bundle, CONTEXT_FORMAT_TIERED)
         if context_format == CONTEXT_FORMAT_TIERED:

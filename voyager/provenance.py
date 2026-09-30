@@ -280,7 +280,12 @@ def session_band(con, sid: str) -> Tuple[str, Dict[str, int]]:
     # BOOTSTRAP_ONLY.  Only `origin` decides what a user event really is.
     relevant = [e for e in evs if e["kind"] == "user"]
     human = sum(1 for e in relevant if e["origin"] == "human")
-    unknown = sum(1 for e in relevant if e["origin"] is None)
+    # `origin IS NULL` is the stored form of "not classified", but a database
+    # written before the sentinel was folded may still hold the literal.  Reading
+    # that as *non-human* would turn "we do not know" into "no human work here",
+    # which is the one direction this function must never get wrong.
+    unknown = sum(1 for e in relevant
+                  if e["origin"] is None or e["origin"] == UNKNOWN)
     nonhuman = len(relevant) - human - unknown
     distinct = len({e["tool_name"] for e in evs
                     if e["kind"] == "tool_call" and e["tool_name"]})

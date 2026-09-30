@@ -198,6 +198,29 @@ of the previous session's hidden tool state.
 | Grok CLI | Y     | N   | `H` — hook registered | Native `SessionStart` hook installed; the provider **has** been observed firing it live (2026-09-25). `H` is a static capability reading, not live evidence |
 | DSH      | Y     | N   | `N` — no mechanism    | Best effort                            |
 
+> **Single source of truth.** The table below is published from
+> `voyager/capability_matrix.py`, which is also what `voyager doctor` and
+> `voyager integrate status --deep` read. Each cell is a *declared* capability
+> capped by what this machine has actually observed, so the docs cannot claim a
+> live verification the code never earned. Run `voyager doctor` to regenerate the
+> machine's view of it.
+
+### Observability commands
+
+```
+voyager doctor [--json]              # is this installation healthy, and why not
+voyager verify [provider] [--json]   # declared / observed / effective per provider
+voyager integrate status --deep      # every capability dimension, with its evidence
+
+voyager db check   [--json]          # read-only integrity diagnosis
+voyager db backup  [--json]          # consistent snapshot via SQLite's backup API
+voyager db repair  [--json]          # plan by default; --apply runs the safe steps
+voyager db compact [--json]          # VACUUM (maintenance, deliberately not "repair")
+```
+
+`db repair` never runs `VACUUM` — that is `db compact`. `db repair` plans by default and
+`--apply` is the authorisation; there is no confirmation bypass.
+
 **Verification levels** — these are deliberately *not* the same claim:
 
 | Level | Meaning |
@@ -226,7 +249,9 @@ stay at UNIT_VERIFIED.
 
 Legend: **Y** = installed, **R** = registered, **N** = unsupported, **A** = available/manual setup needed.
 
-Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered, **`A`** = startup-assisted, **`N`** = no hook. The letter is derived from **static capability and configuration only** — Voyager keeps no persisted live-evidence state, so the CLI cannot report a manual observation, and nothing prints `Y`. Both Claude Code's trigger (2026-09-24) and Grok's (2026-09-25) *have* been observed live, and both still report `H`. Run `voyager integrate status` for the configuration answer on your machine.
+Startup status: **`Y`** = zero-touch verified live, **`H`** = native hook registered, **`A`** = startup-assisted, **`N`** = no hook. The letter is derived from **static capability and configuration only**.
+
+Live verification is now a separate, persisted thing: `voyager verify` reports, per provider, the *declared* state (what the code supports), the *observed* state (what this machine has actually seen, derived from an append-only `verification_events` table) and the *effective* state (the weaker of the two). Observation can only lower a claim, never raise it above what the code supports, and `voyager verify` is strictly read-only — it cannot manufacture the evidence it reports. Run `voyager doctor` for the whole picture. Both Claude Code's trigger (2026-09-24) and Grok's (2026-09-25) *have* been observed live, and both still report `H`. Run `voyager integrate status` for the configuration answer on your machine.
 
 ### How native hooks work here
 

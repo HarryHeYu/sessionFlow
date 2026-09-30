@@ -35,6 +35,7 @@ try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations import hook_payload
     from voyager.integrations.hook_result import build_result, classify
+    from voyager.verification_harness import begin_hook, note_result
 except ImportError:
     # Running as standalone module, parent is voyager dir
     import os
@@ -45,6 +46,7 @@ except ImportError:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations import hook_payload
     from voyager.integrations.hook_result import build_result, classify
+    from voyager.verification_harness import begin_hook, note_result
 
 
 # Hook traces are the only way to tell "the hook never ran" apart from "the hook
@@ -155,10 +157,10 @@ def _log_env_debug():
 
 def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
     """Handle Claude SessionStart event.
-    
+
     Args:
         cwd: Current working directory from Claude's stdin JSON
-        
+
     Returns:
         {
             "status": "context_ready" | "no_thread" | "error",
@@ -178,7 +180,7 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
     """
     # LOG EXECUTION ENVIRONMENT IMMEDIATELY - diagnostic for Claude GUI hooks
     _log_env_debug()
-    
+
     try:
         # Read Claude's stdin JSON. Two guards matter here:
         #  - sys.stdin is None when the caller closes fd 0 (`0<&-`), and calling
@@ -189,27 +191,30 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
             stdin_content = ""
         else:
             stdin_content = stdin_stream.read()
-        
+
         session_id = None
         if stdin_content.strip():
             claude_event = json.loads(stdin_content)
             # Extract common fields from Claude's hook input
             cwd = cwd or claude_event.get("cwd")
             session_id = claude_event.get("session_id")  # Claude's native session ID
-            
+
             _log_debug("claude", "SessionStart_parsed",
                        session_id=session_id, cwd=cwd)
         else:
             _log_debug("claude", "SessionStart_no_stdin", cwd=cwd)
-            
+
         if not cwd:
             cwd = str(Path.cwd())
-        
+
         # Use unified startup continuity primitive - pass native session_id for auto-attach
         # Budget is tunable because this hook runs on every session start and
         # blocks it. Since Step G2 the document is tiered-v1 (~16 KB: L0 +
         # Runtime State + retrieval hint + bounded L1), so `auto` is cheap
         # again; override with VOYAGER_CLAUDE_HOOK_BUDGET if ever needed.
+        # Evidence: this code running is proof the provider fired its hook, and the
+        # chain id ties the later resolution back to this session.
+        correlation_id = begin_hook("claude", cwd=cwd, native_session_id=session_id)
         result = startup_continuity(
             provider="claude",
             cwd=cwd,
@@ -222,14 +227,15 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
             # drops the newest L1 turns -- the exact failure Codex had.
             l1_hard_max=PROVIDER_L1_BUDGET,
         )
-        
+        note_result("claude", correlation_id, result, native_session_id=session_id)
+
         _log_debug("claude", "startup_continuity_result",
                    continuity_available=result.continuity_available,
                    thread_id=result.thread_id,
                    attach_status=result.attach_status,
                    context_stale=result.context_stale,
                    context_source=result.context_source)
-        
+
         # Check for valid WorkThread with available context
         # Note: context_stale=True just means we compiled fresh; context is still usable
         if not result.continuity_available or not result.context:
@@ -246,17 +252,17 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
                                   else "Context not available")
             out["continuity_info"]["context_stale_cached"] = result.context_stale
             return out
-            
+
         # Return structured status - separate from attach decision
         # Context is ready regardless of auto_attach status
         attach_ready = result.attach_status == "already_attached" or result.attach_status == "auto_attached"
-        
+
         _log_debug("claude", "SessionStart_success",
                    thread_id=result.thread_id,
                    context_length=len(result.context),
                    attach_status=result.attach_status,
                    context_source=result.context_source)
-        
+
         response = {
             "status": "context_ready",  # Clear indication context available
             "context": result.context,
@@ -277,18 +283,18 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
                 "recommended_action": result.recommended_action,
             },
         }
-        
+
         if not attach_ready:
             response["next_step"] = "session_discovery_pending"
-        
+
         return response
-        
+
     except Exception as e:
         import traceback
-        
+
         _log_debug("claude", "SessionStart_error",
                    error=str(e)[:200])
-        
+
         return {
             "status": "error",
             "message": str(e),

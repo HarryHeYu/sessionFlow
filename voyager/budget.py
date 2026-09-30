@@ -24,6 +24,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+# Import provider-aware budget defaults from capability_matrix
+try:
+    from .capability_matrix import (
+        PROVIDER_CONTEXT_BUDGETS, provider_auto_budget_target,
+    )
+except ImportError:
+    # Fallback if capability_matrix not available
+    PROVIDER_CONTEXT_BUDGETS = {}
+
+    def provider_auto_budget_target(provider: str) -> Optional[str]:
+        return None
+
 # D13-adjacent D10 rule: token estimates are chars/4, no tokenizer dep.
 BUDGET_PRESETS = {
     "compact": 4000,
@@ -34,6 +46,46 @@ BUDGET_PRESETS = {
 # "auto" resolves per target agent; known continuation targets are
 # large-context agentic CLIs -> balanced. Unknown targets also get balanced.
 AUTO_BUDGET_TOKENS = 20000
+
+
+def resolve_auto_budget(target: Optional[str]) -> int:
+    """Resolve `--budget auto` for a target agent using provider-aware defaults.
+
+    Priority order:
+    1. Provider-specific startup_context_budget converted to tokens
+    2. Provider's auto_budget_target preset name
+    3. Global default
+
+    Returns token count (chars/4 estimate).
+    """
+    if not target:
+        return AUTO_BUDGET_TOKENS
+
+    target_lower = target.lower().strip()
+
+    # Check if target matches a known provider
+    from .capability_matrix import PROVIDERS
+    matched_provider = None
+    for p in PROVIDERS:
+        if target_lower == p or target_lower.startswith(p + ":"):
+            matched_provider = p
+            break
+
+    if matched_provider:
+        # 1. Try provider-specific char budget
+        char_budget = PROVIDER_CONTEXT_BUDGETS.get(matched_provider, {}).get(
+            "startup_context_budget")
+        if char_budget:
+            return max(1, char_budget // 4)
+
+        # 2. Try provider's auto_budget_target preset
+        auto_target = PROVIDER_CONTEXT_BUDGETS.get(matched_provider, {}).get(
+            "auto_budget_target")
+        if auto_target and auto_target in BUDGET_PRESETS:
+            return BUDGET_PRESETS[auto_target]
+
+    # 3. Fall back to global default
+    return AUTO_BUDGET_TOKENS
 
 # Fixed section priority, prefix-matched against "## ..." headings.
 # Earlier = kept first under budget pressure. Evidence & Provenance is
@@ -90,9 +142,18 @@ def parse_budget(spec: Optional[str]) -> Optional[int]:
 
 
 def auto_budget(target: Optional[str]) -> int:
-    """Resolve `--budget auto` for a target agent. All known continuation
-    targets are large-context agentic CLIs -> balanced."""
-    return AUTO_BUDGET_TOKENS
+    """Resolve `--budget auto` for a target agent using provider-aware defaults.
+
+    This is the legacy wrapper; all callers should use resolve_auto_budget() directly.
+
+    Priority order:
+    1. Provider-specific startup_context_budget converted to tokens
+    2. Provider's auto_budget_target preset name
+    3. Global default (20k tokens)
+
+    Returns token count (chars/4 estimate).
+    """
+    return resolve_auto_budget(target)
 
 
 def split_sections(bundle: str) -> Tuple[str, List[Dict[str, Any]]]:

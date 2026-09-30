@@ -13,6 +13,8 @@ from typing import List, Optional
 
 # Import provider config for integrate command output
 from .skill import PROVIDER_CONFIG, uninstall_integration, check_integration_status
+from .db_health import (cmd_db_backup, cmd_db_check, cmd_db_compact,
+                        cmd_db_repair)
 from .adapters import load_all
 from .adapters.base import enabled_adapters, git_info
 from .store import Store, default_db_path, lease_state
@@ -594,7 +596,7 @@ def cmd_diff(args) -> int:
 def _render_budgeted(text: str, args, target: Optional[str] = None) -> str:
     """Phase 4: apply --budget to a rendered bundle/package and print the
     token estimate. Shared by handoff / merge / continue pipelines."""
-    from .budget import apply_budget, auto_budget, parse_budget
+    from .budget import apply_budget, parse_budget, resolve_auto_budget
     spec = getattr(args, "budget", None)
     try:
         tokens = parse_budget(spec)
@@ -602,7 +604,8 @@ def _render_budgeted(text: str, args, target: Optional[str] = None) -> str:
         print(f"error: {e}", file=sys.stderr)
         raise SystemExit(2)
     if tokens is None and spec and spec.strip().lower() == "auto":
-        tokens = auto_budget(target)
+        # Use provider-aware auto budget resolution
+        tokens = resolve_auto_budget(target)
     packed, info = apply_budget(text, tokens, target=target)
     print("estimated tokens: ~{0}".format(info["estimated_tokens"])
           + ("  (budget {0})".format(info["budget"]) if info["budget"] else ""))
@@ -619,7 +622,7 @@ def cmd_api(args) -> int:
 def cmd_skill(args) -> int:
     """Legacy wrapper for backward compatibility."""
     from .skill import install_skills, skill_source
-    
+
     results = install_skills(agent=args.agent, force=args.force,
                              home=Path(args.home) if args.home else None)
     print(f"skill source: {skill_source()}")
@@ -638,30 +641,30 @@ def cmd_skill(args) -> int:
 def cmd_integrate(args) -> int:
     """Install full integration for a provider."""
     from .skill import install_integration
-    
+
     result = install_integration(
         provider=args.provider,
         force=args.force,
         home=Path(args.home) if args.home else None,
     )
-    
+
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
-    
+
     print(f"integrate: {PROVIDER_CONFIG.get(args.provider, {}).get('name', args.provider)}")
     print(f"  status: {result['status']}")
-    
+
     skill = result.get("skill", {})
     print(f"  skill: {skill.get('status')}")
     if skill.get("path"):
         print(f"           {skill['path']}")
-    
+
     mcp = result.get("mcp", {})
     print(f"  mcp: {mcp.get('status', 'unknown')}")
     if mcp.get("message"):
         print(f"       {mcp['message']}")
-    
+
     bootstrap = result.get("bootstrap", {})
     if bootstrap.get("status") == "generated":
         print(f"  bootstrap: generated")
@@ -675,12 +678,12 @@ def cmd_integrate(args) -> int:
         print(f"        {hook.get('command')}")
     elif hook:
         print(f"  hook: {hook.get('status')} - {hook.get('message', '')}")
-    
+
     if result.get("warnings"):
         print("  warnings:")
         for w in result["warnings"]:
             print(f"          {w}")
-    
+
     print(f"\nverification: {result.get('verification', 'none')}")
     return 0 if result["status"] not in ("error",) else 1
 
@@ -688,27 +691,46 @@ def cmd_integrate(args) -> int:
 def cmd_integrate_status(args) -> int:
     """Check integration status for providers."""
     from .skill import check_integration_status
-    
+
     providers = args.providers if args.providers else None
     results = check_integration_status(providers=providers,
                                         home=Path(args.home) if args.home else None)
-    
+
+    if getattr(args, "deep", False):
+        from .capability_matrix import DIMENSIONS, collect_evidence, resolve_cell
+        deep = {}
+        for p in (providers or ["codex", "claude", "grok", "zcode", "cursor",
+                                "kiro", "antigravity", "dsh"]):
+            ev = collect_evidence(p)
+            deep[p] = {d: resolve_cell(p, d, ev) for d in DIMENSIONS}
+        if args.json:
+            print(json.dumps({"integration": results, "capabilities": deep},
+                             indent=2, ensure_ascii=False, default=str))
+            return 0
+        print("Capabilities (declared ceiling capped by what this machine observed)")
+        for p, dims in deep.items():
+            print("")
+            print("  %s" % p)
+            for d, (state, note) in dims.items():
+                print("    %-30s %-26s %s" % (d, state, note[:54]))
+        return 0
+
     if args.json:
         print(json.dumps(results, indent=2, ensure_ascii=False))
         return 0
-    
+
     # Print table header (ASCII compatible)
     print(f"{'Provider':<15} {'Skill':<8} {'MCP':<10} {'Startup':<10} {'Auto':<6}")
     print("-" * 70)
-    
+
     for r in results:
         skill_y = "Y" if r.get("skill", {}).get("installed") else "N"
         mcp_reg = "R" if r.get("mcp", {}).get("registered") else ("A" if r.get("mcp", {}).get("available") else "N")
         start_stat = r.get("startup_status", "N")  # Y=verified live, H=hook registered (unverified), A=assisted, N=none
         auto = "Y" if r.get("auto_attach") else "N"
-        
+
         print(f"{r['installed']:<15} {skill_y:<8} {mcp_reg:<10} {start_stat:<10} {auto:<6}")
-    
+
     # Add notes section
     print("\nLegend:")
     print("  Skill: Y=installed, N=not found")
@@ -721,33 +743,64 @@ def cmd_integrate_status(args) -> int:
     return 0
 
 
+def _cmd_verify(args) -> int:
+    """`voyager verify` -- strictly read-only evidence view.
+
+    The wrapper exists so the harness is imported on demand and so the command
+    has exactly one entry point; the harness itself exposes no way to write from
+    a read path.
+    """
+    from .verification_harness import cmd_verify
+
+    return cmd_verify(provider=args.provider, verbose=args.verbose,
+                      json_output=args.json)
+
+
+def cmd_doctor(args) -> int:
+    """Is this installation healthy, and what is still open?
+
+    Reads the same canonical capability matrix the README does, so the two cannot
+    disagree, and classifies everything it finds as blocking / external /
+    non-blocking debt.
+    """
+    from .doctor import render, run
+
+    report = run(repo=getattr(args, "repo", None))
+    if args.json:
+        print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+    else:
+        print(render(report))
+    # 0 = healthy, 1 = blocking issues found (useful for scripts, not an error)
+    return 1 if report.get("blocking") else 0
+
+
 def cmd_integrate_remove(args) -> int:
     """Remove integration for a provider."""
     from .skill import uninstall_integration
-    
+
     result = uninstall_integration(
         provider=args.provider,
         home=Path(args.home) if args.home else None,
     )
-    
+
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
-    
+
     print(f"remove: {args.provider}")
     print(f"  status: {result['status']}")
-    
+
     skill = result.get("skill", {})
     print(f"  skill: {skill.get('status')}")
     if skill.get("path"):
         print(f"         {skill['path']}")
-    
+
     if "mcp" in result:
         mcp = result["mcp"]
         print(f"  mcp: {mcp.get('status')}")
         if mcp.get("path"):
             print(f"       {mcp['path']}")
-    
+
     if "bootstrap" in result:
         boot = result["bootstrap"]
         print(f"  bootstrap: {boot.get('status')}")
@@ -1089,7 +1142,7 @@ def cmd_switch(args) -> int:
         output=args.output if getattr(args, "output", None) else None,
         no_launch=True,  # Don't launch in handoff_thread
     )
-    
+
     # Save lease info before closing store for manual launch handling
     thread_id = t["id"]
     lease_token = res.get("lease_token")
@@ -1195,11 +1248,11 @@ def cmd_switch(args) -> int:
                 return 1
     else:
         output_lines.append("unexpected action: {0}".format(res["action"]))
-    
+
     # Print all accumulated output BEFORE returning
     if output_lines:
         print("\n".join(output_lines))
-    
+
     if res["action"] == "refused" or res["action"] not in ("native-resume", "transcript", "bundle"):
         return 1
     return 0
@@ -1425,6 +1478,123 @@ def cmd_thread(args) -> int:
             print("lease vanished while unlocking", file=sys.stderr)
         return 0
     print("unknown thread action: " + action, file=sys.stderr)
+    return 1
+
+
+def cmd_checkpoint(args) -> int:
+    """WorkThread checkpoint management commands."""
+    from .checkpoint import (
+        init_checkpoint_schema, checkpoint_create, checkpoint_list,
+        checkpoint_get, checkpoint_update, checkpoint_export, checkpoint_import,
+        get_latest_checkpoint, checkpoint_summary,
+    )
+
+    store = Store(args.db)
+    init_checkpoint_schema(store)
+
+    action = args.checkpoint_cmd
+
+    # Auto-detect thread from cwd if not specified
+    thread_id = None
+    if hasattr(args, 'thread') and args.thread:
+        thread_id = args.thread
+
+    # If no thread specified, try to detect from current continuity state
+    if not thread_id:
+        from .auto import discover_continuity
+        disc = discover_continuity(store, cwd=os.getcwd())
+        thread = disc.get("active_thread")
+        if thread:
+            thread_id = thread["id"]
+            print(f"auto-detected thread: {thread_id}")
+
+    if action == "create":
+        if not thread_id:
+            print("error: need WORKING DIRECTORY or --thread flag", file=sys.stderr)
+            return 1
+        cid = checkpoint_create(
+            store,
+            thread_id=thread_id,
+            goal=args.goal,
+            phase=getattr(args, "phase", "analysis"),
+        )
+        print("checkpoint created:", cid)
+        return 0
+
+    if action == "list":
+        checkpoints = checkpoint_list(store, thread_id=thread_id,
+                                     phase=getattr(args, "phase", None),
+                                     limit=getattr(args, "limit", 10))
+        if not checkpoints:
+            print("no checkpoints found")
+            return 0
+        for cid, ckpt in checkpoints[:getattr(args, "limit", 10)]:
+            lines = checkpoint_summary(ckpt).split("\n")
+            print(f"\n[{cid}]")
+            for line in lines[:3]:  # First few lines only
+                print(f"  {line}")
+        return 0
+
+    if action == "show":
+        checkpoint = checkpoint_get(store, args.checkpoint)
+        if not checkpoint:
+            print("checkpoint not found:", args.checkpoint, file=sys.stderr)
+            return 1
+        print(checkpoint_summary(checkpoint))
+        return 0
+
+    if action == "update":
+        if not thread_id:
+            print("error: need WORKING DIRECTORY or --checkpoint ID", file=sys.stderr)
+            return 1
+
+        # Get latest checkpoint if not specified
+        checkpoint_id = getattr(args, "checkpoint", None)
+        if not checkpoint_id:
+            ckpts = checkpoint_list(store, thread_id=thread_id, limit=1)
+            if not ckpts:
+                print("no checkpoints to update", file=sys.stderr)
+                return 1
+            checkpoint_id = ckpts[0][0]
+
+        cid = checkpoint_update(
+            store,
+            checkpoint_id,
+            add_blocker=getattr(args, "add_blocker", None),
+            severity=getattr(args, "severity", "medium"),
+            add_decision={
+                "topic": getattr(args, "add_decision_topic", ""),
+                "rationale": getattr(args, "decision_rationale", ""),
+            } if getattr(args, "add_decision_topic", None) else None,
+            add_next_action=getattr(args, "add_next_action", None),
+            record_git_state=getattr(args, "record_git", False),
+        )
+        print("checkpoint updated:", cid)
+        return 0
+
+    if action == "export":
+        success = checkpoint_export(store, args.checkpoint, Path(args.output))
+        if not success:
+            print("failed to export checkpoint:", args.checkpoint, file=sys.stderr)
+            return 1
+        print("exported:", args.output)
+        return 0
+
+    if action == "restore":
+        # For now, just show what would be restored
+        checkpoint = checkpoint_get(store, args.checkpoint)
+        if not checkpoint:
+            print("checkpoint not found:", args.checkpoint, file=sys.stderr)
+            return 1
+        print(f"would restore from checkpoint: {args.checkpoint}")
+        print(checkpoint_summary(checkpoint))
+        if not getattr(args, "merge", False):
+            print("\nnote: restore replaces current WorkThread goal/phase with checkpoint state")
+        else:
+            print("\nnote: restore merges checkpoint data with current state")
+        return 0
+
+    print("unknown checkpoint action:", action, file=sys.stderr)
     return 1
 
 
@@ -1663,6 +1833,66 @@ def main(argv=None) -> int:
     tsp.add_argument("sessions", nargs="+",
                      help="session id/prefix (repeatable, comma-ok)")
     tsp.set_defaults(func=cmd_thread)
+
+    # voyager thread checkpoint <subcommand>
+    tch = tsub.add_parser("checkpoint", help="WorkThread checkpoint management")
+    tcsub = tch.add_subparsers(dest="checkpoint_cmd", required=True)
+
+    tsp = tcsub.add_parser("create", parents=[common],
+                           help="create a new checkpoint for this WorkThread")
+    tsp.add_argument("--goal", required=True, help="primary objective")
+    tsp.add_argument("--phase", choices=["analysis", "design", "implementation",
+                                        "testing", "review", "complete"],
+                     default="analysis", help="development phase")
+    tsp.add_argument("--from-session", dest="from_session",
+                     help="copy milestones/blockers from this session ID prefix")
+    tsp.set_defaults(func=cmd_checkpoint)
+
+    tsp = tcsub.add_parser("list", parents=[common],
+                           help="list checkpoints for a WorkThread")
+    tsp.add_argument("thread", nargs="?", help="thread ID (default: auto-detect)")
+    tsp.add_argument("--status", dest="phase",
+                     choices=["analysis", "design", "implementation",
+                             "testing", "review", "complete"],
+                     help="filter by phase")
+    tsp.add_argument("--limit", type=int, default=10)
+    tsp.set_defaults(func=cmd_checkpoint)
+
+    tsp = tcsub.add_parser("show", parents=[common],
+                           help="show detailed checkpoint summary")
+    tsp.add_argument("checkpoint", help="checkpoint ID or prefix")
+    tsp.set_defaults(func=cmd_checkpoint)
+
+    tsp = tcsub.add_parser("update", parents=[common],
+                           help="update last checkpoint with new information")
+    tsp.add_argument("--checkpoint", help="checkpoint ID (default: latest)")
+    tsp.add_argument("--add-blocker", dest="add_blocker",
+                     help="add a blocker description")
+    tsp.add_argument("--severity", choices=["high", "medium", "low"],
+                     default="medium", help="blocker severity")
+    tsp.add_argument("--decision", dest="add_decision_topic",
+                     help="record a decision topic")
+    tsp.add_argument("--decision-rationale", dest="decision_rationale",
+                     help="rationale for the decision")
+    tsp.add_argument("--next-action", dest="add_next_action",
+                     help="add immediate next action")
+    tsp.add_argument("--record-git", action="store_true",
+                     help="record current git state (branch/HEAD)")
+    tsp.set_defaults(func=cmd_checkpoint)
+
+    tsp = tcsub.add_parser("export", parents=[common],
+                           help="export checkpoint to JSON file")
+    tsp.add_argument("checkpoint", help="checkpoint ID")
+    tsp.add_argument("--output", "-o", required=True, help="output file path")
+    tsp.set_defaults(func=cmd_checkpoint)
+
+    tsp = tcsub.add_parser("restore", parents=[common],
+                           help="restore checkpoint to current WorkThread state")
+    tsp.add_argument("checkpoint", help="checkpoint ID")
+    tsp.add_argument("--merge", action="store_true",
+                     help="merge with current state rather than replace")
+    tsp.set_defaults(func=cmd_checkpoint)
+
     tsp = tsub.add_parser("close", parents=[common], help="mark a thread closed (sessions untouched)")
     tsp.add_argument("thread")
     tsp.set_defaults(func=cmd_thread)
@@ -1702,7 +1932,7 @@ def main(argv=None) -> int:
     sp = sub.add_parser("integrate", help="install Voyager integration for a provider",
                         parents=[common])
     isp = sp.add_subparsers(dest="int_cmd", required=True)
-    
+
     # voyager integrate install <provider>
     iisp = isp.add_parser("install", help="install full integration for provider")
     iisp.add_argument("provider", choices=["codex", "claude", "grok", "dsh"],
@@ -1713,16 +1943,37 @@ def main(argv=None) -> int:
     iisp.add_argument("--json", action="store_true",
                       help="output results as JSON")
     iisp.set_defaults(func=cmd_integrate)
-    
+
     # voyager integrate status
     istp = isp.add_parser("status", help="check integration status for providers")
     istp.add_argument("providers", nargs="*", default=None,
-                      choices=["codex", "claude", "grok", "dsh"],
+                      choices=["codex", "claude", "grok", "zcode", "cursor",
+                               "kiro", "antigravity", "dsh"],
                       help="providers to check; omit for all")
     istp.add_argument("--home", help="override HOME for paths (testing)")
     istp.add_argument("--json", action="store_true")
+    istp.add_argument("--deep", action="store_true",
+                      help="also report each capability dimension with its evidence")
     istp.set_defaults(func=cmd_integrate_status)
-    
+
+    # voyager doctor [--json]
+    sp = sub.add_parser("doctor", help="is this installation healthy?")
+    sp.add_argument("--json", action="store_true", help="machine-readable report")
+    sp.add_argument("--repo", help="limit continuity checks to this repository")
+    sp.set_defaults(func=cmd_doctor)
+
+    # voyager verify <provider> [--verbose]
+    sp = sub.add_parser("verify", help="view automatic verification status for providers")
+    sp.add_argument("provider", nargs="?", default=None,
+                    choices=["codex", "claude", "grok", "zcode", "cursor",
+                            "kiro", "antigravity", "dsh"],
+                    help="provider to check; omit for all recorded")
+    sp.add_argument("--verbose", "-v", action="store_true",
+                    help="show recent probe details")
+    sp.add_argument("--json", action="store_true",
+                    help="machine-readable JSON output")
+    sp.set_defaults(func=lambda args: _cmd_verify(args))
+
     # voyager integrate remove <provider>
     irmp = isp.add_parser("remove", help="remove integration for provider")
     irmp.add_argument("provider", choices=["codex", "claude", "grok", "dsh"],
@@ -1731,11 +1982,11 @@ def main(argv=None) -> int:
     irmp.add_argument("--json", action="store_true",
                       help="output results as JSON")
     irmp.set_defaults(func=cmd_integrate_remove)
-    
+
     # voyager hook startup - provider lifecycle hook handler
     sp = sub.add_parser("hook", help="Voyager lifecycle hooks for native provider integration")
     hksub = sp.add_subparsers(dest="hook_cmd", required=True)
-    
+
     hks = hksub.add_parser("startup", help="handle startup continuity for a provider session")
     hks.add_argument("--provider", required=True,
                      help="target provider (claude|codex|grok|...)")
@@ -1769,7 +2020,7 @@ def main(argv=None) -> int:
     hkgs.add_argument("--db", help="index db path")
     hkgs.add_argument("--json", action="store_true")
     hkgs.set_defaults(func=cmd_hook_grok_session_start)
-    
+
     # Legacy skill install still supported
     sp = sub.add_parser("skill", help="(legacy) install the voyager skill into known agents",
                         parents=[common], aliases=["skills"])
@@ -1791,20 +2042,50 @@ def main(argv=None) -> int:
     sp.add_argument("--repo", help="resolve by repo instead of cwd")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_status)
-    
+
     # voyager launcher prelaunch
     sp = sub.add_parser("launcher", help="Voyager launcher hook utilities")
     lsub = sp.add_subparsers(dest="launcher_cmd", required=True)
-    
+
     lsp = lsub.add_parser("prelaunch", help="run prelaunch hook for wrapper scripts")
     lsp.add_argument("--provider", required=True, help="target provider")
     lsp.add_argument("--cwd", required=True, help="current working directory")
     lsp.add_argument("--db", help="index db path")
     lsp.add_argument("--json", action="store_true")
     lsp.set_defaults(func=lambda args: _run_launcher_prelaunch(args))
-    
+
     sp = sub.add_parser("stats", help="index statistics", parents=[common])
     sp.set_defaults(func=cmd_stats)
+
+    # voyager db <subcommand>
+    dbsub = sub.add_parser("db", help="database maintenance: check/backup/repair")
+    dbsub = dbsub.add_subparsers(dest="db_cmd", required=True)
+
+    # voyager db check
+    dbcheck = dbsub.add_parser("check", help="run integrity checks (read-only)")
+    dbcheck.add_argument("--verbose", "-v", action="store_true")
+    dbcheck.add_argument("--json", action="store_true")
+    dbcheck.set_defaults(func=lambda a: cmd_db_check(db_path=getattr(a, 'db', None), verbose=a.verbose,
+                                                      json_output=a.json))
+
+    # voyager db backup
+    dbbackup = dbsub.add_parser("backup", help="consistent snapshot via SQLite's backup API")
+    dbbackup.add_argument("--output-dir", help="backup destination directory")
+    dbbackup.add_argument("--json", action="store_true")
+    dbbackup.set_defaults(func=lambda a: cmd_db_backup(db_path=getattr(a, 'db', None), output_dir=a.output_dir,
+                                                        json_output=a.json))
+
+    # voyager db repair -- plan by default; --apply authorises the safe steps
+    dbrepair = dbsub.add_parser("repair", help="plan, and optionally apply, safe repairs")
+    dbrepair.add_argument("--apply", action="store_true",
+                          help="execute the SAFE_DERIVED_REPAIR steps (no confirmation bypass)")
+    dbrepair.add_argument("--json", action="store_true")
+    dbrepair.set_defaults(func=lambda a: cmd_db_repair(db_path=getattr(a, 'db', None), apply=a.apply, json_output=a.json))
+
+    # voyager db compact -- VACUUM, separate on purpose
+    dbcompact = dbsub.add_parser("compact", help="VACUUM the database (maintenance, not repair)")
+    dbcompact.add_argument("--json", action="store_true")
+    dbcompact.set_defaults(func=lambda a: cmd_db_compact(db_path=getattr(a, 'db', None), json_output=a.json))
 
     args = p.parse_args(argv)
     _expand_path_args(args)

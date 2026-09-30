@@ -38,12 +38,14 @@ try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.integrations.hook_result import build_result, classify
+    from voyager.verification_harness import begin_hook, note_result
     from voyager.startup import startup_continuity
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.integrations.hook_result import build_result, classify
+    from voyager.verification_harness import begin_hook, note_result
     from voyager.startup import startup_continuity
 
 PROVIDER = "cursor"
@@ -147,6 +149,10 @@ def handle_cursor_session_start(
     cwd = cwd or payload["cwd"]
     session_id = payload["native_session_id"]
 
+    # Evidence: this code running is proof the provider fired its hook,
+    # and the chain id ties the later resolution back to this session.
+    result = None
+    correlation_id = begin_hook(PROVIDER, cwd=cwd, native_session_id=session_id)
     try:
         # Anything the core prints would splice into our protocol stdout, so the
         # call is buffered; the envelope is written afterwards, on purpose.
@@ -166,6 +172,12 @@ def handle_cursor_session_start(
         _log_event({"ts": time.time(), "event": "startup_continuity_error",
                     "error": str(e), "cwd": cwd, "session_id": session_id})
         return {"status": "error", "message": str(e)}
+
+    # Evidence for the lifecycle that actually happened.  This has to sit
+    # after the call returns: it used to live inside the except branch, so a
+    # successful run recorded nothing and a failed one raised
+    # UnboundLocalError on `result`.
+    note_result(PROVIDER, correlation_id, result, native_session_id=session_id)
 
     if not result.continuity_available or not result.context:
         attach_status = getattr(result, "attach_status", None) or ""
