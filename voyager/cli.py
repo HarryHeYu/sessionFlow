@@ -1472,6 +1472,60 @@ def cmd_thread(args) -> int:
         print("attached {0} session(s)".format(attached)
               + (", {0} skipped/duplicate".format(skipped) if skipped else ""))
         return 0
+    if action in ("reopen", "archive"):
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+        tid = t["id"]
+        if action == "archive":
+            store.thread_set_status(tid, "archived")
+            print("thread {0} archived (sessions untouched)".format(tid))
+            return 0
+        # Reopening is an explicit act, and it can create the ambiguity the core
+        # refuses to resolve on its own: two active WorkThreads for one repo.
+        # Timestamps must never settle that, so say it out loud instead.
+        repo = t["repo_root"]
+        peers = []
+        if repo:
+            peers = [r for r in store.thread_list("active")
+                     if r["id"] != tid and r["repo_root"] == repo]
+        store.thread_set_status(tid, "active")
+        print("thread {0} reopened".format(tid))
+        if peers:
+            print("WARNING: {0} other active WorkThread(s) for {1}: {2}".format(
+                len(peers), repo, ", ".join(r["id"] for r in peers)))
+            print("         automatic continuation will now report AMBIGUOUS and")
+            print("         refuse to choose; close one, or pick explicitly with")
+            print("         `voyager continue --thread <id>`.")
+        return 0
+    if action == "stale":
+        import time as _time
+        days = float(getattr(args, "days", 14) or 14)
+        cutoff = _time.time() - days * 86400
+        rows = []
+        for r in store.thread_list("active"):
+            last = r["updated_at"] or r["created_at"] or 0
+            if last < cutoff:
+                rows.append({"id": r["id"], "title": r["title"],
+                             "repo_root": r["repo_root"],
+                             "last_activity": last,
+                             "age_days": round((_time.time() - last) / 86400, 1),
+                             "members": r["members"]})
+        if getattr(args, "json", False):
+            print(json.dumps({"days": days, "stale": rows}, indent=2,
+                             ensure_ascii=False, default=str))
+            return 0
+        if not rows:
+            print("no active thread is stale (> {0:g} days idle)".format(days))
+            return 0
+        for r in rows:
+            print("{0}  idle {1:g}d  members:{2}  {3}".format(
+                r["id"], r["age_days"], r["members"], r["title"] or ""))
+            print("    repo: {0}".format(r["repo_root"] or "?"))
+        print("")
+        print("A stale thread is still active: close or archive it explicitly.")
+        return 0
     if action == "close":
         t = store.thread_get(args.thread)
         if not t:
@@ -1940,6 +1994,19 @@ def main(argv=None) -> int:
                      help="merge with current state rather than replace")
     tsp.set_defaults(func=cmd_checkpoint)
 
+    tsp = tsub.add_parser("reopen", parents=[common],
+                          help="reopen a closed thread (warns if it creates ambiguity)")
+    tsp.add_argument("thread")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("archive", parents=[common],
+                          help="archive a thread (terminal, sessions untouched)")
+    tsp.add_argument("thread")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("stale", parents=[common],
+                          help="active threads with no recent activity")
+    tsp.add_argument("--days", type=float, default=14)
+    tsp.add_argument("--json", action="store_true")
+    tsp.set_defaults(func=cmd_thread)
     tsp = tsub.add_parser("close", parents=[common], help="mark a thread closed (sessions untouched)")
     tsp.add_argument("thread")
     tsp.set_defaults(func=cmd_thread)

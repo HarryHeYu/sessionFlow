@@ -205,6 +205,24 @@ of the previous session's hidden tool state.
 > live verification the code never earned. Run `voyager doctor` to regenerate the
 > machine's view of it.
 
+### WorkThread commands
+
+```
+voyager thread list|show|create|attach        # the basics
+voyager thread activity <thread> [--json]     # who contributed what
+voyager thread summarize <thread> [--json]    # one brief across every agent
+voyager thread checkpoint <create|list|show|update|export|restore>
+voyager thread close|reopen|archive <thread>  # explicit lifecycle
+voyager thread stale [--days N] [--json]      # active but idle
+```
+
+A brief is a derivation over the canonical WorkThread -- deterministic, offline,
+and independent of any model: the authoritative fields come from the thread
+itself, the recent turns are grouped per agent and read oldest-first, and open
+items exist only because a checkpoint recorded them. `reopen` warns when it would
+leave two active threads for one repository, because ambiguity is a choice the
+user makes, never something a timestamp settles.
+
 ### Observability commands
 
 ```
