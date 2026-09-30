@@ -743,6 +743,29 @@ def cmd_integrate_status(args) -> int:
     return 0
 
 
+def cmd_dashboard(args) -> int:
+    """Render the local dashboard: one self-contained HTML file."""
+    from .dashboard import build, render_html, write
+
+    store = Store(args.db)
+    try:
+        if getattr(args, "json", False):
+            print(json.dumps(build(store, repo=getattr(args, "repo", None)),
+                             indent=2, ensure_ascii=False, default=str))
+            return 0
+        out = getattr(args, "out", None)
+        if out:
+            path = write(store, Path(out), repo=getattr(args, "repo", None))
+        else:
+            from .store import default_db_path
+            path = write(store, Path(default_db_path()).parent / "dashboard.html",
+                         repo=getattr(args, "repo", None))
+        print(str(path))
+        return 0
+    finally:
+        store.close()
+
+
 def _cmd_verify(args) -> int:
     """`voyager verify` -- strictly read-only evidence view.
 
@@ -2069,6 +2092,14 @@ def main(argv=None) -> int:
     istp.add_argument("--deep", action="store_true",
                       help="also report each capability dimension with its evidence")
     istp.set_defaults(func=cmd_integrate_status)
+
+    # voyager dashboard [--out PATH] [--json]
+    sp = sub.add_parser("dashboard",
+                        help="render a local dashboard (one self-contained HTML file)")
+    sp.add_argument("--out", help="output path (default: ~/.voyager/dashboard.html)")
+    sp.add_argument("--repo", help="focus this repository")
+    sp.add_argument("--json", action="store_true", help="emit the data, not the page")
+    sp.set_defaults(func=cmd_dashboard)
 
     # voyager doctor [--json]
     sp = sub.add_parser("doctor", help="is this installation healthy?")

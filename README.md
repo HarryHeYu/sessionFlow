@@ -223,6 +223,20 @@ items exist only because a checkpoint recorded them. `reopen` warns when it woul
 leave two active threads for one repository, because ambiguity is a choice the
 user makes, never something a timestamp settles.
 
+### Dashboard
+
+```
+voyager dashboard [--out PATH] [--repo R] [--json]
+```
+
+Renders **one self-contained HTML file** (default `~/.voyager/dashboard.html`):
+projects, WorkThreads, the active thread and its agent members, recent activity
+with a client-side filter, checkpoints, provider health and the open items. It is
+an observation panel, not a chat client -- no server, no CDN, no network requests,
+no JavaScript dependencies. Everything it shows comes from the same sources as
+`voyager doctor` and `voyager thread summarize`, so the page cannot tell a
+different story from the commands.
+
 ### Observability commands
 
 ```
