@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 
 import pytest
 
@@ -339,3 +340,62 @@ def test_a_failed_run_does_not_reference_an_unbound_result(db, monkeypatch):
     result = zo.handle_zcode_session_start(cwd="E:/repo", stdin_raw="{}")
     assert result["status"] == "error"
     assert "UnboundLocalError" not in json.dumps(result, default=str)
+
+
+def test_the_canonical_codex_path_promotes_through_a_real_resolution(tmp_path, monkeypatch):
+    """hook -> pending -> a scan indexes the session and resolves -> zero-touch.
+
+    This is the lifecycle that actually happened on this machine, driven through
+    the *real* resolver rather than by writing the events by hand.  The hook opens
+    the chain in one process; the resolution happens later, in a scan, and has to
+    recover the chain from the session id alone.
+    """
+    from voyager.auto import resolve_pending_attaches
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    path = tmp_path / "index.db"
+    store = Store(path)
+    try:
+        monkeypatch.setattr(vh, "_db_path", lambda: path)
+        tid = store.thread_create(repo_root="E:/repo", title="t", goal="g")
+
+        # 1. the provider's hook ran, delivered context, and could not attach yet
+        cid = vh.begin_hook("codex", cwd="E:/repo", native_session_id="01a0")
+        assert cid
+        vh.note_result("codex", cid,
+                       _Result(context="doc", attach_status="pending_resolve"),
+                       native_session_id="01a0")
+        assert _status("codex")["observed_state"] == LIVE_VERIFIED, "not yet"
+
+        # 2. the hook also records the pending attach, as the handler does
+        store.pending_record(tid, "codex", native_session_id="01a0",
+                             repo_root="E:/repo", cwd="E:/repo")
+
+        # 3. a later scan indexes the session, and the pending resolves
+        src = tmp_path / "s.jsonl"
+        src.write_text("{}", encoding="utf-8")
+        sess = new_session(id="codex:01a0", provider="codex",
+                           native_session_id="01a0", title="seeded",
+                           started_at=time.time(), updated_at=time.time(),
+                           repo_root="E:/repo", cwd="E:/repo")
+        store.replace_session(
+            sess, [new_event(sid="codex:01a0", seq=1, kind="user", ts=time.time(),
+                             content="hi")], "codex", src)
+
+        stats = resolve_pending_attaches(store)
+        assert stats["attached"], stats
+
+        # 4. the chain is complete, and the evidence says so
+        st = _status("codex")
+        assert st["observed_state"] == ZERO_TOUCH_LIVE_VERIFIED, st
+    finally:
+        store.close()
+
+
+def test_a_resolution_for_an_unknown_session_records_nothing(db):
+    """A scan can resolve a session this machine never saw a hook for."""
+    from voyager.verification_harness import note_attach_resolved_for_session
+
+    assert note_attach_resolved_for_session("codex", "never-seen", thread_id="t") is False
+    assert _status()["evidence_count"] == 0

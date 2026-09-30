@@ -127,6 +127,18 @@ def resolve_pending_attaches(store: Store, now: Optional[float] = None,
             c = cands[0]
             store.thread_attach(pend["thread_id"], c["id"])
             store.pending_mark(pend["rid"], "resolved", c["id"])
+            # Evidence for the *second* half of the lifecycle.  The hook opened a
+            # chain when the provider started; the resolution happens here, in a
+            # scan, so the chain is recovered from the session id.  Without this
+            # the canonical Codex path (hook -> pending -> resolved) could never
+            # promote a provider past LIVE_VERIFIED.
+            try:
+                from .verification_harness import note_attach_resolved_for_session
+                note_attach_resolved_for_session(
+                    pend["provider"], c["native_id"],
+                    thread_id=pend["thread_id"], source_session_id=c["id"])
+            except Exception:
+                pass
             store._continuity_log("auto-attach", thread=pend["thread_id"],
                                   session=c["id"], provider=pend["provider"])
             stats["attached"].append({"thread": pend["thread_id"],

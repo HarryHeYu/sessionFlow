@@ -484,6 +484,37 @@ def note_result(provider: str, correlation_id: Optional[str], result: Any,
         pass
 
 
+def note_attach_resolved_for_session(provider: str,
+                                     native_session_id: Optional[str],
+                                     *, thread_id: Optional[str] = None,
+                                     source_session_id: Optional[str] = None) -> bool:
+    """Record a resolution found from the session id alone.
+
+    The resolution runs in a scan, in a different process from the hook that
+    opened the chain, so the correlation id is not in hand -- it has to be
+    recovered from the session id.  Returns True when a chain was found and the
+    evidence recorded.
+    """
+    if not native_session_id:
+        return False
+    con = _connect()
+    if con is None:
+        return False
+    try:
+        cid = chain_for_session(con, provider, native_session_id)
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+    if not cid:
+        return False
+    record_event(provider, ATTACH_RESOLVED, cid,
+                 native_session_id=native_session_id, thread_id=thread_id,
+                 source_session_id=source_session_id)
+    return True
+
+
 def note_attach_resolved(provider: str, correlation_id: str, *,
                          native_session_id: Optional[str] = None,
                          thread_id: Optional[str] = None,
