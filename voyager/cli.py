@@ -131,7 +131,14 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
             # If the artifact is temporarily unreadable (locked DB) treat the
             # round as skipped instead of pruning everything it owns.
             try:
-                bundles = ad.scan(store.source_changed)
+                # `--force` means "re-read everything", and an adapter's own
+                # per-file fingerprint check is exactly what force is meant to
+                # bypass.  Without this, force only made the pipeline *call*
+                # scan(); the adapter still skipped every unchanged file, so a
+                # session whose source was recorded but never indexed could never
+                # come back.
+                bundles = ad.scan((lambda p, f: True) if force
+                                  else store.source_changed)
             except Exception as e:
                 print(f"  ! {ad.provider}: scan failed ({e}); keeping existing index",
                       file=sys.stderr)

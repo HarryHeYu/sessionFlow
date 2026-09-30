@@ -36,7 +36,12 @@ FIXTURES = Path(__file__).parent / "fixtures"
 # module-level path globals an adapter may expose for discovery; the isolation
 # fixture below points all of them at a non-existent dir
 PATH_GLOBALS = ("SESSIONS_DIR", "PROJECTS_DIR", "FILE_HISTORY_DIR",
-                "DB_PATH", "VSCDB", "CONV_DIR")
+                "DB_PATH", "VSCDB", "CONV_DIR",
+                # the Codex app / VS Code extension store.  It has to be here or
+                # an unredirected adapter would read the developer's own
+                # conversations -- which is precisely what this guard exists to
+                # prevent (a real DSH session was destroyed that way once).
+                "THREAD_HISTORY_DB", "STATE_DB", "CODEX_DEV_DB")
 
 
 def _redirect_adapters(monkeypatch, missing: Path) -> None:
