@@ -1372,6 +1372,40 @@ def cmd_thread(args) -> int:
                 t["id"], t["status"], t["members"], t["repo_root"] or "?"))
             print("    " + (t["title"] or "")[:100])
         return 0
+    if action in ("activity", "summarize"):
+        # One WorkThread, every agent that touched it.  A brief is a derivation
+        # over the canonical thread -- never a concatenation of transcripts.
+        from .thread_brief import activity, render, summarize
+
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            return 1
+        tid = t["id"]
+        if action == "activity":
+            data = activity(store, tid, limit=getattr(args, "limit", 20))
+            if getattr(args, "json", False):
+                print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+                return 0 if "error" not in data else 1
+            print("WorkThread %s  %s" % (tid, data.get("title") or ""))
+            print("providers: %s   members: %s"
+                  % (", ".join(data.get("providers") or []) or "-",
+                     data.get("member_count")))
+            for c in data["contributions"]:
+                print("  %-9s %-8s events=%-6d human=%-4d last=%s"
+                      % (c["provider"], c["band"], c["events"], c["human_turns"],
+                         int(c["last_ts"]) if c["last_ts"] else "-"))
+                if c.get("last_line"):
+                    print("      " + c["last_line"])
+            return 0
+
+        brief = summarize(store, tid, turns=getattr(args, "turns", 3))
+        if getattr(args, "json", False):
+            print(json.dumps(brief.to_dict(), indent=2, ensure_ascii=False,
+                             default=str))
+            return 0
+        print(render(brief))
+        return 0
     if action == "show":
         t = store.thread_get(args.thread)
         if not t:
@@ -1817,6 +1851,19 @@ def main(argv=None) -> int:
     tsub = sp.add_subparsers(dest="thread_cmd", required=True)
     tsp = tsub.add_parser("list", parents=[common], help="list active threads")
     tsp.add_argument("--status", default="active")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("activity", parents=[common],
+                          help="per-agent contribution to a WorkThread")
+    tsp.add_argument("thread")
+    tsp.add_argument("--limit", type=int, default=20)
+    tsp.add_argument("--json", action="store_true")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("summarize", parents=[common],
+                          help="one continuous-task brief across every agent")
+    tsp.add_argument("thread")
+    tsp.add_argument("--turns", type=int, default=3,
+                     help="recent turns to quote per agent")
+    tsp.add_argument("--json", action="store_true")
     tsp.set_defaults(func=cmd_thread)
     tsp = tsub.add_parser("show", parents=[common], help="show one thread and its members")
     tsp.add_argument("thread")

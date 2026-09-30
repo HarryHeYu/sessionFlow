@@ -192,8 +192,21 @@ def checkpoint_create(
     phase: str = "analysis",
     milestones: Optional[List[Dict[str, Any]]] = None,
     next_actions: Optional[List[str]] = None,
+    blockers: Optional[List[Dict[str, Any]]] = None,
+    decisions: Optional[List[Dict[str, Any]]] = None,
+    changed_files: Optional[List[str]] = None,
+    commands: Optional[List[str]] = None,
+    tests: Optional[List[str]] = None,
+    branches: Optional[List[str]] = None,
+    head_commit: Optional[str] = None,
 ) -> str:
-    """Create a new checkpoint for a WorkThread."""
+    """Create a new checkpoint for a WorkThread.
+
+    The table has always had columns for blockers, decisions, changed files,
+    commands, tests and branches; this signature did not accept them, so a
+    checkpoint could not record the open items a brief is supposed to surface.
+    Every field is optional: a checkpoint records what somebody actually knew.
+    """
     now = time.time()
     checkpoint_id = f"chk_{thread_id}:{now}"
 
@@ -203,16 +216,23 @@ def checkpoint_create(
         phase=phase,
         milestones=[CheckpointMilestone(**m) for m in (milestones or [])],
         next_actions=next_actions or [],
+        blockers=[CheckpointBlocker(**b) for b in (blockers or [])],
+        decisions=[CheckpointDecision(**d) for d in (decisions or [])],
+        changed_files=list(changed_files or []),
+        commands_executed=list(commands or []),
+        tests_passed=list(tests or []),
         created_at=now,
         updated_at=now,
     )
 
-    conn = store._con
+    conn = store.con
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO checkpoints (id, thread_id, goal, phase, milestones_json, 
-                                 next_actions, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO checkpoints (id, thread_id, goal, phase, milestones_json,
+                                 next_actions, blockers_json, decisions_json,
+                                 changed_files, commands_json, tests_json,
+                                 branches_json, head_commit, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         checkpoint_id,
         thread_id,
@@ -220,6 +240,13 @@ def checkpoint_create(
         phase,
         json.dumps([asdict(m) for m in check.milestones]),
         json.dumps(check.next_actions),
+        json.dumps([asdict(b) for b in check.blockers]),
+        json.dumps([asdict(d) for d in check.decisions]),
+        json.dumps(list(changed_files or [])),
+        json.dumps(list(commands or [])),
+        json.dumps(list(tests or [])),
+        json.dumps(list(branches or [])),
+        head_commit,
         now,
         now,
     ))
@@ -230,7 +257,7 @@ def checkpoint_create(
 
 def checkpoint_get(store: Store, checkpoint_id: str) -> Optional[Checkpoint]:
     """Get a checkpoint by ID."""
-    conn = store._con
+    conn = store.con
     row = conn.execute(
         "SELECT * FROM checkpoints WHERE id = ?", (checkpoint_id,)
     ).fetchone()
@@ -248,7 +275,7 @@ def checkpoint_list(
     limit: int = 10,
 ) -> List[Tuple[str, Checkpoint]]:
     """List checkpoints, optionally filtered by thread_id and phase."""
-    conn = store._con
+    conn = store.con
     query = "SELECT * FROM checkpoints WHERE 1=1"
     params = []
 
@@ -330,7 +357,7 @@ def checkpoint_store(store: Store, checkpoint: Checkpoint) -> str:
     now = time.time()
     checkpoint_id = f"chk_{checkpoint.thread_id}:{now}"
 
-    conn = store._con
+    conn = store.con
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO checkpoints (id, thread_id, goal, phase, milestones_json,
@@ -362,7 +389,7 @@ def checkpoint_store(store: Store, checkpoint: Checkpoint) -> str:
 
 def checkpoint_delete(store: Store, checkpoint_id: str) -> bool:
     """Delete a checkpoint (permanent!)."""
-    conn = store._con
+    conn = store.con
     cursor = conn.cursor()
     cursor.execute("DELETE FROM checkpoints WHERE id = ?", (checkpoint_id,))
     affected = cursor.rowcount
@@ -416,7 +443,7 @@ def _row_to_checkpoint(row) -> Checkpoint:
 
 def init_checkpoint_schema(store: Store):
     """Initialize checkpoint schema if not present."""
-    add_checkpoint_schema(store._con)
+    add_checkpoint_schema(store.con)
 
 
 # --- Utility Functions ---------------------------------------------------
