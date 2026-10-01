@@ -114,7 +114,7 @@ def log_dir() -> Path:
     return Path.home() / ".voyager" / "logs"
 
 
-def _db_path() -> Optional[Path]:
+def _db_path(explicit: Optional[Path] = None) -> Optional[Path]:
     """Where the evidence lives.
 
     `VOYAGER_DB` wins when set.  That is not a convenience: a test that drives a
@@ -122,6 +122,8 @@ def _db_path() -> Optional[Path]:
     index as if the provider had fired, and an explicit override is the only way
     to guarantee it.
     """
+    if explicit is not None:
+        return Path(explicit)
     override = os.environ.get("VOYAGER_DB")
     if override:
         return Path(override).expanduser()
@@ -132,7 +134,7 @@ def _db_path() -> Optional[Path]:
         return None
 
 
-def _connect(create: bool = False) -> Optional[sqlite3.Connection]:
+def _connect(create: bool = False, db_path: Optional[Path] = None) -> Optional[sqlite3.Connection]:
     """Open the index. `create=False` means strictly read-only.
 
     A read path must not issue DDL: `voyager verify` has to leave the database
@@ -140,7 +142,7 @@ def _connect(create: bool = False) -> Optional[sqlite3.Connection]:
     command a writer.  When the table is absent the honest answer is "no evidence
     yet", not "here is a new table".
     """
-    path = _db_path()
+    path = _db_path(db_path)
     if not path or not path.exists():
         return None
     try:
@@ -374,7 +376,8 @@ def observed_state(con: sqlite3.Connection, provider: str) -> Dict[str, Any]:
     }
 
 
-def query_status(provider: Optional[str] = None) -> Dict[str, Any]:
+def query_status(provider: Optional[str] = None,
+                 db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Declared vs observed vs effective. Read-only; writes nothing.
 
     `declared` comes from the capability matrix (what the code supports),
@@ -386,7 +389,7 @@ def query_status(provider: Optional[str] = None) -> Dict[str, Any]:
 
     providers = [provider] if provider else list(PROVIDERS)
     out: Dict[str, Any] = {"providers": {}}
-    con = _connect()
+    con = _connect(db_path=db_path)
     try:
         for p in providers:
             declared = declared_state(p)
@@ -534,14 +537,14 @@ def note_attach_resolved(provider: str, correlation_id: str, *,
 # --- CLI (read-only) --------------------------------------------------------
 
 def cmd_verify(provider: Optional[str] = None, verbose: bool = False,
-               json_output: bool = False) -> int:
+               json_output: bool = False, db_path: Optional[Path] = None) -> int:
     """`voyager verify` -- strictly read-only.
 
     It queries evidence and derives state; it never records, ensures or creates
     anything.  A provider with no evidence shows its declared state and an empty
     observation, which is the honest answer.
     """
-    status = query_status(provider)
+    status = query_status(provider, db_path=db_path)
     if json_output:
         print(json.dumps(status, indent=2, ensure_ascii=False, default=str))
         return 0

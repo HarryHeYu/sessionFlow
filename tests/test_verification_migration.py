@@ -64,7 +64,7 @@ def _schema_digest(con) -> str:
 def test_fresh_database_gets_only_the_evidence_table(tmp_path, monkeypatch):
     path = tmp_path / "fresh.db"
     path.touch()                       # exists, but completely empty
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
 
     con = sqlite3.connect(str(path))
     before = _table_names(con)
@@ -84,7 +84,7 @@ def test_legacy_database_without_the_table_reads_as_no_evidence(tmp_path, monkey
     path = tmp_path / "legacy.db"
     store = Store(path)                # the real schema, no evidence table
     store.close()
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
 
     con = sqlite3.connect(str(path))
     assert vh.TABLE not in _table_names(con)
@@ -111,7 +111,7 @@ def test_a_legacy_mutable_table_is_ignored(tmp_path, monkeypatch):
                 "'ZERO_TOUCH_LIVE_VERIFIED', '[{\"probe\": 1}]')")
     con.commit()
     con.close()
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
 
     out = vh.query_status("codex")["providers"]["codex"]
     assert out["observed_state"] is None, "legacy rows must not become live evidence"
@@ -147,7 +147,7 @@ def _populate(path):
 def test_a_populated_database_is_left_alone(tmp_path, monkeypatch):
     path = tmp_path / "populated.db"
     _populate(path)
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
 
     con = sqlite3.connect(str(path))
     counts_before = _row_counts(con)
@@ -167,7 +167,7 @@ def test_a_populated_database_is_left_alone(tmp_path, monkeypatch):
 def test_recording_does_not_disturb_the_indexes_of_other_tables(tmp_path, monkeypatch):
     path = tmp_path / "populated2.db"
     _populate(path)
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
     con = sqlite3.connect(str(path))
     before = _index_names(con)
     con.close()
@@ -187,7 +187,7 @@ def test_recording_does_not_disturb_the_indexes_of_other_tables(tmp_path, monkey
 def test_repeated_open_and_migration_is_idempotent(tmp_path, monkeypatch):
     path = tmp_path / "repeat.db"
     path.touch()
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
 
     vh.record_event("codex", HOOK_TRIGGERED, "c1", observed_at=1.0)
     con = sqlite3.connect(str(path))
@@ -210,7 +210,7 @@ def test_repeated_open_and_migration_is_idempotent(tmp_path, monkeypatch):
 def test_the_primary_key_deduplicates_across_reopens(tmp_path, monkeypatch):
     path = tmp_path / "pk.db"
     path.touch()
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
 
     first = vh.record_event("codex", HOOK_TRIGGERED, "c1", observed_at=1.0)
     second = vh.record_event("codex", HOOK_TRIGGERED, "c1", observed_at=1.0)

@@ -37,7 +37,7 @@ def db(tmp_path, monkeypatch):
     con.executescript(vh.SCHEMA)
     con.commit()
     con.close()
-    monkeypatch.setattr(vh, "_db_path", lambda: path)
+    monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
     return path
 
 
@@ -357,7 +357,7 @@ def test_the_canonical_codex_path_promotes_through_a_real_resolution(tmp_path, m
     path = tmp_path / "index.db"
     store = Store(path)
     try:
-        monkeypatch.setattr(vh, "_db_path", lambda: path)
+        monkeypatch.setattr(vh, "_db_path", lambda explicit=None: path)
         tid = store.thread_create(repo_root="E:/repo", title="t", goal="g")
 
         # 1. the provider's hook ran, delivered context, and could not attach yet

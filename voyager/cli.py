@@ -808,6 +808,13 @@ def cmd_dashboard(args) -> int:
         store.close()
 
 
+def _db_path_arg(args):
+    """argparse hands us a string; the store-facing functions want a Path."""
+    from pathlib import Path as _Path
+    value = getattr(args, "db", None)
+    return _Path(value) if value else None
+
+
 def _cmd_verify(args) -> int:
     """`voyager verify` -- strictly read-only evidence view.
 
@@ -818,7 +825,7 @@ def _cmd_verify(args) -> int:
     from .verification_harness import cmd_verify
 
     return cmd_verify(provider=args.provider, verbose=args.verbose,
-                      json_output=args.json)
+                      json_output=args.json, db_path=_db_path_arg(args))
 
 
 def cmd_doctor(args) -> int:
@@ -830,7 +837,8 @@ def cmd_doctor(args) -> int:
     """
     from .doctor import render, run
 
-    report = run(repo=getattr(args, "repo", None))
+    report = run(repo=getattr(args, "repo", None),
+                 db_path=_db_path_arg(args))
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     else:
@@ -2262,14 +2270,14 @@ def main(argv=None) -> int:
     dbcheck = dbsub.add_parser("check", help="run integrity checks (read-only)")
     dbcheck.add_argument("--verbose", "-v", action="store_true")
     dbcheck.add_argument("--json", action="store_true")
-    dbcheck.set_defaults(func=lambda a: cmd_db_check(db_path=getattr(a, 'db', None), verbose=a.verbose,
+    dbcheck.set_defaults(func=lambda a: cmd_db_check(db_path=_db_path_arg(a), verbose=a.verbose,
                                                       json_output=a.json))
 
     # voyager db backup
     dbbackup = dbsub.add_parser("backup", help="consistent snapshot via SQLite's backup API")
     dbbackup.add_argument("--output-dir", help="backup destination directory")
     dbbackup.add_argument("--json", action="store_true")
-    dbbackup.set_defaults(func=lambda a: cmd_db_backup(db_path=getattr(a, 'db', None), output_dir=a.output_dir,
+    dbbackup.set_defaults(func=lambda a: cmd_db_backup(db_path=_db_path_arg(a), output_dir=a.output_dir,
                                                         json_output=a.json))
 
     # voyager db repair -- plan by default; --apply authorises the safe steps
@@ -2277,12 +2285,12 @@ def main(argv=None) -> int:
     dbrepair.add_argument("--apply", action="store_true",
                           help="execute the SAFE_DERIVED_REPAIR steps (no confirmation bypass)")
     dbrepair.add_argument("--json", action="store_true")
-    dbrepair.set_defaults(func=lambda a: cmd_db_repair(db_path=getattr(a, 'db', None), apply=a.apply, json_output=a.json))
+    dbrepair.set_defaults(func=lambda a: cmd_db_repair(db_path=_db_path_arg(a), apply=a.apply, json_output=a.json))
 
     # voyager db compact -- VACUUM, separate on purpose
     dbcompact = dbsub.add_parser("compact", help="VACUUM the database (maintenance, not repair)")
     dbcompact.add_argument("--json", action="store_true")
-    dbcompact.set_defaults(func=lambda a: cmd_db_compact(db_path=getattr(a, 'db', None), json_output=a.json))
+    dbcompact.set_defaults(func=lambda a: cmd_db_compact(db_path=_db_path_arg(a), json_output=a.json))
 
     args = p.parse_args(argv)
     _expand_path_args(args)

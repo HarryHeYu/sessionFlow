@@ -60,7 +60,9 @@ def provider_context_budget_info(provider: str) -> Dict[str, Any]:
 CONTEXT_FORMAT = "tiered-v1"
 
 
-def _store_path() -> Optional[Path]:
+def _store_path(explicit: Optional[Path] = None) -> Optional[Path]:
+    if explicit is not None:
+        return Path(explicit)
     from .store import default_db_path
     try:
         return Path(default_db_path())
@@ -68,13 +70,13 @@ def _store_path() -> Optional[Path]:
         return None
 
 
-def check_store() -> Dict[str, Any]:
+def check_store(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """repo/store/schema: can we open it, and is the shape what we expect?"""
     out: Dict[str, Any] = {"ok": False, "path": None, "sessions": None,
                            "threads": None, "error": None}
     try:
         from .store import Store
-        path = _store_path()
+        path = _store_path(db_path)
         out["path"] = str(path) if path else None
         if not path or not path.exists():
             out["error"] = "index database not found; run `voyager scan`"
@@ -116,13 +118,14 @@ def check_hook_config(provider: str) -> Dict[str, Any]:
     return out
 
 
-def check_continuity(repo: Optional[str] = None) -> Dict[str, Any]:
+def check_continuity(repo: Optional[str] = None,
+                     db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Active WorkThread, ambiguity, pending attach, provenance coverage."""
     out: Dict[str, Any] = {"active_threads": None, "ambiguous": False,
                            "pending": None, "coverage": None, "error": None}
     try:
         from .store import Store
-        path = _store_path()
+        path = _store_path(db_path)
         if not path or not path.exists():
             out["error"] = "no index"
             return out
@@ -185,13 +188,13 @@ def check_continuity(repo: Optional[str] = None) -> Dict[str, Any]:
     return out
 
 
-def check_cache() -> Dict[str, Any]:
+def check_cache(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """How many continuity bundles are cached, and how old is the newest?"""
     out: Dict[str, Any] = {"entries": None, "newest_age_s": None}
     try:
         import os as _os
         from .store import Store
-        path = _store_path()
+        path = _store_path(db_path)
         if not path or not path.exists():
             return out
         store = Store(path)
@@ -219,8 +222,13 @@ def check_cache() -> Dict[str, Any]:
     return out
 
 
-def run(repo: Optional[str] = None) -> Dict[str, Any]:
-    """The whole diagnostic, as a dict. Never raises."""
+def run(repo: Optional[str] = None,
+        db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """The whole diagnostic, as a dict. Never raises.
+
+    `db_path` exists because `voyager --db X doctor` has to diagnose X, not the
+    default index -- the same trap the `db` subcommands had.
+    """
     providers: Dict[str, Any] = {}
     for p in PROVIDERS:
         ev = collect_evidence(p)
@@ -246,11 +254,11 @@ def run(repo: Optional[str] = None) -> Dict[str, Any]:
         }
 
     issues: List[Dict[str, str]] = []
-    store = check_store()
+    store = check_store(db_path)
     if not store.get("ok"):
         issues.append({"kind": "blocking", "id": "STORE_UNAVAILABLE",
                        "detail": store.get("error") or "index cannot be opened"})
-    cont = check_continuity(repo)
+    cont = check_continuity(repo, db_path)
     if cont.get("ambiguous"):
         issues.append({"kind": "blocking", "id": "AMBIGUOUS_WORKTHREAD",
                        "detail": "more than one active WorkThread for a repo: %s"
@@ -273,7 +281,7 @@ def run(repo: Optional[str] = None) -> Dict[str, Any]:
         "context_format": CONTEXT_FORMAT,
         "store": store,
         "continuity": cont,
-        "cache": check_cache(),
+        "cache": check_cache(db_path),
         "providers": providers,
         "issues": issues,
         "blocking": [i for i in issues if i["kind"] == "blocking"],

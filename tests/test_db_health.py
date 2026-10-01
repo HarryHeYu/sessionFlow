@@ -273,3 +273,43 @@ def test_diagnostics_never_go_to_stdout(healthy, capsys):
     dh.cmd_db_check(db_path=healthy, json_output=True)
     out = capsys.readouterr().out
     json.loads(out)          # would raise if anything else were on stdout
+
+
+def test_every_db_command_honours_an_explicit_index(tmp_path, capsys):
+    """`voyager --db X db check` must diagnose X -- and must not crash doing it.
+
+    argparse hands the command a *string*, while the store-facing functions take a
+    Path; getting that boundary wrong turned `db check --db` into an
+    `AttributeError`, which the smoke test caught.  The same class of bug had
+    already bitten once, when `--db` was silently ignored and `db compact` would
+    have vacuumed the default index instead.
+    """
+    from voyager.cli import main
+    from voyager.store import Store
+
+    path = tmp_path / "explicit.db"
+    store = Store(path)
+    try:
+        store.thread_create(repo_root="E:/explicit", title="t", goal="g")
+    finally:
+        store.close()
+
+    for argv in (["db", "check"], ["db", "repair"], ["db", "compact", "--json"],
+                 ["verify"], ["doctor"]):
+        capsys.readouterr()
+        rc = main(["--db", str(path)] + argv)
+        out = capsys.readouterr()
+        assert rc in (0, 1), (argv, out.err)
+        assert "Traceback" not in out.err, (argv, out.err)
+        assert "AttributeError" not in out.err, (argv, out.err)
+
+
+def test_doctor_reports_the_index_it_actually_read(tmp_path, capsys):
+    from voyager.cli import main
+    from voyager.store import Store
+
+    path = tmp_path / "named.db"
+    Store(path).close()
+    capsys.readouterr()
+    main(["--db", str(path), "doctor"])
+    assert str(path) in capsys.readouterr().out

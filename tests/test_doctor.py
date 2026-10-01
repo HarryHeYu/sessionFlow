@@ -122,7 +122,7 @@ def test_doctor_flags_literal_unknown_rows_as_blocking(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr(doctor, "check_continuity", lambda repo=None: {
+    monkeypatch.setattr(doctor, "check_continuity", lambda repo=None, db_path=None: {
         "active_threads": 2, "pending": 0, "ambiguous": False,
         "coverage": {"events": 10, "unclassified": 5, "classified_pct": 50.0,
                      "literal_unknown": 3},
@@ -133,7 +133,7 @@ def test_doctor_flags_literal_unknown_rows_as_blocking(monkeypatch):
 
 
 def test_doctor_flags_ambiguity_as_blocking(monkeypatch):
-    monkeypatch.setattr(doctor, "check_continuity", lambda repo=None: {
+    monkeypatch.setattr(doctor, "check_continuity", lambda repo=None, db_path=None: {
         "active_threads": 2, "pending": 0, "ambiguous": True,
         "ambiguous_repos": ["E:/repo"], "coverage": None,
     })
@@ -153,7 +153,8 @@ def test_ambuity_counts_only_active_threads(tmp_path, monkeypatch):
     try:
         store.thread_create(repo_root=repo, title="one", goal="g")
         store.thread_create(repo_root=repo, title="two", goal="g")
-        monkeypatch.setattr(doctor, "_store_path", lambda: tmp_path / "d.db")
+        monkeypatch.setattr(doctor, "_store_path",
+                            lambda explicit=None: tmp_path / "d.db")
         # both start active -> genuinely ambiguous
         assert doctor.check_continuity()["ambiguous"] is True
         # close them -> no choice left for the user
@@ -170,3 +171,45 @@ def test_known_debts_are_classified():
     ids = {d["id"] for d in doctor.KNOWN_DEBTS}
     assert "LIVE_VERIFICATION_BLOCKED_BY_PROVIDER_UI" in ids
     assert "EXTERNAL_CODEX_APPSERVER_CONPTY_POPUP" in ids
+
+
+def test_doctor_can_be_pointed_at_a_specific_index(tmp_path):
+    """`voyager --db X doctor` must diagnose X.  The `db` subcommands had exactly
+    this trap -- `--db` silently ignored, so `db compact` would have vacuumed the
+    wrong database."""
+    from voyager import doctor
+    from voyager.store import Store
+
+    path = tmp_path / "other.db"
+    store = Store(path)
+    try:
+        store.thread_create(repo_root="E:/probe", title="probe", goal="g")
+    finally:
+        store.close()
+
+    report = doctor.run(db_path=path)
+    assert report["store"]["path"] == str(path)
+    assert report["store"]["threads"] == 1
+    assert report["continuity"]["threads_total"] == 1
+
+    # and the default stays untouched by that call
+    default_report = doctor.run()
+    assert default_report["store"]["path"] != str(path)
+
+
+def test_the_cli_forwards_db_to_doctor(tmp_path, capsys):
+    from voyager.cli import main
+    from voyager.store import Store
+
+    path = tmp_path / "cli.db"
+    store = Store(path)
+    try:
+        store.thread_create(repo_root="E:/cli", title="cli", goal="g")
+    finally:
+        store.close()
+
+    capsys.readouterr()
+    assert main(["--db", str(path), "doctor"]) in (0, 1)
+    out = capsys.readouterr().out
+    assert str(path) in out, "the report must name the index it actually read"
+    assert "threads: 1" in out
