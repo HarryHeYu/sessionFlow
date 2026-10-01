@@ -275,7 +275,7 @@ tests/
 
 ```sh
 python -m pytest tests/ -q                # full dev 环境：754 collected：736 passed / 18 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
-python scripts/run_tests_core_only.py     # 模拟 core-only：374 collected：356 passed / 18 skipped
+python scripts/run_tests_core_only.py     # 模拟 core-only：屏蔽 mcp/zstandard/PIL 后重跑（收集数同 full dev，被屏蔽的用例转为 skipped）
 ```
 
 两套环境的 skip 原因不同，两个数字不能互换。装了 full dev extras 时仅有的 2 个
