@@ -8,6 +8,13 @@ any other UI) talks to this surface, over stdio JSON-lines via
 
 Read-only by design: the only "write-ish" op is bundle_preview, which
 writes nothing (it renders a bundle in memory).
+
+Boundary (P9): this is the *read-only context* facet — it compiles and
+returns text, and never leases, records a pending attach or launches. The
+*handoff* facet (one WorkThread changing hands between agents) is
+`continuity.handoff_thread()`, which the CLI and MCP share. A UI that wants
+to hand work over must call that engine through the CLI/MCP surface rather
+than growing a second pipeline here.
 """
 
 from __future__ import annotations

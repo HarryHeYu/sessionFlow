@@ -913,82 +913,215 @@ def bundle_command(target: str, bundle_path: Path) -> Optional[List[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Unified handoff orchestration (Phase G) — the ONE function all entry
-# points (CLI switch/continue, MCP, Skill) call for thread-level continuity.
+# Unified handoff orchestration (P9) — the ONE engine every entry point
+# (CLI switch/continue/handoff/merge, MCP switch/handoff, future UI) calls to
+# move work between agents.
+#
+# Source resolution, the single-writer lease (D13), same-provider native
+# resume (D7), the canonical context (D11 Continuation Bundle or the
+# single-session handoff package), attach behaviour (the pending record) and
+# fallback/recovery all live here.  Callers only render the result.
+#
+# Contract:
+#   * **never prints** — MCP speaks JSON-RPC on stdout, so the engine is mute;
+#   * **never launches** — it returns `argv`; the caller decides (and owns the
+#     lease-release-on-failure policy that needs the exit code);
+#   * **never raises** for expected paths — every outcome is a value;
+#   * **never writes a provider file** and **never creates a WorkThread**.
 # ---------------------------------------------------------------------------
+
+
+def resolve_handoff_source(
+    store: Store,
+    thread: Any = None,
+    sessions: Optional[List[Any]] = None,
+    source: Any = None,
+) -> Dict[str, Any]:
+    """Normalise any handoff entry point into one shape.
+
+    Exactly one of:
+
+    * ``thread``   — a WorkThread row or id → **thread scope** (lease +
+      pending attach);
+    * ``sessions`` — explicit session rows → session scope;
+    * ``source``   — one session ref (id / native id / prefix) or row.
+
+    A session-scope call still *adopts* the WorkThread that already owns those
+    members, so handing off threaded work by session keeps the lease and the
+    pending attach.  A WorkThread is **never created here**: minting a thread
+    as a side effect of an export would be a silent schema write, and "one
+    thread per accidental handoff" is exactly the kind of state nobody can
+    clean up later.  ``voyager merge`` / ``voyager thread create`` are the
+    explicit ways to get one.
+
+    Returns ``{thread, thread_id, members, repo_root, source_provider,
+    source_session, scope, error}``.  ``error`` is set (with ``members``
+    empty) when the reference does not resolve.
+    """
+    members: List[Any] = []
+    t: Any = None
+
+    def _fail(msg: str) -> Dict[str, Any]:
+        return {"error": msg, "members": [], "thread": None, "thread_id": None,
+                "repo_root": None, "source_provider": None,
+                "source_session": None, "scope": None}
+
+    if source is not None:
+        if isinstance(source, str):
+            row, ambiguous = store.session(source)
+            if row is None:
+                if ambiguous:
+                    return _fail("'{0}' matches {1} sessions — use a longer "
+                                 "prefix".format(source, len(ambiguous)))
+                return _fail("session not found: {0}".format(source))
+            members = [row]
+        else:
+            members = [source]
+
+    if sessions:
+        members = list(sessions)
+
+    if thread is not None:
+        t = store.thread_get(thread) if isinstance(thread, str) else thread
+        if t is None:
+            return _fail("thread not found: {0}".format(thread))
+        if not members:
+            members = store.thread_members(t["id"])
+
+    if t is None and members:
+        # Adopt the WorkThread that already OWNS these sessions —
+        # containment, not equality, so handing off one member of a
+        # three-member thread still leases that thread.
+        owner = store.thread_find_containing([m["id"] for m in members])
+        if owner:
+            t = store.thread_get(owner)
+
+    tid = t["id"] if t is not None else None
+    repo_root = (t["repo_root"] if t is not None else None) or next(
+        (m["repo_root"] or m["cwd"] for m in members
+         if m["repo_root"] or m["cwd"]), None)
+    newest = max(members, key=lambda m: m["updated_at"] or 0) if members else None
+
+    return {
+        "thread": t,
+        "thread_id": tid,
+        "members": members,
+        "repo_root": repo_root,
+        "source_provider": newest["provider"] if newest else None,
+        "source_session": newest["id"] if newest else None,
+        "scope": "thread" if tid else "session",
+        "error": None,
+    }
+
 
 def handoff_thread(
     store: Store,
-    thread: Any,
-    target: str,
+    thread: Any = None,
+    target: Optional[str] = None,
     goal: Optional[str] = None,
     budget: Optional[str] = None,
-    launch: bool = True,
     mode: str = "bundle",
     steal: bool = False,
     output: Optional[Path] = None,
-    no_launch: bool = False,
+    sessions: Optional[List[Any]] = None,
+    source: Any = None,
+    style: str = "continuation",
+    force_bundle: bool = False,
 ) -> Dict[str, Any]:
-    """ONE unified orchestration for handing a WorkThread to an agent.
+    """ONE unified orchestration for handing work to another agent.
 
-    Executes: lease (D13) → same-provider native resume (D7) XOR
-    Continuation Bundle (D11) XOR transcript (#10) → git dirty warning →
-    launch. Returns a result dict; the caller decides how to present it.
+    Executes, in order:
 
-    Never raises for expected paths — errors are in the result dict.
+      resolve source → git dirty warning → lease (D13) → same-provider native
+      resume (D7) XOR transcript (#10) XOR canonical context (D11) → pending
+      attach → return ``argv`` for the caller to launch.
+
+    ``style`` picks the canonical context the target agent reads:
+    ``"continuation"`` (the multi-session Continuation Bundle, the default) or
+    ``"package"`` (the single-session handoff package used by
+    ``voyager handoff``).  Both are compiled from the same indexed evidence —
+    a presentation choice, not a second continuity model.
+
+    The lease and the pending attach only exist when work actually changes
+    hands (a ``target`` is set) *and* there is a WorkThread to protect.
+    Otherwise the engine still compiles the context and reports
+    ``scope == "session"`` — which is correct, not degraded: a lease protects
+    one WorkThread from two concurrent writers, and two independent session
+    handoffs are not a thread conflict.
+
+    ``force_bundle`` skips the D7 native-resume shortcut (`voyager switch
+    --bundle`).  ``action`` ∈ {``refused``, ``invalid``, ``error``,
+    ``native-resume``, ``transcript``, ``bundle``}; ``argv`` is ``None`` when
+    the target has no direct launch path (the context file is still written).
     """
     from .budget import apply_budget, parse_budget, resolve_auto_budget
 
-    tid = thread["id"]
+    src = resolve_handoff_source(store, thread=thread, sessions=sessions,
+                                 source=source)
     res: Dict[str, Any] = {
-        "action": None, "argv": None, "thread_id": tid,
+        "action": None, "argv": None, "thread_id": src.get("thread_id"),
         "target": target, "lease_token": None, "lease_holder": None,
-        "bundle_path": None, "pending_recorded": False,
-        "warnings": [], "error": None, "exit_code": None,
+        "bundle_path": None, "context_path": None, "context_chars": None,
+        "pending_recorded": False, "warnings": [], "error": None,
+        "exit_code": None, "scope": src.get("scope"), "style": style,
+        "source_provider": src.get("source_provider"),
+        "source_session": src.get("source_session"),
+        "member_count": len(src.get("members") or []),
+        "launch_supported": None, "budget_info": None,
     }
-
-    # -- lease (D13) -------------------------------------------------------
-    ok, lease = store.thread_lease_acquire(
-        tid, target, steal=steal)
-    if not ok:
-        res["action"] = "refused"
-        res["error"] = ("thread {0} is leased to {1} pid={2}, "
-                        "heartbeat {3:.0f}s ago".format(
-                            tid, lease["holder"], lease["pid"],
-                            time.time() - (lease["heartbeat_at"] or 0)))
-        res["lease_holder"] = lease["holder"]
-        res["warnings"].append(
-            "pass --steal or run `voyager thread unlock {0} --steal`".format(tid))
+    if src.get("error"):
+        res["action"] = "error"
+        res["error"] = src["error"]
+        res["exit_code"] = 2
         return res
-    res["lease_token"] = lease["lease_token"]
-    res["lease_holder"] = target
 
-    members = store.thread_members(tid)
+    tid = res["thread_id"]
+    members = src["members"]
     if not members:
-        store.thread_lease_release(tid, lease["lease_token"], reason="empty")
         res["action"] = "refused"
-        res["error"] = "thread has no live member sessions"
+        res["error"] = ("thread has no live member sessions" if tid
+                        else "no source session to hand off")
         return res
 
-    # -- git dirty warning (never stash/reset) -----------------------------
-    repo_hint = thread["repo_root"] or (members[0]["cwd"] if members else None)
+    # -- git dirty warning (never stash/reset; computed once, always) ------
+    repo_hint = src["repo_root"]
     snap = get_git_snapshot(repo_hint)
     if snap["is_git"] and snap["dirty_count"]:
         res["warnings"].append(
             "working tree has {0} uncommitted change(s) in {1}".format(
                 snap["dirty_count"], repo_hint))
 
+    # -- single-writer lease (D13): only when work changes hands in a thread
+    lease_token: Optional[str] = None
+    if tid and target:
+        ok, lease = store.thread_lease_acquire(tid, target, steal=steal)
+        if not ok:
+            res["action"] = "refused"
+            res["error"] = ("thread {0} is leased to {1} pid={2}, "
+                            "heartbeat {3:.0f}s ago".format(
+                                tid, lease["holder"], lease["pid"],
+                                time.time() - (lease["heartbeat_at"] or 0)))
+            res["lease_holder"] = lease["holder"]
+            res["warnings"].append(
+                "pass --steal or run `voyager thread unlock {0} --steal`".format(tid))
+            return res
+        res["lease_token"] = lease_token = lease["lease_token"]
+        res["lease_holder"] = target
+
     # -- same-provider native resume (D7 priority) -------------------------
     resumable = [m for m in members
-                 if m["provider"] == target and m["can_resume"] and m["resume_cmd"]]
-    if resumable and mode == "bundle":
+                 if target and m["provider"] == target
+                 and m["can_resume"] and m["resume_cmd"]]
+    if resumable and mode == "bundle" and not force_bundle:
         cand = max(resumable, key=lambda x: x["updated_at"] or 0)
-        _, lease = store.thread_lease_acquire(
-            tid, target, native_session_id=cand["native_id"],
-            pid=os.getpid(), steal=True)   # transfer rotates the token
-        res["lease_token"] = lease["lease_token"]
+        if tid:
+            _, lease = store.thread_lease_acquire(
+                tid, target, native_session_id=cand["native_id"],
+                pid=os.getpid(), steal=True)   # transfer rotates the token
+            res["lease_token"] = lease["lease_token"]
         res["action"] = "native-resume"
         res["argv"] = cand["resume_cmd"].split()
+        res["launch_supported"] = True
         return res
 
     # -- opt-in transcript transplant (#10, gated) -------------------------
@@ -996,46 +1129,96 @@ def handoff_thread(
         from .writers import write_transcript, writer_supported
         if not writer_supported(target):
             reason = UNSUPPORTED_REASON_SHORT.get(target, "unverified")
-            store.thread_lease_release(tid, lease["lease_token"],
-                                       reason="transcript-unsupported")
+            if tid and lease_token:
+                store.thread_lease_release(tid, lease_token,
+                                           reason="transcript-unsupported")
             res["action"] = "refused"
             res["error"] = ("transcript transplant unsupported for "
                             "{0}: {1}".format(target, reason))
             return res
-        from .writers import write_transcript as _wt
-        w = _wt(store, tid, target)
+        if not tid:
+            res["action"] = "refused"
+            res["error"] = ("transcript transplant needs a WorkThread — pass "
+                            "--thread, or `voyager merge` the sessions first")
+            return res
+        w = write_transcript(store, tid, target)
         res["action"] = "transcript"
         res["argv"] = w["resume_cmd"].split()
         res["native_session_id"] = w["native_session_id"]
+        res["launch_supported"] = True
         return res
 
-    # -- cross-provider: compile Continuation Bundle (D11 default) ---------
-    from .budget import apply_budget as _ab, parse_budget as _pb, resolve_auto_budget
-    tokens = _pb(budget)
+    # -- canonical context (D11 Continuation Bundle / handoff package) -----
+    try:
+        tokens = parse_budget(budget)
+    except ValueError as e:
+        if tid and lease_token:
+            store.thread_lease_release(tid, lease_token, reason="invalid-budget")
+        res["action"] = "invalid"
+        res["error"] = str(e)
+        res["exit_code"] = 2
+        return res
     if tokens is None and budget and budget.strip().lower() == "auto":
         tokens = resolve_auto_budget(target)
-    bundle = build_continuation_bundle(store, members, goal=goal)
-    packed, info = _ab(bundle, tokens, target=target)
-    out_dir = get_bundles_dir()
-    out = Path(output) if output else out_dir / default_bundle_name(members)
+
+    if style == "package" and len(members) == 1:
+        # A single session has a Context Package; a WorkThread or a merge has
+        # a Continuation Bundle.  Asking for "package" with several members
+        # degrades to the bundle, and the effective style is reported so the
+        # caller's wording follows the file it actually got.
+        from .handoff import build_context_package, default_package_name
+        text = build_context_package(store, members[0], goal=goal)
+        # The CLI's documented default for an export is the *current
+        # directory* (a package is something you paste); MCP, which has no
+        # meaningful cwd, passes an explicit `output` in the bundles dir.
+        default_out = Path(default_package_name(members[0]))
+        res["style"] = "package"
+    else:
+        text = build_continuation_bundle(store, members, goal=goal)
+        default_out = get_bundles_dir() / default_bundle_name(members)
+        res["style"] = "continuation"
+
+    packed, info = apply_budget(text, tokens, target=target)
+    res["budget_info"] = info
+
+    out = Path(output) if output else default_out
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(packed, encoding="utf-8")
+    res["bundle_path"] = res["context_path"] = str(out.resolve())
+    res["context_chars"] = len(packed)
 
-    # Record pending attach so the next scan can auto-resolve
-    store.pending_record(
-        tid, target,
-        note="switch continuation: " + out.name,
-        repo_root=thread["repo_root"],
-        cwd=members[0]["cwd"] if members else None,
-        source_provider=(members[-1]["provider"] if members else None),
-        source_session=(members[-1]["id"] if members else None),
-        goal=goal,
-        lease_token=lease["lease_token"])
-    res["pending_recorded"] = True
+    # -- attach behaviour: a real handoff to a named target is the only thing
+    #    the next scan needs to adopt, so that is the only pending record.
+    if tid and target:
+        store.pending_record(
+            tid, target,
+            note="handoff continuation: " + out.name,
+            repo_root=src["repo_root"],
+            cwd=members[0]["cwd"] if members else None,
+            source_provider=src["source_provider"],
+            source_session=src["source_session"],
+            goal=goal,
+            lease_token=lease_token)
+        res["pending_recorded"] = True
+
+    if target:
+        if res["style"] == "package":
+            from .handoff import handoff_command
+            res["argv"] = handoff_command(target, out)
+        else:
+            res["argv"] = bundle_command(target, out)
+    res["launch_supported"] = bool(res["argv"])
+
+    # Nothing changed hands if the target has no launch path — the caller has
+    # to paste the file in by hand.  Holding the lease would refuse the *next*
+    # handoff of this thread for a whole heartbeat timeout, so give it back.
+    if tid and lease_token and not res["argv"]:
+        store.thread_lease_release(tid, lease_token, reason="no-launch-path")
+        res["lease_token"] = res["lease_holder"] = None
+        res["warnings"].append(
+            "no direct launch path for '{0}' — lease released".format(target))
 
     res["action"] = "bundle"
-    res["argv"] = bundle_command(target, out)
-    res["bundle_path"] = str(out.resolve())
     return res
 
 

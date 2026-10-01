@@ -108,14 +108,55 @@ from voyager.skill import install_skills
 results = install_skills(agent=None, force=False)  # codex/claude/grok
 ```
 
+### Handoff engine (`voyager.continuity.handoff_thread`)
+
+The **one** engine behind `voyager switch` / `continue` / `handoff` / `merge`
+and the MCP `voyager_switch` / `voyager_handoff` / `voyager_merge` tools
+(see [DECISIONS.md](DECISIONS.md) D14).
+
+```python
+from voyager.continuity import handoff_thread, resolve_handoff_source
+
+res = handoff_thread(store, thread=tid, target="codex",
+                     goal="fix CI", budget="compact", style="continuation")
+# or: handoff_thread(store, sessions=rows, target="claude")
+# or: handoff_thread(store, source="11111111-2222", target="claude")
+
+res["action"]        # refused | invalid | error | native-resume | transcript | bundle
+res["argv"]          # None when the target has no direct launch path
+res["context_path"]  # the file that was written (None before the bundle step)
+res["lease_token"]   # held only when work actually changed hands
+res["pending_recorded"]
+res["style"]         # "package" or "continuation" — what was ACTUALLY built
+res["warnings"]      # dirty tree, refused lease, released lease, …
+```
+
+`resolve_handoff_source(store, thread=…, sessions=…, source=…)` normalises any
+entry point to `{thread, thread_id, members, repo_root, source_provider,
+source_session, scope}`. A session-scope call adopts the WorkThread that
+already **contains** those sessions (`store.thread_find_containing`), so
+handing off one member of a thread still leases that thread. A WorkThread is
+never created here.
+
+The engine never prints (MCP's JSON-RPC rides stdout), never launches, never
+raises for expected paths, never writes a provider file and never creates a
+WorkThread. It returns `argv`; the caller launches and owns the
+release-the-lease-on-failure policy (`voyager.cli._handoff_launch`).
+
 ### Switch (`voyager.cli.cmd_switch`)
 
 `voyager switch <agent>` composes: freshness scan → WorkThread
-resolution → lease acquire (D13) → native resume XOR bundle → launch.
-The lease is consumed via `store.thread_lease_acquire`; launch failure
-releases it.
+resolution → the handoff engine → render. The lease is consumed via
+`store.thread_lease_acquire`; launch failure releases it. `--bundle`
+forces the Continuation Bundle even for a same-provider member, and
+`--steal` takes over a live lease explicitly.
 
 ### Handoff (`voyager.handoff`)
+
+`voyager handoff <id> --to <agent>` is the *export* spelling of the same
+engine (`style="package"`): it always compiles a Context Package, because
+`--to` names the agent that will read it. The two functions below are the
+package compiler and argv builder the engine calls.
 
 ```python
 from voyager.handoff import build_context_package, handoff_command

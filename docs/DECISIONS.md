@@ -207,3 +207,49 @@ thread 日志），**追加写入**。每个 WorkThread 有一份租约：`holde
 `c41f99b`）。`voyager switch`（#7）已消费这把锁；writer（#10）的
 codex/grok 实现同样运行在租约之下。测试要覆盖：第二家 switch 失败、
 过期租约可抢、持锁期间只吸入持锁方。
+
+## D14 — 四条 handoff 命令共用同一个引擎
+
+**Decision**: `voyager switch` / `continue` / `handoff` / `merge`（以及 MCP 的
+`voyager_switch` / `voyager_handoff` / `voyager_merge`）不再各自实现一遍流程，
+统一走 `continuity.handoff_thread()`。引擎接受三种来源：一个 WorkThread、
+一组显式 session、或单个 session；来源是 session 时，会**收养**已经拥有它的
+WorkThread（**包含**关系，不是相等关系），于是同一把租约和同一条 pending
+attach 依然生效。
+
+引擎本身**不打印、不拉起、不抛异常、不写 provider 文件、不创建 WorkThread**：
+它返回一个结果字典，由调用方决定措辞和退出码（CLI 是 `_render_handoff`）。
+不打印是硬要求——MCP 的 JSON-RPC 就走 stdout。
+
+`style` 决定目标 agent 读到的规范上下文：`continuation`（多 session 的
+Continuation Bundle，默认）或 `package`（单 session 的 Context Package，
+`voyager handoff` 用）。两者都编译自同一份索引证据——这是**表现形式**的差异，
+不是第二套接续模型。租约与 pending attach 只在**真的换手**时产生：给了
+`target`，且有 WorkThread 可保护；否则引擎照样编译上下文，并报告
+`scope == "session"`（这是正确的，不是降级——租约保护的是一个 WorkThread
+不被两个写者同时写，两次互不相干的 session 级 handoff 不构成线程冲突）。
+
+**Reason**: 收敛前每条命令都有自己的流程副本，同一个 WorkThread 的行为取决于
+你敲了哪条命令：
+
+- `switch T --to X` 抢锁并写 pending，而 `continue --thread T --to X` 两样都
+  不做——两家 agent 可以同时写同一个线程，目标 agent 的新 session 也永远不会
+  被下一次 scan 收养；
+- `continue --thread T --to X` 忽略 D7，即使线程里已有该 provider 的可恢复
+  成员也照样编 bundle；
+- `switch --bundle` 解析了却没传给引擎，是静默 no-op；
+- `switch <agent>`（不带 `--thread`）抛 `UnboundLocalError`：候选列表推导式的
+  `t` 在 py3 里不会泄漏到外层作用域，所以 `thread=t` 是未绑定的。
+
+"每条命令各自记得做一遍"正是这个项目反复踩的坑（见 D11/D13 的 Alternatives）。
+
+**Alternatives**: CLI 各自实现、只共享 compiler——安全语义仍会漂移，正是上面
+第一、二条；把 `handoff`/`merge` 也做成会抢锁的"真换手"——`voyager handoff`
+是**导出**，`--to` 命名的是这份包的**读者**而不是要恢复的 session，抢锁只会
+挡住下一次 handoff。
+
+**Consequences**: `tests/test_handoff_convergence.py` 固定了收敛后的行为与引擎
+不变式（静音、错误即值、绝不创建 WorkThread、没有启动路径时归还租约）。
+新增 `Store.thread_find_containing()`（包含语义，`thread_find_by_members` 的
+相等语义不够用）。删除 `_merge_and_handoff` / `_handoff_from_row` /
+`_render_budgeted` 三份重复实现。`continue` 补上 `--bundle`。

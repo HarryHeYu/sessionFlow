@@ -75,7 +75,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # full dev env: 546 collected, 543 passed, 2 skipped, 1 deselected
+python -m pytest tests/ -q     # full dev env: 754 collected, 736 passed, 18 skipped
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -133,6 +133,16 @@ automatic handoff package for the rest. `voyager continue --repo myproj
 synthesis (`voyager merge A B C`) groups the work into a **WorkThread**
 and cross-agent switch is one command (`voyager switch codex` — lease
 aware, see [docs/ROADMAP.md](docs/ROADMAP.md)).
+
+`switch`, `continue`, `handoff` and `merge` are four spellings of **one
+engine** (`continuity.handoff_thread` — see
+[docs/DECISIONS.md](docs/DECISIONS.md) D14), so they cannot drift apart. When
+the work sits in a WorkThread, all four take the single-writer lease, prefer
+the native resume, record the pending attach that lets the next `scan` adopt
+the target agent's new session, and warn — never stash — on a dirty tree.
+`handoff` is the export spelling: `--to` names the agent that will *read* the
+package, so it always compiles one. `--steal` takes over a live lease
+explicitly; without it a second agent is refused by name.
 
 **Goal-conditioned & budgeted**: add `--goal "finish adapter tests"` to
 rank the evidence, and `--budget compact|balanced|full|Nk` to cap the
@@ -428,7 +438,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # full dev env: 546 collected, 543 passed, 2 skipped, 1 deselected — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
+python -m pytest tests/ -q                # full dev env: 754 collected, 736 passed, 18 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
 python scripts/run_tests_core_only.py     # core-only simulated: a subset that skips the DB-backed suites
 ```
 

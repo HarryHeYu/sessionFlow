@@ -188,9 +188,7 @@ def voyager_handoff(session_id: str, target: str = "claude",
     errors, where work stopped) from a session, for handing the task to a
     DIFFERENT agent. Returns the package file path — the target agent
     should read that file and continue the task."""
-    from pathlib import Path
-    from .continuity import get_bundles_dir
-    from .handoff import build_context_package, default_package_name
+    from .continuity import handoff_thread
     store = Store()
     row, ambiguous = store.session(session_id)
     if row is None and ambiguous:
@@ -201,10 +199,21 @@ def voyager_handoff(session_id: str, target: str = "claude",
     if row is None:
         store.close()
         return f"session not found: {session_id}"
-    out = get_bundles_dir() / default_package_name(row)
-    out.write_text(build_context_package(store, row), encoding="utf-8")
+    # Same engine as `voyager switch` / the CLI, in "package" style.  No
+    # target is claimed here: this tool returns a file path for the caller to
+    # act on, so nothing changes hands yet and no lease/pending is taken.
+    # The output path is explicit because the engine's default for a package
+    # is the *current directory* (right for a CLI export) — a server process
+    # must never drop files into whatever cwd it happens to have.
+    from .continuity import get_bundles_dir
+    from .handoff import default_package_name
+    res = handoff_thread(store, source=row, target=None, goal=goal or None,
+                         style="package",
+                         output=get_bundles_dir() / default_package_name(row))
     store.close()
-    return (f"Context package written to {out.resolve()}. "
+    if res["action"] != "bundle":
+        return "handoff failed: {0}".format(res.get("error"))
+    return (f"Context package written to {res['context_path']}. "
             f"Target agent ({target}) should read this file and continue "
             f"the task described inside.")
 
@@ -215,8 +224,7 @@ def voyager_merge(session_ids: list[str], target: str = "claude", goal: str = ""
     Bundle, resolving chronological conflicts, deduplicating files/commands/errors,
     and capturing live git state. Returns the bundle file path — the target agent
     should read that file and continue work."""
-    from pathlib import Path
-    from .continuity import build_continuation_bundle, default_bundle_name, get_bundles_dir
+    from .continuity import handoff_thread
     store = Store()
     rows = []
     for sid in session_ids:
@@ -231,13 +239,13 @@ def voyager_merge(session_ids: list[str], target: str = "claude", goal: str = ""
     if not rows:
         store.close()
         return "error: no valid sessions provided"
-    out_dir = get_bundles_dir()
-    out = out_dir / default_bundle_name(rows)
-    bundle = build_continuation_bundle(store, rows, goal=goal or None)
-    out.write_text(bundle, encoding="utf-8")
+    res = handoff_thread(store, sessions=rows, target=None, goal=goal or None)
     store.close()
-    return (f"Continuation bundle written to {out.resolve()} ({len(bundle)} chars). "
-            f"Target agent ({target}) should read this file and continue the task.")
+    if res["action"] != "bundle":
+        return "merge failed: {0}".format(res.get("error"))
+    return (f"Continuation bundle written to {res['context_path']} "
+            f"({res['context_chars']} chars). Target agent ({target}) should "
+            f"read this file and continue the task.")
 
 
 @mcp.tool()
@@ -352,7 +360,13 @@ def voyager_context(cwd: str = "", provider: str = "",
                     budget: str = "") -> str:
     """Compile a ready-to-use continuation context (goal, state, decisions,
     failures, next steps) for the active WorkThread. Returns the bundle
-    text — read it and continue the work."""
+    text — read it and continue the work.
+
+    This is the read-only *context* facet of continuity: it compiles and
+    returns text, and never leases, records a pending attach or launches. The
+    *handoff* facet — one WorkThread changing hands between agents — is
+    `voyager_switch` / `voyager_handoff`, which share one engine with the CLI
+    (`continuity.handoff_thread`)."""
     from .auto import get_continuation_context
     store = Store()
     res = get_continuation_context(store=store, cwd=cwd or None,
@@ -375,10 +389,14 @@ def voyager_continue(cwd: str = "", goal: str = "", budget: str = "") -> str:
 
 @mcp.tool()
 def voyager_switch(target: str, cwd: str = "", goal: str = "",
-                   budget: str = "", steal: bool = False) -> str:
+                   budget: str = "", steal: bool = False,
+                   force_bundle: bool = False) -> str:
     """Switch the active WorkThread to another agent. Compiles the
     continuation bundle (or native resume if same provider). Returns
-    instructions for the target agent."""
+    instructions for the target agent.
+
+    Uses the same engine as the CLI (`continuity.handoff_thread`): lease →
+    same-provider native resume → continuation bundle + pending attach."""
     from .auto import discover_continuity
     from .continuity import handoff_thread
     store = Store()
@@ -388,27 +406,26 @@ def voyager_switch(target: str, cwd: str = "", goal: str = "",
         return "no active WorkThread — nothing to switch"
     tid = disc["active_thread"]["id"]
     t = store.thread_get(tid)
-    
+
     res = handoff_thread(
         store=store,
         thread=t,
         target=target,
         goal=goal or None,
         budget=budget or None,
-        launch=False,  # MCP returns text, doesn't launch
         mode="bundle",
         steal=steal,
-        no_launch=True,
+        force_bundle=force_bundle,
     )
     store.close()
-    
-    if res["action"] == "refused":
-        return "refused: {0}".format(res.get("error", "unknown"))
+
+    if res["action"] in ("refused", "invalid", "error"):
+        return "{0}: {1}".format(res["action"], res.get("error", "unknown"))
     if res["warnings"]:
         warnings = "\n".join(["warning: {0}".format(w) for w in res["warnings"]])
     else:
         warnings = ""
-    
+
     if res["action"] == "native-resume":
         return ("same provider ({0}) — native resume ready:\n\n{1}".format(
             target, "\n".join(res["argv"]))) + ("\n\n" + warnings if warnings else "")
@@ -416,12 +433,14 @@ def voyager_switch(target: str, cwd: str = "", goal: str = "",
         return ("transplant written; session id {0}.\n\n{1}".format(
             res.get("native_session_id", "unknown"), warnings))
     elif res["action"] == "bundle":
-        return ("Continuation bundle ready: {0}\n\n{1}{2} Target agent ({3}) should "
+        if not res.get("argv"):
+            return ("Continuation bundle ready: {0}\n\n{1}No direct launch path "
+                    "for '{2}' — paste the bundle into that agent."
+                    .format(res["context_path"], warnings, target))
+        return ("Continuation bundle ready: {0}\n\n{1} Target agent ({2}) should "
                 "read the bundle and continue.".format(
-                    res["bundle_path"],
-                    warnings,
-                    "\nestimated_tokens is available in the bundle," if "context" in locals() else "",
-                    target))
+                    res["context_path"], warnings, target))
+
     else:
         return "unexpected action: {0}".format(res["action"])
 

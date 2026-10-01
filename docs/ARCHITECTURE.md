@@ -84,6 +84,19 @@ WorkThread（threads/thread_sessions/租约表）、goal ranker（ranker.py）�
 Context Budget（budget.py）、Skill 安装器、`voyager switch`、本地 API
 （api.py + `voyager api serve`）。当前架构见 [ROADMAP.zh-CN.md](ROADMAP.zh-CN.md)。
 
+**Handoff 只有一个引擎**：`continuity.handoff_thread()`。`voyager switch` /
+`continue` / `handoff` / `merge` 和 MCP 的对应工具都是它的薄适配层——
+引擎负责来源解析（WorkThread / 一组 session / 单个 session，session 来源会
+收养拥有它的 WorkThread）、租约（D13）、同 provider 原生恢复（D7）、规范上下文
+（Continuation Bundle 或 Context Package）、pending attach、git dirty 警告与
+`argv`；调用方只负责措辞和退出码。引擎**不打印、不拉起、不抛异常、不写
+provider 文件、不创建 WorkThread**——不打印是硬要求，MCP 的 JSON-RPC 走
+stdout。理由与边界见 [DECISIONS.md](DECISIONS.md) D14。
+
+**只读的上下文面**与 handoff 面分开：`voyager_context` / `voyager_continue`
+（MCP）和 session-start hook 走 `auto.get_continuation_context()`，编译并返回
+文本，不抢租约、不写 pending、不拉起——它们读的是同一份索引证据，但不是换手。
+
 索引层仍为后续特性留有钩子（这些属于 docs/POST-1.0.md 的 backlog，**未实现**）：
 
 索引层已为后续特性留了钩子，但不挡 Continuity：

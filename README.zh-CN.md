@@ -68,7 +68,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"   
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # full dev 环境：374 collected：372 passed / 2 skipped
+python -m pytest tests/ -q     # full dev 环境：754 collected：736 passed / 18 skipped
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -124,6 +124,14 @@ codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager c
 （仅 codex/grok），默认仍是 Continuation Bundle。这是**工作接续**，
 不是把 Session 原样搬过去——见
 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)。
+
+`switch` / `continue` / `handoff` / `merge` 是**同一个引擎**的四种说法
+（`continuity.handoff_thread`，见 [docs/DECISIONS.md](docs/DECISIONS.md) D14），
+所以它们不会各自漂移。当工作属于某个 WorkThread 时，四条命令都会：抢单写者
+租约（第二家 agent 会被点名拒绝，`--steal` 才显式接管）、优先走同 provider 的
+原生恢复、写下 pending attach（下一次 `scan` 就会把目标 agent 的新会话接进同一个
+thread）、以及在工作区脏时只警告、绝不 stash。`handoff` 是「导出」这条说法：
+`--to` 指的是**读**这份包的 agent，所以它永远编译包。
 
 **日常套路**——`brief` 看全局动态，`export` 完整细读某个会话（实测把
 2915 条消息的 DSH 会话导成 20MB Markdown），`continue` / `handoff` 接着干。
@@ -266,7 +274,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # full dev 环境：374 collected：372 passed / 2 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
+python -m pytest tests/ -q                # full dev 环境：754 collected：736 passed / 18 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
 python scripts/run_tests_core_only.py     # 模拟 core-only：374 collected：356 passed / 18 skipped
 ```
 

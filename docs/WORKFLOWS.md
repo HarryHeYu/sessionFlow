@@ -69,6 +69,20 @@ Histories stay in each agent's own format; Voyager syncs the **index**
 rewriting Codex files as Claude JSONL. Multi-session merge and
 `voyager switch <agent>` are shipped: [ROADMAP.md](ROADMAP.md).
 
+`continue`, `switch`, `handoff` and `merge` are four dialects of **one
+engine** (`continuity.handoff_thread`, see [DECISIONS.md](DECISIONS.md) D14),
+so they share one set of guarantees rather than one each. When the work sits
+in a WorkThread, all four:
+
+- take the single-writer lease (D13) — a second agent is refused by name,
+  `--steal` takes over explicitly;
+- prefer the D7 native resume when a member of the target provider is
+  resumable (`--bundle` forces the bundle instead);
+- record a **pending attach** for the target provider, which the next
+  `voyager scan` resolves by attaching that agent's new session to the same
+  thread;
+- warn — never stash — when the working tree is dirty.
+
 ## 6. Hand a task to a different agent
 
 ```sh
@@ -82,6 +96,14 @@ and a condensed timeline. Launchable targets: `claude`, `codex`, `grok`;
 other targets get the package file to paste manually. The new session
 does not inherit the previous agent's hidden tool state — it reads the
 package and continues the *work*.
+
+`handoff` is an **export**: `--to` names the agent that will *read* the
+package, so it always compiles one — even when the source provider equals the
+target, which would otherwise hit the D7 native-resume shortcut. Use
+`voyager resume` / `voyager continue` when you want the session resumed.
+If the session already belongs to a WorkThread, the export also takes that
+thread's lease and records the pending attach; if it does not, no thread is
+created (run `voyager merge` for that).
 
 ## 7. From inside an agent (MCP)
 

@@ -635,25 +635,6 @@ def cmd_diff(args) -> int:
     return 0
 
 
-def _render_budgeted(text: str, args, target: Optional[str] = None) -> str:
-    """Phase 4: apply --budget to a rendered bundle/package and print the
-    token estimate. Shared by handoff / merge / continue pipelines."""
-    from .budget import apply_budget, parse_budget, resolve_auto_budget
-    spec = getattr(args, "budget", None)
-    try:
-        tokens = parse_budget(spec)
-    except ValueError as e:
-        print(f"error: {e}", file=sys.stderr)
-        raise SystemExit(2)
-    if tokens is None and spec and spec.strip().lower() == "auto":
-        # Use provider-aware auto budget resolution
-        tokens = resolve_auto_budget(target)
-    packed, info = apply_budget(text, tokens, target=target)
-    print("estimated tokens: ~{0}".format(info["estimated_tokens"])
-          + ("  (budget {0})".format(info["budget"]) if info["budget"] else ""))
-    return packed
-
-
 def cmd_api(args) -> int:
     """Phase 7: local stdio JSON-lines API (the VS Code sidebar's client)."""
     from .api import serve
@@ -1056,75 +1037,90 @@ def _same_repo(a: str, b: str) -> bool:
     return a == b or a.endswith("/" + b) or b.endswith("/" + a)         or a in b or b in a
 
 
-def _continue_from_thread(store: Store, t, args) -> int:
-    """Continue inside a WorkThread: newest natively-resumable member wins
-    without --to; otherwise compile the continuation bundle from members."""
-    member_rows = store.thread_members(t["id"])
-    if not member_rows:
+def _continue_thread(store: Store, t, args) -> int:
+    """Continue inside a WorkThread.
+
+    The engine resumes the newest natively-resumable member when no `--to` is
+    given (D7) and otherwise compiles the continuation bundle from the
+    thread's members.  The banner is printed here because the engine is mute.
+    """
+    members = store.thread_members(t["id"])
+    if not members:
         print("thread " + t["id"] + " has no live member sessions",
               file=sys.stderr)
+        store.close()
         return 1
     print("thread {0}  [{1}]  {2} member(s)".format(
-        t["id"], t["status"], len(member_rows)))
-    if not getattr(args, "to", None):
-        for m in sorted(member_rows, key=lambda x: x["updated_at"] or 0,
-                        reverse=True):
-            if m["can_resume"] and m["resume_cmd"]:
-                argv = m["resume_cmd"].split()
-                print("$ " + " ".join(argv))
-                if not args.launch:
-                    print("add --launch to start it now")
-                    return 0
-                try:
-                    return _launch(argv)
-                except KeyboardInterrupt:
-                    return 130
-        args.to = "claude"
-        print("no natively-resumable member — compiling continuation bundle "
-              "for claude (override with --to)")
-    return _merge_and_handoff(store, member_rows, args)
+        t["id"], t["status"], len(members)))
+    target = getattr(args, "to", None)
+    if not target:
+        resumable = [m for m in members if m["can_resume"] and m["resume_cmd"]]
+        if resumable:
+            target = max(resumable,
+                         key=lambda x: x["updated_at"] or 0)["provider"]
+        else:
+            target = "claude"
+            print("no natively-resumable member — compiling continuation "
+                  "bundle for claude (override with --to)")
+    return _handoff_via_engine(store, args, "continue", thread=t, target=target)
 
 
 def cmd_continue(args) -> int:
     """One command to pick work back up: native resume when possible,
-    automatic cross-agent handoff otherwise."""
+    automatic cross-agent handoff otherwise.
+
+    A thin adapter over continuity.handoff_thread(): WorkThread scope first
+    (explicit --thread, else the newest active thread for this repo), then
+    session scope (--from / one session / the newest session).
+    """
     store = Store(args.db)
     # Phase 1b: the index is only as fresh as the last scan
     _ensure_fresh(args, store,
                   providers=[args.platform] if getattr(args, "platform", None) else None)
-    if getattr(args, "thread", None):
-        t = store.thread_get(args.thread)
-        if not t:
-            print("thread not found: " + args.thread, file=sys.stderr)
-            return 1
-        return _continue_from_thread(store, t, args)
-    # Phase 2 task-centric default: --repo / cwd -> active WorkThread.
+
+    # -- WorkThread scope --------------------------------------------------
     # Deterministic only: an explicit thread wins, otherwise the most
     # recently updated active thread for this repo is picked LOUDLY.
     # Multi-signal auto-clustering is deliberately NOT implemented
     # (roadmap Deferred) — sessions are never silently swallowed.
-    if not args.session and not getattr(args, "from_sessions", None):
+    t = None
+    if getattr(args, "thread", None):
+        t = store.thread_get(args.thread)
+        if not t:
+            print("thread not found: " + args.thread, file=sys.stderr)
+            store.close()
+            return 1
+    elif not args.session and not getattr(args, "from_sessions", None):
         repo_ref = getattr(args, "repo", None)
         if repo_ref:
             repo = repo_ref
         else:
             repo = (git_info(os.getcwd()).get("repo_root")
                     or os.getcwd().replace("\\", "/"))
-        cands = [t for t in store.thread_list("active")
-                 if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+        cands = [x for x in store.thread_list("active")
+                 if x["repo_root"] and _same_repo(x["repo_root"], repo)]
         if cands:
             t = max(cands, key=lambda x: x["updated_at"] or 0)
             print("active thread: {0}  ({1})".format(
                 t["id"], (t["title"] or "")[:70]))
-            return _continue_from_thread(store, t, args)
+    if t is not None:
+        return _continue_thread(store, t, args)
+
+    # -- session scope -----------------------------------------------------
     from_sessions = getattr(args, "from_sessions", None)
     if from_sessions:
         refs = [s.strip() for s in from_sessions.split(",") if s.strip()]
         if not refs:
             print("error: --from requires at least one session id", file=sys.stderr)
+            store.close()
             return 2
         rows = [_resolve(store, ref) for ref in refs]
-        return _merge_and_handoff(store, rows, args)
+        target = getattr(args, "to", None)
+        if not target:
+            target = "claude"
+            print("defaulting continuation target to 'claude' (override with --to)")
+        return _handoff_via_engine(store, args, "continue",
+                                   sessions=rows, target=target)
 
     if args.session:
         row = _resolve(store, args.session)
@@ -1137,37 +1133,244 @@ def cmd_continue(args) -> int:
         rows = [r for r in rows if r["updated_at"]]
         if not rows:
             print("no sessions to continue (run `voyager scan` first)")
+            store.close()
             return 1
         row = rows[0]
         print(f"latest session: [{row['provider']}] {(row['title'] or '')[:70]} "
               f"({_short_ts(row['updated_at'])})")
 
-    if getattr(args, "to", None):
-        # explicit cross-agent handoff wins
-        return _handoff_from_row(store, row, args)
-    if row["can_resume"] and row["resume_cmd"]:
-        argv = row["resume_cmd"].split()
-        print(f"$ {' '.join(argv)}")
-        if args.no_launch or not args.launch:
-            print("add --launch to start it now" if not args.no_launch
-                  else "(--no-launch: not launching)")
+    target = getattr(args, "to", None)
+    if not target:
+        if row["can_resume"] and row["resume_cmd"]:
+            target = row["provider"]        # native resume in place (D7)
+        else:
+            # native resume unsupported (e.g. ZCode): hand off instead
+            target = "claude"
+            print(f"native resume unsupported for '{row['provider']}' — "
+                  f"falling back to cross-agent handoff")
+    return _handoff_via_engine(store, args, "continue", source=row, target=target)
+
+
+# ---------------------------------------------------------------------------
+# Handoff rendering (P9)
+#
+# continuity.handoff_thread() owns every decision — source resolution, lease,
+# native resume, the canonical context, the pending attach.  These helpers only
+# choose words and exit codes, so `switch` / `continue` / `handoff` / `merge`
+# cannot drift apart again: they are dialects of one engine, not four
+# implementations.  `voyager_context` / `voyager_continue` (MCP) are the
+# read-only *context* facet of the same evidence and deliberately do not come
+# through here — they compile and return text without leasing or launching.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_READY = "add --launch to start it now"
+
+_HANDOFF_DIALECTS = {
+    # `switch` launches by default, so its "not launching" lines explain what
+    # to do next instead of repeating the generic hint.
+    "switch": {
+        "ready_resume": "native resume ready",
+        "ready_transplant": "transplant ready",
+        "ready_bundle": "switch ready (--no-launch); the target agent should read "
+                        "the bundle, then `voyager thread attach {tid} <new-id>` "
+                        "resolves the pending attach",
+        "launched": "switch complete: after the target agent starts, run "
+                    "`voyager thread attach {tid} <new-session-id>` to link the "
+                    "continuation",
+    },
+    "continue": {"launched": ""},
+    "merge": {"launched": ""},
+    "handoff": {"launched": ""},
+}
+
+
+def _handoff_nouns(style: str) -> tuple:
+    """(artifact, prompt, launch) nouns for the context shape actually used.
+
+    Derived from the engine's *effective* style rather than from which command
+    was typed: `continue` asks for a package but a multi-member source gets a
+    Continuation Bundle, and the words have to follow the file, not the flag.
+    """
+    if style == "package":
+        return "context package", "handoff prompt", "handoff"
+    return "continuation bundle", "continuation prompt", "continuation"
+
+
+def _wants_launch(kind: str, args) -> bool:
+    """`switch` launches by default (`--no-launch` suppresses it); every other
+    entry point is opt-in (`--launch`).  That asymmetry is deliberate and
+    predates the convergence — it is kept, not silently normalised."""
+    if kind == "switch":
+        return not getattr(args, "no_launch", False)
+    return bool(getattr(args, "launch", False))
+
+
+def _handoff_launch(store: Store, res, lines: list) -> int:
+    """Launch a handoff result's argv, releasing the WorkThread lease if the
+    launch fails.
+
+    A dangling live lease is worse than the failed launch itself: it blocks
+    every later handoff of that thread until someone runs `thread unlock
+    --steal`.  Centralised here so all four entry points share one policy
+    (this block used to be copy-pasted three times inside `cmd_switch`).
+    """
+    tid, token = res.get("thread_id"), res.get("lease_token")
+
+    def _release(reason: str) -> None:
+        if tid and token:
+            from .store import Store as _Store
+            s = _Store(store.db_path)
+            s.thread_lease_release(tid, token, reason=reason)
+            s.close()
+
+    try:
+        rc = _launch(res["argv"])
+        if rc != 0:
+            _release("launch-failed")
+            lines.append("launch exited with code {0}; lease released".format(rc))
+        return rc
+    except KeyboardInterrupt:
+        _release("launch-interrupted")
+        lines.append("launch interrupted; lease released")
+        return 130
+    except OSError as e:
+        _release("launch-failed")
+        lines.append("launch failed ({0}); lease released".format(e))
+        return 1
+
+
+def _render_handoff(store: Store, res, args, kind: str) -> int:
+    """Render a continuity.handoff_thread() result for a CLI entry point."""
+    d = _HANDOFF_DIALECTS.get(kind, _HANDOFF_DIALECTS["continue"])
+    lines: list = ["warning: {0}".format(w) for w in res.get("warnings", [])]
+    action = res["action"]
+
+    if action in ("error", "invalid"):
+        if lines:
+            print("\n".join(lines))
+        print("error: {0}".format(res.get("error")), file=sys.stderr)
+        raise SystemExit(res.get("exit_code") or 2)
+    if action == "refused":
+        lines.append("refused: {0}".format(res.get("error")))
+        print("\n".join(lines))
+        return 1
+
+    if res.get("budget_info"):
+        info = res["budget_info"]
+        lines.append("estimated tokens: ~{0}".format(info["estimated_tokens"])
+                     + ("  (budget {0})".format(info["budget"])
+                        if info["budget"] else ""))
+
+    from .continuity import PROMPT_TARGETS
+    launchable = ", ".join(sorted(PROMPT_TARGETS))
+    launch_now = _wants_launch(kind, args)
+    tid = res.get("thread_id")
+    noun, prompt, launch_noun = _handoff_nouns(res.get("style") or "")
+
+    def _ready(key: str) -> str:
+        return d.get(key) or _DEFAULT_READY
+
+    if action == "native-resume":
+        lines.append("$ {0}".format(" ".join(res["argv"])))
+        if not launch_now:
+            lines.append(_ready("ready_resume"))
+            print("\n".join(lines))
             return 0
-        try:
-            return _launch(argv)
-        except KeyboardInterrupt:
-            return 130
-    # native resume unsupported (e.g. ZCode): fall back to a handoff package
-    print(f"native resume unsupported for '{row['provider']}' — "
-          f"falling back to cross-agent handoff")
-    args.to = args.to or "claude"
-    return _handoff_from_row(store, row, args)
+        rc = _handoff_launch(store, res, lines)
+        print("\n".join(lines))
+        return rc
+
+    if action == "transcript":
+        lines.append("transcript written: session id {0}".format(
+            res.get("native_session_id", "unknown")))
+        lines.append("$ {0}".format(" ".join(res["argv"])))
+        if not launch_now:
+            lines.append(_ready("ready_transplant"))
+            print("\n".join(lines))
+            return 0
+        rc = _handoff_launch(store, res, lines)
+        print("\n".join(lines))
+        return rc
+
+    # -- bundle (Continuation Bundle or handoff package) -------------------
+    lines.append("{0}: {1} ({2} chars)".format(
+        noun, res["context_path"], res["context_chars"]))
+
+    if not res.get("target"):
+        ref = (res.get("source_session") or "<session>").split(":")[-1][:16]
+        lines.append("next: pick a target agent, e.g. `voyager {0} {1} --to "
+                     "claude` (targets with direct launch: {2})".format(
+                         kind, ref, launchable))
+        print("\n".join(lines))
+        return 0
+
+    if not res.get("argv"):
+        lines.append("Direct {0} launch is not supported for '{1}'. "
+                     "Launchable targets: {2}. You can still paste {3} into "
+                     "that agent manually.".format(
+                         launch_noun, res["target"], launchable,
+                         res["context_path"]))
+        print("\n".join(lines))
+        return 1
+
+    lines.append("$ {0} \"<{1}>\"".format(res["argv"][0], prompt))
+    if not launch_now:
+        lines.append(_ready("ready_bundle").format(tid=tid))
+        print("\n".join(lines))
+        return 0
+    rc = _handoff_launch(store, res, lines)
+    if rc == 0 and d.get("launched"):
+        lines.append(d["launched"].format(tid=tid))
+    print("\n".join(lines))
+    return rc
+
+
+def _handoff_via_engine(store: Store, args, kind: str,
+                        style: Optional[str] = None, **source) -> int:
+    """Run the one engine and render it in this command's dialect.
+
+    `source` carries the already-resolved entry point (`thread=`, `sessions=`,
+    `source=`) plus `target=`; everything else is read off `args` so the four
+    CLI commands cannot diverge in what they pass.
+
+    `voyager handoff` is an *export*: it always compiles a package, because
+    `--to` names the agent that will READ the package, not a session to
+    resume.  `voyager resume` / `voyager continue` own native resume.  So
+    `handoff` forces the bundle path even when the source provider happens to
+    equal the target (which would otherwise hit the D7 shortcut).
+
+    Style follows the *shape of the work*, which is also how the commands
+    behaved before the convergence: a single session gets a Context Package
+    (`handoff`, and `continue <session>`), while a WorkThread or a multi-session
+    merge gets a Continuation Bundle (`switch`, `merge`).  Asking for
+    `"package"` and handing the engine several members therefore degrades to
+    the bundle, and the engine reports which one it actually used.
+    """
+    from .continuity import handoff_thread
+    if style is None:
+        style = "continuation" if kind in ("switch", "merge") else "package"
+    res = handoff_thread(
+        store=store,
+        target=source.pop("target", None),
+        goal=getattr(args, "goal", None),
+        budget=getattr(args, "budget", None),
+        mode=getattr(args, "mode", "bundle"),
+        steal=getattr(args, "steal", False),
+        output=getattr(args, "output", None) or None,
+        style=style,
+        force_bundle=(kind == "handoff"
+                      or getattr(args, "bundle", False)),
+        **source)
+    store.close()
+    return _render_handoff(store, res, args, kind)
 
 
 def cmd_switch(args) -> int:
     """Phase 6 / #7: one command to switch agent inside the active WorkThread.
 
-    Unified via handoff_thread(): scan → thread resolve → lease → bundle/
-    native resume → launch. Returns 0 on success, non-zero on error/abort.
+    A thin adapter over continuity.handoff_thread(): scan → resolve the
+    WorkThread → the unified engine → render. Returns 0 on success, non-zero
+    on error/abort.
     """
     store = Store(args.db)
     _ensure_fresh(args, store)
@@ -1192,143 +1395,23 @@ def cmd_switch(args) -> int:
         from .adapters.base import git_info
         repo = repo_ref or (git_info(os.getcwd()).get("repo_root")
                             or os.getcwd().replace("\\", "/"))
-        cands = [t for t in store.thread_list("active")
-                 if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+        cands = [x for x in store.thread_list("active")
+                 if x["repo_root"] and _same_repo(x["repo_root"], repo)]
         if not cands:
             print("error: no active WorkThread for this repo ({0}).".format(repo))
             print("Create one: voyager thread create --repo {0} --attach <ids>".format(repo))
             print("Or continue without switching: voyager continue")
             store.close()
             return 1
+        # P9: this branch used to fall through to `thread=t` with `t` unbound
+        # (the comprehension's `t` never escapes in py3), so `voyager switch
+        # <agent>` without --thread raised UnboundLocalError.  Pick the newest
+        # active thread for the repo, loudly, exactly like `continue` does.
+        t = max(cands, key=lambda x: x["updated_at"] or 0)
+        print("active thread: {0}  ({1})".format(t["id"], (t["title"] or "")[:70]))
 
-    # -- unified orchestration --------------------------------------------
-    from .continuity import handoff_thread as _hot
-    res = _hot(
-        store=store,
-        thread=t,
-        target=target,
-        goal=getattr(args, "goal", None),
-        budget=getattr(args, "budget", None),
-        launch=False,  # We'll launch manually below so we can handle errors
-        mode=getattr(args, "mode", "bundle"),
-        steal=getattr(args, "steal", False),
-        output=args.output if getattr(args, "output", None) else None,
-        no_launch=True,  # Don't launch in handoff_thread
-    )
+    return _handoff_via_engine(store, args, "switch", thread=t, target=target)
 
-    # Save lease info before closing store for manual launch handling
-    thread_id = t["id"]
-    lease_token = res.get("lease_token")
-    store.close()
-
-    # -- present result uniformly -----------------------------------------
-    output_lines = []
-    if res["action"] == "refused":
-        output_lines.append("refused: {0}".format(res["error"]))
-        for w in res.get("warnings", []):
-            output_lines.append("warning: {0}".format(w))
-    elif res.get("warnings"):
-        output_lines.extend(["warning: {0}".format(w) for w in res["warnings"]])
-    if res["action"] == "native-resume":
-        output_lines.append("$ {0}".format(" ".join(res["argv"])))
-        if getattr(args, "no_launch", False):
-            output_lines.append("native resume ready")
-        else:
-            try:
-                rc = _launch(res["argv"])
-                if rc != 0:
-                    # Launch failed - release lease
-                    if thread_id and lease_token:
-                        # Need to re-open store for lease operations
-                        from .store import Store as _Store
-                        _store = _Store(store.db_path)
-                        _store.thread_lease_release(thread_id, lease_token, reason="launch-failed")
-                        _store.close()
-                    output_lines.append("launch exited with code {0}; lease released".format(rc))
-                    print("\n".join(output_lines))
-                return rc
-            except KeyboardInterrupt:
-                if thread_id and lease_token:
-                    from .store import Store as _Store
-                    _store = _Store(store.db_path)
-                    _store.thread_lease_release(thread_id, lease_token, reason="launch-interrupted")
-                    _store.close()
-                output_lines.append("launch interrupted; lease released")
-                print("\n".join(output_lines))
-                return 130
-            except OSError as e:
-                if thread_id and lease_token:
-                    from .store import Store as _Store
-                    _store = _Store(store.db_path)
-                    _store.thread_lease_release(thread_id, lease_token, reason="launch-failed")
-                    _store.close()
-                output_lines.append("launch failed ({0}); lease released".format(e))
-                print("\n".join(output_lines))
-                return 1
-    elif res["action"] == "transcript":
-        output_lines.append("transcript written: session id {0}".format(
-            res.get("native_session_id", "unknown")))
-        output_lines.append("$ {0}".format(" ".join(res["argv"])))
-        if getattr(args, "no_launch", False):
-            output_lines.append("transplant ready")
-        else:
-            try:
-                rc = _launch(res["argv"])
-                if rc != 0:
-                    if thread_id and lease_token:
-                        from .store import Store as _Store
-                        _store = _Store(store.db_path)
-                        _store.thread_lease_release(thread_id, lease_token, reason="launch-failed")
-                        _store.close()
-                    output_lines.append("launch exited with code {0}; lease released".format(rc))
-                return rc
-            except KeyboardInterrupt:
-                if thread_id and lease_token:
-                    from .store import Store as _Store
-                    _store = _Store(store.db_path)
-                    _store.thread_lease_release(thread_id, lease_token, reason="launch-interrupted")
-                    _store.close()
-                output_lines.append("launch interrupted; lease released")
-                return 130
-            except OSError as e:
-                if thread_id and lease_token:
-                    from .store import Store as _Store
-                    _store = _Store(store.db_path)
-                    _store.thread_lease_release(thread_id, lease_token, reason="launch-failed")
-                    _store.close()
-                output_lines.append("launch failed ({0}); lease released".format(e))
-                return 1
-    elif res["action"] == "bundle":
-        output_lines.append("continuation bundle: {0}".format(res["bundle_path"]))
-        output_lines.append("$ {0} \"<continuation prompt>\"".format(res["argv"][0]))
-        if getattr(args, "no_launch", False):
-            output_lines.append("switch ready (--no-launch); the target agent should "
-                  "read the bundle, then `voyager thread attach {0} <new-id>` "
-                  "resolves the pending attach".format(t["id"]))
-        else:
-            try:
-                rc = _launch(res["argv"])
-                if rc == 0:
-                    output_lines.append("switch complete: after the target agent starts, run "
-                          "`voyager thread attach {0} <new-session-id>` to link the "
-                          "continuation".format(t["id"]))
-                return rc
-            except KeyboardInterrupt:
-                output_lines.append("launch interrupted")
-                return 130
-            except OSError as e:
-                output_lines.append("launch failed ({0}); lease released".format(e))
-                return 1
-    else:
-        output_lines.append("unexpected action: {0}".format(res["action"]))
-
-    # Print all accumulated output BEFORE returning
-    if output_lines:
-        print("\n".join(output_lines))
-
-    if res["action"] == "refused" or res["action"] not in ("native-resume", "transcript", "bundle"):
-        return 1
-    return 0
 
 
 def _lease_age(lease) -> float:
@@ -1367,10 +1450,19 @@ def cmd_brief(args) -> int:
 
 
 def cmd_handoff(args) -> int:
+    """Export one session as a context package for another agent.
+
+    A thin adapter over continuity.handoff_thread() with `style="package"`.
+    When the session already belongs to a WorkThread the handoff now takes the
+    single-writer lease and records the pending attach, so the target agent's
+    new session is adopted by the next scan.  A WorkThread is never created
+    implicitly — `voyager merge` is how you get one.
+    """
     store = Store(args.db)
     _ensure_fresh(args, store)
     row = _resolve(store, args.session)
-    return _handoff_from_row(store, row, args)
+    return _handoff_via_engine(store, args, "handoff",
+                               source=row, target=getattr(args, "to", None))
 
 
 def cmd_merge(args) -> int:
@@ -1380,17 +1472,20 @@ def cmd_merge(args) -> int:
     session_refs = args.sessions
     if not session_refs:
         print("error: at least one session id required", file=sys.stderr)
+        store.close()
         return 2
     rows = [_resolve(store, ref) for ref in session_refs]
 
-    rc = _merge_and_handoff(store, rows, args)
-    _thread_from_merge(store, rows, args)
-    return rc
+    # The WorkThread comes first, so the engine can lease it and record the
+    # pending attach: a merged handoff is then exactly as safe as a `switch`.
+    tid = _thread_from_merge(store, rows, args)
+    return _handoff_via_engine(store, args, "merge", thread=tid, sessions=rows,
+                               target=getattr(args, "to", None))
 
 
-def _thread_from_merge(store: Store, rows: list, args) -> None:
+def _thread_from_merge(store: Store, rows: list, args) -> str:
     """Phase 2: a merge over N sessions yields (or updates) a WorkThread
-    whose member set is exactly those N sessions."""
+    whose member set is exactly those N sessions.  Returns the thread id."""
     sids = {r["id"] for r in rows}
     tid = store.thread_find_by_members(sids)
     repo_root = next((r["repo_root"] or r["cwd"] for r in rows
@@ -1412,6 +1507,7 @@ def _thread_from_merge(store: Store, rows: list, args) -> None:
     print("members:")
     for r in rows:
         print("  {0} {1}".format(r["provider"], r["native_id"]))
+    return tid
 
 
 def _print_lease(store: Store, tid: str) -> None:
@@ -1759,87 +1855,14 @@ def cmd_checkpoint(args) -> int:
     return 1
 
 
-def _merge_and_handoff(store: Store, rows: list, args) -> int:
-    from .continuity import (
-        PROMPT_TARGETS,
-        build_continuation_bundle,
-        bundle_command,
-        default_bundle_name,
-        get_bundles_dir,
-    )
-    out_dir = get_bundles_dir()
-    out = Path(args.output) if getattr(args, "output", None) else (out_dir / default_bundle_name(rows))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    bundle = build_continuation_bundle(store, rows, goal=getattr(args, "goal", None))
+# NOTE (P9): `_merge_and_handoff` and `_handoff_from_row` used to live here.
+# Both were a second, weaker implementation of the handoff pipeline — no
+# lease, no pending attach, no D7 native-resume priority, and their own
+# budget/launch/error handling — so `continue --thread T --to X` behaved
+# differently from `switch T --to X` on the same thread.  They are gone:
+# continuity.handoff_thread() is now the single engine, and `_render_handoff`
+# is the only place that turns its result into words.
 
-    target = getattr(args, "to", None)
-    if not target and getattr(args, "cmd", "") == "continue":
-        target = "claude"
-        print("defaulting continuation target to 'claude' (override with --to)")
-
-    # Phase 4: ranking happened in the compiler; budgeting runs after it
-    bundle = _render_budgeted(bundle, args, target=target)
-    out.write_text(bundle, encoding="utf-8")
-    print(f"continuation bundle: {out.resolve()} ({len(bundle)} chars)")
-
-    if not target:
-        if getattr(args, "cmd", "") != "continue":
-            print(f"next: pick a target agent, e.g. "
-                  f"`voyager merge {' '.join(r['native_id'][:8] for r in rows)} --to claude` "
-                  f"(targets with direct launch: {', '.join(sorted(PROMPT_TARGETS))})")
-            return 0
-
-    argv = bundle_command(target, out)
-    if argv is None:
-        print(f"Direct continuation launch is not supported for '{target}'. "
-              f"Launchable targets: {', '.join(sorted(PROMPT_TARGETS))}. "
-              f"You can still paste {out.resolve()} into that agent manually.")
-        return 1
-    print(f"$ {argv[0]} \"<continuation prompt>\"")
-    if getattr(args, "launch", False):
-        try:
-            return _launch(argv)
-        except KeyboardInterrupt:
-            return 130
-        except OSError as e:
-            print(f"failed to launch: {e}", file=sys.stderr)
-            return 1
-    print("add --launch to start it now")
-    return 0
-
-
-def _handoff_from_row(store: Store, row, args) -> int:
-    from .handoff import PROMPT_TARGETS, build_context_package, default_package_name, handoff_command
-    out = Path(args.output) if getattr(args, "output", None) else Path(default_package_name(row))
-    package = build_context_package(store, row, goal=getattr(args, "goal", None))
-    package = _render_budgeted(package, args, target=getattr(args, "to", None))
-    out.write_text(package, encoding="utf-8")
-    print(f"context package: {out.resolve()} ({len(package)} chars)")
-
-    target = getattr(args, "to", None)
-    if not target:
-        print("next: pick a target agent, e.g. "
-              f"`voyager handoff {row['native_id'][:16]} --to claude` "
-              f"(targets with direct launch: {', '.join(sorted(PROMPT_TARGETS))})")
-        return 0
-
-    argv = handoff_command(target, out)
-    if argv is None:
-        print(f"Direct handoff launch is not supported for '{target}'. "
-              f"Launchable targets: {', '.join(sorted(PROMPT_TARGETS))}. "
-              f"You can still paste {out.resolve()} into that agent manually.")
-        return 1
-    print(f"$ {argv[0]} \"<handoff prompt>\"")
-    if getattr(args, "launch", False):
-        try:
-            return _launch(argv)
-        except KeyboardInterrupt:
-            return 130
-        except OSError as e:
-            print(f"failed to launch: {e}", file=sys.stderr)
-            return 1
-    print("add --launch to start it now")
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -2111,6 +2134,8 @@ def main(argv=None) -> int:
     sp.add_argument("--platform", help="pick the newest session of this provider")
     sp.add_argument("--thread", help="continue from a WorkThread's members")
     sp.add_argument("--to", help="force cross-agent handoff to this target")
+    sp.add_argument("--bundle", action="store_true",
+                    help="force a continuation bundle even for same-provider members")
     sp.add_argument("--output", "-o", help="bundle file path (when continuing via handoff/merge)")
     sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")

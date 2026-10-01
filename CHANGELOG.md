@@ -264,6 +264,26 @@ All notable changes to Voyager are documented here. Format loosely follows
   `continue --launch`, `handoff --launch` and `switch` now go through one
   `_launch()` helper that resolves `argv[0]` first, while the printed and
   exported command stays the readable bare form.
+- **`switch` / `continue` / `handoff` / `merge` are now four dialects of one
+  engine** (`continuity.handoff_thread`). Each used to carry its own copy of the
+  pipeline, so the same WorkThread behaved differently depending on which
+  command you typed: `continue --thread T --to X` neither took the single-writer
+  lease nor recorded a pending attach (two agents could write the same thread,
+  and the target's new session was never adopted by a later scan); it also
+  ignored D7 and compiled a bundle even when the thread already held a
+  resumable member of that provider. Two more defects surfaced on the way:
+  `switch --bundle` was parsed but never handed to the engine (a silent no-op),
+  and `switch <agent>` without `--thread` raised `UnboundLocalError` — the
+  candidate comprehension's `t` never escapes in Python 3, so `thread=t` was
+  unbound. The engine resolves any source (WorkThread, session list, or one
+  session — adopting the thread that already owns it, by containment), leases,
+  prefers native resume, compiles the canonical context, records the pending
+  attach, warns on a dirty tree and returns `argv`; it never prints (MCP's
+  JSON-RPC rides stdout), never launches, never raises for expected paths,
+  never writes a provider file and never creates a WorkThread. A lease is only
+  taken when work actually changes hands, and is released when the target has
+  no launch path. See `docs/DECISIONS.md` D14 and
+  `tests/test_handoff_convergence.py`.
 
 ### Added
 - **`tests/test_switch.py`: Claude → Grok cross-provider continuity, end to end.**

@@ -574,6 +574,29 @@ class Store:
                 return r["id"]
         return None
 
+    def thread_find_containing(self, sids) -> Optional[str]:
+        """Return the active thread that contains ALL of `sids`.
+
+        Containment, not equality: handing off *one* member of a three-member
+        WorkThread must still find (and lease) that thread — which is why
+        `thread_find_by_members` is not enough here.  A session that sits in
+        two active threads resolves to the most recently updated one, so the
+        choice is deterministic rather than row-order dependent.
+        """
+        sids = list(sids)
+        if not sids:
+            return None
+        rows = self.q(
+            "SELECT t.id AS id, t.updated_at AS updated_at "
+            "FROM threads t JOIN thread_sessions ts ON ts.thread_id = t.id "
+            "WHERE t.status='active' AND ts.session_id IN ({0}) "
+            "GROUP BY t.id HAVING COUNT(ts.session_id) = ?".format(
+                ", ".join("?" * len(sids))),
+            tuple(sids) + (len(sids),))
+        if not rows:
+            return None
+        return max(rows, key=lambda r: r["updated_at"] or 0)["id"]
+
     def thread_list(self, status: str = "active"):
         return self.q(
             """SELECT t.*, COUNT(ts.session_id) members
