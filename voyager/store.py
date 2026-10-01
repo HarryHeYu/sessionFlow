@@ -90,6 +90,11 @@ CREATE TABLE IF NOT EXISTS events (
     raw_json    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_sid ON events(sid);
+-- "the newest turns of one session" is the hot path for briefs and the L1
+-- window; without the sort columns in the index SQLite scans every event of the
+-- session and sorts them, which on a cold 1.6 GB page cache is ~38 ms per
+-- session.  With them it stops after the LIMIT.
+CREATE INDEX IF NOT EXISTS idx_events_sid_ts ON events(sid, ts DESC, seq DESC);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
 CREATE INDEX IF NOT EXISTS idx_events_call ON events(tool_call_id);
 

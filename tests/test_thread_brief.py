@@ -182,3 +182,56 @@ def test_an_unknown_thread_summarizes_to_an_error(tmp_path):
         assert "error" in b.open_items
     finally:
         store.close()
+
+
+# --- the brief must not be an N+1 query loop -------------------------------
+
+def test_activity_uses_a_constant_number_of_queries(tmp_path):
+    """Counting queries rather than milliseconds: a timing assertion would be
+    flaky, but the shape of the query pattern is not.
+
+    The per-member form cost ~38 ms a query on a 1.6 GB index with a cold page
+    cache and made a brief take two seconds; batching is what fixed it, and this
+    is what keeps it fixed.  The only per-member query left is `session_band`,
+    which needs that session's events to classify it.
+    """
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    store = Store(tmp_path / "many.db")
+    try:
+        tid = store.thread_create(repo_root="E:/many", title="many", goal="g")
+        src = tmp_path / "s.jsonl"
+        src.write_text("{}", encoding="utf-8")
+        for i in range(20):
+            sid = "codex:m%d" % i
+            sess = new_session(id=sid, provider="codex", native_session_id="m%d" % i,
+                               title=sid, started_at=1.0 + i, updated_at=2.0 + i,
+                               repo_root="E:/many", cwd="E:/many")
+            store.replace_session(sess, [
+                new_event(sid=sid, seq=1, kind="user", ts=1.0 + i,
+                          content="hello %d" % i, origin="human"),
+                new_event(sid=sid, seq=2, kind="assistant", ts=1.1 + i,
+                          content="reply %d" % i)], "codex", src)
+            store.thread_attach(tid, sid)
+
+        calls = []
+        real_q = store.q
+
+        def counting(sql, args=()):
+            calls.append(sql)
+            return real_q(sql, args)
+
+        store.q = counting
+        try:
+            data = tb.activity(store, tid)
+        finally:
+            store.q = real_q
+
+        assert len(data["contributions"]) == 20
+        # one query per member (session_band) plus a small constant for the set
+        # queries -- nowhere near the three-per-member shape this replaced
+        assert len(calls) < 20 + 12, len(calls)
+        assert len(calls) < 3 * 20, "the N+1 form would be at least 60"
+    finally:
+        store.close()
