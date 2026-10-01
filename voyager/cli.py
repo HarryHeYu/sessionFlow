@@ -451,10 +451,42 @@ def cmd_show(args) -> int:
     return 0
 
 
+def _parse_when(value):
+    """`2026-09-30`, `2026-09-30T12:00`, or `7d` (that many days ago)."""
+    if value in (None, ""):
+        return None
+    import time as _time
+    from datetime import datetime, timedelta
+    text = str(value).strip()
+    if text.endswith("d") and text[:-1].isdigit():
+        return _time.time() - int(text[:-1]) * 86400
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).timestamp()
+        except ValueError:
+            continue
+    raise ValueError("unrecognised time %r (try 2026-09-30 or 7d)" % value)
+
+
+def _search_filters(args) -> dict:
+    return {
+        "providers": [p.strip() for p in (getattr(args, "provider", None) or "").split(",") if p.strip()],
+        "repo": getattr(args, "repo", None),
+        "since": _parse_when(getattr(args, "since", None)),
+        "until": _parse_when(getattr(args, "until", None)),
+        "kinds": [k.strip() for k in (getattr(args, "kind", None) or "").split(",") if k.strip()],
+        "tool": getattr(args, "tool", None),
+        "file": getattr(args, "file", None),
+        "origins": [o.strip() for o in (getattr(args, "origin", None) or "").split(",") if o.strip()],
+        "human_only": bool(getattr(args, "human_only", False)),
+    }
+
+
 def cmd_search(args) -> int:
     store = Store(args.db)
     try:
-        rows = store.search(args.query, limit=args.limit)
+        rows = store.search(args.query, limit=args.limit,
+                            filters=_search_filters(args))
     except Exception as e:
         print(f"search error: {e}", file=sys.stderr)
         return 2
@@ -472,6 +504,9 @@ def cmd_search(args) -> int:
         print(f"[{r['provider']}] {r['native_id'][:36]}  {_short_ts(r['updated_at'])}")
         sn = (r["snippet"] or "").replace("\n", " ")[:150]
         print(f"    {sn}")
+    applied = {k: v for k, v in _search_filters(args).items() if v}
+    if applied:
+        print("  filters: %s" % ", ".join("%s=%s" % (k, v) for k, v in applied.items()))
     print(f"\n{len(rows)} hit(s) across {len(seen)} session(s). `voyager show <id>` for detail.")
     return 0
 
@@ -1852,6 +1887,16 @@ def main(argv=None) -> int:
     sp.add_argument("query")
     sp.add_argument("--limit", type=int, default=50)
     sp.add_argument("--json", action="store_true")
+    sp.add_argument("--provider", help="comma list: codex,claude,grok,...")
+    sp.add_argument("--repo", help="substring of the session's repo/cwd")
+    sp.add_argument("--since", help="2026-09-30, 2026-09-30T12:00, or 7d")
+    sp.add_argument("--until", help="same forms as --since")
+    sp.add_argument("--kind", help="comma list: user,assistant,tool_call,...")
+    sp.add_argument("--tool", help="substring of the tool name")
+    sp.add_argument("--file", help="substring of a touched file path")
+    sp.add_argument("--origin", help="comma list: human,provider_bootstrap,...")
+    sp.add_argument("--human-only", dest="human_only", action="store_true",
+                    help="only turns a human actually wrote")
     sp.set_defaults(func=cmd_search)
 
     sp = sub.add_parser("repo", help="timeline of all agent sessions for a repo",

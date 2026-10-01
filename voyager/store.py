@@ -889,22 +889,65 @@ class Store:
     def events(self, sid: str) -> List[sqlite3.Row]:
         return self.q("SELECT * FROM events WHERE sid=? ORDER BY seq, id", (sid,))
 
-    def search(self, query: str, limit: int = 50) -> List[sqlite3.Row]:
-        """Substring search over every event body.
+    def search(self, query: str, limit: int = 50,
+               filters: Optional[Dict[str, Any]] = None) -> List[sqlite3.Row]:
+        """Substring search over every event body, with optional filters.
 
         The user's text is always passed as ONE quoted FTS5 phrase: queries
         like `pytest -q`, `a:b` or `"unbalanced` are ordinary text to a human
         but operators/syntax errors to FTS5, and this is a substring search,
         not a query language.
+
+        Filters narrow *where* to look; they never change what the phrase means.
+        Recognised keys: ``providers``, ``repo``, ``since``, ``until``,
+        ``kinds``, ``tool``, ``file``, ``origins``, ``human_only``.
         """
         phrase = '"' + (query or "").replace('"', '""') + '"'
+        where: List[str] = []
+        args: List[Any] = [phrase]
+        f = filters or {}
+
+        def _in(column: str, values) -> None:
+            values = [v for v in (values or []) if v]
+            if values:
+                where.append("%s IN (%s)" % (column, ",".join("?" * len(values))))
+                args.extend(values)
+
+        _in("s.provider", f.get("providers"))
+        if f.get("repo"):
+            where.append("COALESCE(s.repo_root, s.cwd, '') LIKE ?")
+            args.append("%" + str(f["repo"]) + "%")
+        if f.get("since") is not None:
+            where.append("e.ts >= ?")
+            args.append(float(f["since"]))
+        if f.get("until") is not None:
+            where.append("e.ts <= ?")
+            args.append(float(f["until"]))
+        _in("e.kind", f.get("kinds"))
+        if f.get("tool"):
+            where.append("COALESCE(e.tool_name, '') LIKE ?")
+            args.append("%" + str(f["tool"]) + "%")
+        if f.get("file"):
+            where.append("COALESCE(e.file_path, '') LIKE ?")
+            args.append("%" + str(f["file"]) + "%")
+        if f.get("human_only"):
+            where.append("e.origin = 'human'")
+        else:
+            _in("e.origin", f.get("origins"))
+
+        clause = (" AND " + " AND ".join(where)) if where else ""
+        args.append(limit)
         return self.q(
-            """SELECT s.*, f.sid AS _sid, snippet(event_fts, 0, '>>>', '<<<', '…', 12) AS snippet
+            """SELECT s.*, e.kind AS _kind, e.origin AS _origin, e.ts AS _ts,
+                      e.tool_name AS _tool, e.file_path AS _file,
+                      f.sid AS _sid,
+                      snippet(event_fts, 0, '>>>', '<<<', '…', 12) AS snippet
                FROM event_fts f
+               JOIN events e ON e.id = f.rowid
                JOIN sessions s ON s.id = f.sid
-               WHERE event_fts MATCH ?
-               ORDER BY rank LIMIT ?""",
-            (phrase, limit),
+               WHERE event_fts MATCH ?%s
+               ORDER BY rank LIMIT ?""" % clause,
+            tuple(args),
         )
 
     def stats(self) -> Dict[str, Any]:

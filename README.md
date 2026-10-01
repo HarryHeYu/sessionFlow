@@ -205,6 +205,23 @@ of the previous session's hidden tool state.
 > live verification the code never earned. Run `voyager doctor` to regenerate the
 > machine's view of it.
 
+### Search
+
+```
+voyager search <text> [--limit N] [--json]
+    [--provider codex,claude]   [--repo SUBSTR]
+    [--since 7d | 2026-09-30]   [--until ...]
+    [--kind user,assistant,tool_call]   [--tool SUBSTR]   [--file SUBSTR]
+    [--origin human,provider_bootstrap] [--human-only]
+```
+
+The text is always one quoted FTS5 phrase -- `pytest -q`, `a:b` and `"unbalanced`
+are ordinary text to a human and operators to FTS5 -- so the query never has to be
+escaped by hand. The filters are the structured half, and they only ever narrow
+where to look: `--human-only` excludes turns a provider injected through the user
+channel, `--since 7d` accepts relative days or a date, and combining them is a
+conjunction. Chinese substring search works because the index is trigram-based.
+
 ### WorkThread commands
 
 ```
