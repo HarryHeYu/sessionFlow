@@ -72,36 +72,33 @@ def git_info(cwd: Optional[str]) -> dict:
         return _git_cache[key]
     out = {"repo_root": None, "remote": None, "branch": None, "commit": None}
     try:
+        # O1: one rev-parse resolves toplevel + branch + commit (was 3 calls)
         r = subprocess.run(
-            ["git", "-C", key, "rev-parse", "--show-toplevel"],
+            ["git", "-C", key, "rev-parse", "--show-toplevel",
+             "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, timeout=10,
             **background_subprocess_kwargs(),
         )
         if r.returncode == 0:
-            root = r.stdout.strip()
-            out["repo_root"] = root
-            b = subprocess.run(
-                ["git", "-C", key, "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, timeout=10,
-                **background_subprocess_kwargs(),
-            )
-            if b.returncode == 0:
-                out["branch"] = b.stdout.strip() or None
-            c = subprocess.run(
-                ["git", "-C", key, "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=10,
-                **background_subprocess_kwargs(),
-            )
-            if c.returncode == 0:
-                out["commit"] = c.stdout.strip() or None
-            rem = subprocess.run(
-                ["git", "-C", key, "remote", "get-url", "origin"],
-                capture_output=True, text=True, timeout=10,
-                **background_subprocess_kwargs(),
-            )
-            if rem.returncode == 0:
-                out["remote"] = rem.stdout.strip() or None
-    except (OSError, subprocess.TimeoutExpired):
+            lines = r.stdout.strip().splitlines()
+            if len(lines) >= 2:
+                out["repo_root"] = lines[0]
+                out["branch"] = lines[1] or None
+        c = subprocess.run(
+            ["git", "-C", key, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+            **background_subprocess_kwargs(),
+        )
+        if c.returncode == 0:
+            out["commit"] = c.stdout.strip() or None
+        rem = subprocess.run(
+            ["git", "-C", key, "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=10,
+            **background_subprocess_kwargs(),
+        )
+        if rem.returncode == 0:
+            out["remote"] = rem.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
         pass
     _git_cache[key] = out
     return out

@@ -75,44 +75,29 @@ def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
         "dirty_files": [],
     }
     try:
-        res_inside = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=cwd, capture_output=True, text=True, timeout=2,
+        # O1: one `status --porcelain=v2 --branch` resolves inside-work-tree,
+        # branch, HEAD oid and dirty state (was 4 subprocess calls).  It
+        # exits non-zero outside a repository and when git is missing.
+        res = subprocess.run(
+            ["git", "status", "--porcelain=v2", "--branch"],
+            cwd=cwd, capture_output=True, text=True, timeout=10,
             **background_subprocess_kwargs())
-        if res_inside.returncode != 0 or res_inside.stdout.strip() != "true":
+        if res.returncode != 0:
             return snapshot
         snapshot["is_git"] = True
-        # symbolic-ref works even on an unborn branch (fresh git init)
-        res_branch = subprocess.run(
-            ["git", "symbolic-ref", "--short", "HEAD"],
-            cwd=cwd, capture_output=True, text=True, timeout=2,
-            **background_subprocess_kwargs())
-        if res_branch.returncode == 0:
-            snapshot["branch"] = res_branch.stdout.strip()
-
-        res_commit = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            **background_subprocess_kwargs(),
-        )
-        if res_commit.returncode == 0:
-            snapshot["commit"] = res_commit.stdout.strip()
-
-        res_st = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            **background_subprocess_kwargs(),
-        )
-        if res_st.returncode == 0:
-            lines = [ln for ln in res_st.stdout.splitlines() if ln.strip()]
-            snapshot["dirty_count"] = len(lines)
-            snapshot["dirty_files"] = lines[:15]
+        dirty = []
+        for ln in res.stdout.splitlines():
+            if ln.startswith("# branch.oid "):
+                oid = ln[len("# branch.oid "):].strip()
+                # an unborn HEAD reports a placeholder, not a sha
+                if oid and all(c in "0123456789abcdef" for c in oid.lower()):
+                    snapshot["commit"] = oid[:7]
+            elif ln.startswith("# branch.head "):
+                snapshot["branch"] = ln[len("# branch.head "):].strip()
+            elif ln.strip() and not ln.startswith("#"):
+                dirty.append(ln)
+        snapshot["dirty_count"] = len(dirty)
+        snapshot["dirty_files"] = dirty[:15]
     except (subprocess.SubprocessError, OSError):
         pass
 
