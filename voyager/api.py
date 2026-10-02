@@ -170,6 +170,28 @@ def bundle_preview(db: Optional[Path] = None,
             "trimmed": info["trimmed"]}
 
 
+def thread_timeline(db: Optional[Path] = None, thread_id: str = "",
+                    limit: Optional[int] = None,
+                    kinds: Optional[List[str]] = None,
+                    provider: Optional[str] = None,
+                    state: Optional[str] = None) -> Dict[str, Any]:
+    """O3: one WorkThread's lifecycle, as the canonical timeline.
+
+    Thin pass-through to :func:`voyager.timeline.build_thread_timeline` — the
+    same function the CLI and the dashboard call.  A UI must never aggregate
+    its own timeline, because two aggregations drift and the drift is
+    invisible.  Read-only: it opens no transaction and writes nothing.
+    """
+    from .timeline import build_thread_timeline
+    store = Store(db)
+    try:
+        return build_thread_timeline(store, thread_id, limit=limit,
+                                     kinds=kinds, provider=provider,
+                                     state=state)
+    finally:
+        store.close()
+
+
 # ---------------------------------------------------------------------------
 # stdio JSON-lines bridge: {"id": N, "op": "...", "params": {...}} per line
 # ---------------------------------------------------------------------------
@@ -179,6 +201,7 @@ _OPS = {
     "thread_detail": thread_detail,
     "sessions": sessions,
     "bundle_preview": bundle_preview,
+    "thread_timeline": thread_timeline,
 }
 
 

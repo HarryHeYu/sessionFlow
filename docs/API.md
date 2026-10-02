@@ -19,6 +19,7 @@ as a small Python API. This page documents both.
 | `voyager continue [id] [--repo] [--thread T] [--from ids] [--goal G] [--budget B] [--to] [--launch] [--no-launch]` | pick work back up (native resume or bundle) |
 | `voyager switch <agent> [--thread T] [--repo] [--goal G] [--budget B] [--steal] [--no-launch]` | switch the active WorkThread to another agent (D13 lease) |
 | `voyager thread list\|show\|create\|attach\|close\|unlock` | manage WorkThreads (unlock releases a lease) |
+| `voyager thread timeline <id> [--json] [--limit N] [--kind …] [--provider P] [--live-only\|--retained-only]` | lifecycle/milestone timeline (O3, D16) |
 | `voyager brief [--hours N] [--repo] [--limit N]` | recent-activity digest |
 | `voyager files <id>` / `voyager diff <id>` | file history (Claude version chain) |
 | `voyager watch [--interval S]` | keep the index in sync automatically |
@@ -142,6 +143,42 @@ The engine never prints (MCP's JSON-RPC rides stdout), never launches, never
 raises for expected paths, never writes a provider file and never creates a
 WorkThread. It returns `argv`; the caller launches and owns the
 release-the-lease-on-failure policy (`voyager.cli._handoff_launch`).
+
+### Timeline (`voyager.timeline`)
+
+The **one** WorkThread timeline (O3, DECISIONS D16). The CLI
+(`voyager thread timeline`), the dashboard, the VS Code webview and the stdio
+API op `thread_timeline` all consume this — no surface aggregates its own.
+
+```python
+from voyager.timeline import build_thread_timeline, render_text
+
+tl = build_thread_timeline(store, "thr_abc123", limit=40,
+                           kinds=["HANDOFF", "SOURCE_MISSING"],
+                           provider="codex", state="retained")
+tl["thread"]    # {id, title, goal, status, repo_root}
+tl["events"]    # oldest first: id, timestamp, event_type, thread_id,
+                # provider, session_id, title, summary, source_state, metadata
+tl["total"], tl["shown"], tl["counts"], tl["filters"]
+
+print(render_text(tl))       # the CLI view
+```
+
+Event types, and the single piece of canonical evidence behind each:
+
+| type | evidence |
+|---|---|
+| `THREAD_CREATED` | `threads.created_at` |
+| `SESSION_ATTACHED` | `thread_sessions.attached_at` |
+| `HANDOFF` / `PROVIDER_SWITCHED` | `thread_pending.created_at` (+ source/target provider) |
+| `CHECKPOINT_CREATED` / `BLOCKER_ADDED` / `BLOCKER_RESOLVED` / `TEST_GATE` / `COMMIT_OBSERVED` | `checkpoints` — explicit records only |
+| `SOURCE_MISSING` | the append-only `thread_events` log (or `sessions.source_missing_since` for rows that predate it) |
+| `SOURCE_RETURNED` | the `thread_events` log |
+| `THREAD_CLOSED` / `THREAD_REOPENED` / `THREAD_ARCHIVED` | the `thread_events` log — `threads.status` has no timestamp and `updated_at` is also written by `thread_touch` |
+
+Assistant prose is never scanned. `state="live"` / `"retained"` filters on
+`source_state`; timestamps order the display and nothing else (they never settle
+an ambiguity or establish authority — see D13/D14).
 
 ### Switch (`voyager.cli.cmd_switch`)
 

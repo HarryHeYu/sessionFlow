@@ -183,6 +183,23 @@ CREATE TABLE IF NOT EXISTS thread_pending (
     PRIMARY KEY (thread_id, provider)
 );
 
+-- O3 lifecycle log.  Append-only, and deliberately small: it exists because
+-- some facts have nowhere else to live.  `threads.status` has no timestamp
+-- (and `updated_at` is also written by thread_touch, so it cannot stand in for
+-- one), and a source coming back clears the only marker we had.  Everything
+-- else in the timeline is DERIVED from canonical columns that already carry a
+-- time, so this table never duplicates them -- see voyager/timeline.py.
+CREATE TABLE IF NOT EXISTS thread_events (
+    id         INTEGER PRIMARY KEY,
+    thread_id  TEXT NOT NULL,
+    ts         REAL NOT NULL,
+    kind       TEXT NOT NULL,
+    provider   TEXT,
+    session_id TEXT,
+    detail_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_thread_events ON thread_events(thread_id, ts, id);
+
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(
@@ -293,6 +310,15 @@ def _fold_origin(origin: Any) -> Any:
     return None if origin == ORIGIN_UNKNOWN else origin
 
 
+#: O3 — the timeline event a WorkThread status change produces.  A status is a
+#: single value with no history, so the transition is logged when it happens.
+_STATUS_EVENT = {
+    "closed": "THREAD_CLOSED",
+    "archived": "THREAD_ARCHIVED",
+    "active": "THREAD_REOPENED",
+}
+
+
 class Store:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path) if db_path else default_db_path()
@@ -393,6 +419,12 @@ class Store:
         import time as _time
         seen_at = _time.time()
         self.con.execute("BEGIN")
+        # O3: read the retention state BEFORE it is overwritten below.
+        # Re-ingesting a session whose sources had all vanished IS the
+        # reconcile, and that transition is a timeline fact.
+        prev = self.con.execute(
+            "SELECT source_state FROM sessions WHERE id=?", (sid,)).fetchone()
+        was_retained = bool(prev) and prev["source_state"] == "SOURCE_MISSING"
         try:
             self.con.execute(
                 "DELETE FROM event_fts WHERE rowid IN (SELECT id FROM events WHERE sid=?)",
@@ -493,6 +525,16 @@ class Store:
                     )
                 except OSError:
                     pass
+            if was_retained:
+                # O3: the session just came back.  Log it inside this
+                # transaction so the marker and the timeline fact cannot
+                # disagree.
+                for t in self.q("SELECT thread_id FROM thread_sessions"
+                                " WHERE session_id=?", (sid,)):
+                    self.thread_event_record(
+                        t["thread_id"], "SOURCE_RETURNED", provider=provider,
+                        session_id=sid, detail={"via": "re-ingest"},
+                        commit=False)
             self.con.execute("COMMIT")
         except Exception:
             try:
@@ -551,6 +593,18 @@ class Store:
                     " AND missing_since IS NULL", (now, provider, sid))
                 if r["source_state"] != "SOURCE_MISSING":
                     marked.append(sid)
+                    # O3: record the episode when it happens.  Once the source
+                    # comes back nothing else remembers it was ever gone, and
+                    # "Codex's source rotated here" is exactly the history a
+                    # timeline exists to show.
+                    for t in self.q("SELECT thread_id FROM thread_sessions"
+                                    " WHERE session_id=?", (sid,)):
+                        self.thread_event_record(
+                            t["thread_id"], "SOURCE_MISSING", provider=provider,
+                            session_id=sid, ts=now,
+                            detail={"missing_sources": sorted(
+                                str(sr["path"]) for sr in src_rows)},
+                            commit=False)
                 self.con.execute(
                     "UPDATE sessions SET source_state='SOURCE_MISSING',"
                     " source_missing_since=COALESCE(source_missing_since, ?)"
@@ -570,6 +624,16 @@ class Store:
                 self.con.execute(
                     "UPDATE sessions SET source_state='LIVE',"
                     " source_missing_since=NULL WHERE id=?", (sid,))
+                if r["source_state"] == "SOURCE_MISSING":
+                    # O3: the return is a timeline fact with nowhere else to
+                    # live -- clearing the marker erases the only trace of it.
+                    for t in self.q("SELECT thread_id FROM thread_sessions"
+                                    " WHERE session_id=?", (sid,)):
+                        self.thread_event_record(
+                            t["thread_id"], "SOURCE_RETURNED",
+                            provider=provider, session_id=sid,
+                            detail={"sources": sorted(str(p) for p in disk_paths)},
+                            commit=False)
         self.con.commit()
         return len(marked)
 
@@ -600,9 +664,44 @@ class Store:
 
     def thread_set_status(self, tid: str, status: str) -> None:
         import time as _time
+        now = _time.time()
         self.con.execute("UPDATE threads SET status=?, updated_at=? WHERE id=?",
-                         (status, _time.time(), tid))
+                         (status, now, tid))
         self.con.commit()
+        # O3: when a status changed has nowhere else to live -- `status` is a
+        # single value and `updated_at` is also written by thread_touch, so it
+        # cannot stand in for a transition time.
+        self.thread_event_record(tid, _STATUS_EVENT.get(status, "THREAD_STATUS"),
+                                 ts=now)
+
+    def thread_event_record(self, tid: str, kind: str, *, provider=None,
+                            session_id=None, detail=None,
+                            ts: Optional[float] = None,
+                            commit: bool = True) -> None:
+        """Append one lifecycle fact to the O3 timeline log.
+
+        Deliberately narrow: only for facts that have no other timestamped
+        home (status transitions, a source coming back).  Everything else in
+        the timeline is derived from canonical columns that already carry a
+        time, so nothing here duplicates them.
+
+        `commit=False` when the caller is already inside a transaction -- a
+        commit here would end that transaction early.
+        """
+        import time as _time
+        self.con.execute(
+            "INSERT INTO thread_events(thread_id, ts, kind, provider,"
+            " session_id, detail_json) VALUES (?,?,?,?,?,?)",
+            (tid, ts if ts is not None else _time.time(), kind, provider,
+             session_id,
+             json.dumps(detail, ensure_ascii=False) if detail else None))
+        if commit:
+            self.con.commit()
+
+    def thread_events_list(self, tid: str) -> List[sqlite3.Row]:
+        return self.q(
+            "SELECT * FROM thread_events WHERE thread_id=? ORDER BY ts, id",
+            (tid,))
 
     def thread_touch(self, tid: str) -> None:
         import time as _time

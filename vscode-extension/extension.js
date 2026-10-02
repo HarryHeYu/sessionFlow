@@ -16,6 +16,7 @@
 const vscode = require("vscode");
 const { spawn } = require("child_process");
 const composer = require("./composer");
+const timelineView = require("./timeline");
 
 let bridge = null;
 let requestSeq = 0;
@@ -235,6 +236,77 @@ function openComposer(context) {
   });
 }
 
+let timelinePanel = null;
+
+/**
+ * WorkThread Timeline (O3.5).
+ *
+ * A pure consumer of the `thread_timeline` API op, which is a pass-through to
+ * the canonical `voyager.timeline.build_thread_timeline` — the same function
+ * the CLI and the dashboard use.  This view aggregates nothing itself, and it
+ * never switches: switching goes through the handoff engine, so the view hands
+ * the user the canonical command instead of growing a second path.
+ */
+function openTimeline(context) {
+  if (timelinePanel) {
+    timelinePanel.reveal(vscode.ViewColumn.Beside);
+    return;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    "voyager.timeline",
+    "Voyager: WorkThread Timeline",
+    vscode.ViewColumn.Beside,
+    { enableScripts: true, retainContextWhenHidden: true }
+  );
+  timelinePanel = panel;
+  panel.webview.html = timelineView.html(
+    String(Date.now()) + String(Math.random()).slice(2)
+  );
+
+  async function sendThreads() {
+    try {
+      const res = await getBridge(context).request("overview", {
+        repo: repoPath(),
+      });
+      if (res.error) return showError(res.error);
+      const threads = (res.result && res.result.threads) || [];
+      panel.webview.postMessage({ type: "threads", items: threads });
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    try {
+      if (msg.type === "ready") {
+        await sendThreads();
+      } else if (msg.type === "timeline") {
+        const res = await getBridge(context).request("thread_timeline", {
+          thread_id: msg.thread_id,
+        });
+        if (res.error) {
+          panel.webview.postMessage({
+            type: "timeline", ok: false, error: res.error,
+          });
+          return;
+        }
+        panel.webview.postMessage({
+          type: "timeline", ok: true, data: res.result,
+        });
+      } else if (msg.type === "copy") {
+        await vscode.env.clipboard.writeText(msg.text || "");
+        vscode.window.showInformationMessage("Voyager: copied to clipboard.");
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+
+  panel.onDidDispose(() => {
+    timelinePanel = null;
+  });
+}
+
 class ThreadsProvider {
   constructor(context) {
     this._bridge = getBridge(context);
@@ -279,6 +351,9 @@ function activate(context) {
     ),
     vscode.commands.registerCommand("voyager.openComposer", () =>
       openComposer(context)
+    ),
+    vscode.commands.registerCommand("voyager.openTimeline", () =>
+      openTimeline(context)
     ),
     vscode.commands.registerCommand("voyager.refresh", () => provider.refresh()),
     vscode.commands.registerCommand("voyager.switchThread", (item) =>

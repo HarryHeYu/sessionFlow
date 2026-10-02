@@ -14,6 +14,7 @@
   "activationEvents": [
     "onCommand:voyager.overview",
     "onCommand:voyager.openComposer",
+    "onCommand:voyager.openTimeline",
     "onView:voyager.threads"
   ],
   "main": "./extension.js",
@@ -32,6 +33,10 @@
         "title": "Voyager: Open Context Composer"
       },
       {
+        "command": "voyager.openTimeline",
+        "title": "Voyager: Open WorkThread Timeline"
+      },
+      {
         "command": "voyager.switchThread",
         "title": "Voyager: Switch WorkThread to another agent",
         "enablement": "viewItem == thread"
@@ -39,6 +44,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "voyager.openTimeline",
+          "when": "view == voyager.threads",
+          "group": "navigation"
+        },
         {
           "command": "voyager.openComposer",
           "when": "view == voyager.threads",

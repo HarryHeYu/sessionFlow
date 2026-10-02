@@ -331,3 +331,57 @@ bundle、并把 retained session 当作 native-resume 候选（`resolve_handoff_
 
 回归在 `tests/test_retention.py`（22 个）+ 改写的
 `tests/test_cli.py::test_scan_retains_sessions_whose_source_vanished`。
+
+## D16 — Timeline 只有一个模型，且只放有证据的事件
+
+**Decision**: WorkThread 的时间线只有一份实现：`voyager/timeline.py::
+build_thread_timeline(thread_id)`。CLI（`voyager thread timeline`）、Dashboard、
+VS Code webview、以及 stdio API 的 `thread_timeline` op **都只是它的消费者**；
+任何一处都不得再写第二套 aggregation。
+
+事件只允许来自两类**已有时间戳**的 canonical 依据：
+
+1. 已有列：`threads.created_at`（THREAD_CREATED）、
+   `thread_sessions.attached_at`（SESSION_ATTACHED）、
+   `thread_pending.created_at`（HANDOFF / PROVIDER_SWITCHED）、
+   `checkpoints.created_at`（CHECKPOINT_CREATED / BLOCKER_ADDED / TEST_GATE /
+   COMMIT_OBSERVED）、`sessions.source_missing_since`（SOURCE_MISSING）。
+2. 追加日志 `thread_events`（O3 新增，append-only）：只放**别处没有时间戳**的事实
+   —— 状态迁移（THREAD_CLOSED / THREAD_REOPENED / THREAD_ARCHIVED）、
+   source 回来（SOURCE_RETURNED）、以及 source 消失的那一刻。
+
+**禁止**扫描 assistant 的自然语言去猜"这句像里程碑"。`BLOCKER_RESOLVED` 只在
+**后一个 checkpoint 明确把它记成 milestone** 时才产生 —— blocker 单纯消失不算证据
+（可能是被丢掉了）。
+
+**Reason**: 三条理由，按重要性排序。
+
+1. **三套 aggregation 一定会漂移，而漂移是看不见的。** 同一个 thread 在 CLI 和
+   dashboard 上给出不同的故事，用户没有任何办法判断哪个对。
+2. **时间戳只能排序，不能定权威。** 它不能用来解决 WorkThread 歧义（D13/D14 已有
+   明确的规则），也不能推导"谁是当前持有者"—— 那是租约和显式规则的事。
+3. **猜出来的时间线比短的时间线更糟。** 从散文里推断里程碑会让时间线看起来更丰富，
+   同时把不可验证的东西伪装成事实。项目里所有"宣称"都要有机器证据，时间线不能例外。
+
+**Alternatives**: 让每个前端各自聚合（简单，但必然漂移）；把 assistant 文本里的
+关键词当事件（丰富，但等于编造）；用 `threads.updated_at` 当状态迁移时间
+（**行不通**：`thread_touch` 也写它，所以它不能代表状态变更）。
+
+**Consequences**: 新增 append-only 表 `thread_events(thread_id, ts, kind, provider,
+session_id, detail_json)` + `(thread_id, ts, id)` 索引。它只承载别处无法表达的事实，
+所以**不会与派生事件重复**；SOURCE_MISSING 在迁移发生时写入，`_source_missing()`
+只为"O3 之前就已经 retained、因此没有日志行"的 session 兜底派生 —— 日志优先，
+同一 episode 不会出现两次。
+
+性能上时间线**只读 thread 作用域的行，从不碰 `events` 表**：它是
+lifecycle/milestone 视图，不是 transcript dump。60 session / 6,000 event 的 thread
+仍然只发 ≤10 条查询（回归里钉住了这一点），`--limit` 保留最新 N 条再恢复时间顺序。
+
+O3.3 的措辞是契约的一部分：SOURCE_MISSING 一律表述为
+"Provider source disappeared — history retained locally"，
+恢复是 "Provider source restored — session reconciled"，
+**绝不使用 deleted / lost 这类词**（回归会检查 dashboard 与 timeline 的输出里不出现）。
+
+O3.6：时间线**自己不切换**。UI 只提供"复制 canonical CLI 命令"，切换继续走
+`continuity.handoff_thread()` —— 不新增第二套切换逻辑（回归会检查 webview 里
+没有自己的 switch 调用）。

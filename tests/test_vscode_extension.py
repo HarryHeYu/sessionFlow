@@ -91,8 +91,8 @@ def test_view_activation_event_is_declared(pkg):
 # --- the webview document --------------------------------------------------
 
 @functools.lru_cache(maxsize=None)
-def _composer_html(nonce: str = "TESTNONCE") -> str:
-    """Render the webview document by actually running composer.js.
+def _webview_html(module: str, nonce: str = "TESTNONCE") -> str:
+    """Render a webview document by actually running its module.
 
     Python cannot import a `.js` file (unknown source suffix), and a
     re-implementation in Python would test the re-implementation rather than
@@ -103,10 +103,18 @@ def _composer_html(nonce: str = "TESTNONCE") -> str:
     if not node:
         pytest.skip("node not installed")
     script = "const c=require(%s);process.stdout.write(c.html(%s));" % (
-        json.dumps(str(EXT / "composer.js")), json.dumps(nonce))
+        json.dumps(str(EXT / module)), json.dumps(nonce))
     proc = subprocess.run([node, "-e", script], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     return proc.stdout
+
+
+def _composer_html(nonce: str = "TESTNONCE") -> str:
+    return _webview_html("composer.js", nonce)
+
+
+def _timeline_html(nonce: str = "TESTNONCE") -> str:
+    return _webview_html("timeline.js", nonce)
 
 
 def test_composer_html_is_self_contained():
@@ -156,10 +164,83 @@ def test_extension_js_parses(tmp_path):
     node = shutil.which("node")
     if not node:
         pytest.skip("node not installed")
-    for name in ("extension.js", "composer.js"):
+    for name in ("extension.js", "composer.js", "timeline.js"):
         proc = subprocess.run([node, "--check", str(EXT / name)],
                               capture_output=True, text=True)
         assert proc.returncode == 0, "%s: %s" % (name, proc.stderr)
+
+
+# --- the O3 timeline webview ----------------------------------------------
+
+def test_timeline_command_is_wired(pkg, extension_js):
+    contributed = {c["command"] for c in pkg["contributes"]["commands"]}
+    assert "voyager.openTimeline" in contributed
+    assert "voyager.openTimeline" in extension_js
+    assert "onCommand:voyager.openTimeline" in pkg["activationEvents"]
+    titles = pkg["contributes"]["menus"]["view/title"]
+    assert any(m["command"] == "voyager.openTimeline" for m in titles)
+
+
+def test_timeline_webview_is_self_contained():
+    html = _timeline_html()
+    assert html.startswith("<!DOCTYPE html>")
+    assert html.rstrip().endswith("</html>")
+    assert "http://" not in html and "https://" not in html
+    assert "<link" not in html
+    assert "src=" not in html
+    assert html.count("<script") == 1 and html.count("</script>") == 1
+
+
+def test_timeline_nonce_reaches_both_the_csp_and_the_script_tag():
+    html = _timeline_html("XYZ789")
+    assert "script-src 'nonce-XYZ789'" in html
+    assert '<script nonce="XYZ789">' in html
+    assert "${nonce}" not in html
+
+
+def _code_only(path: Path) -> str:
+    """Source with comments stripped.
+
+    The assertions below are about what the code *does*; a comment explaining
+    "never innerHTML" must not count as using it.
+    """
+    src = path.read_text(encoding="utf-8")
+    src = re.sub(r"/\*[\s\S]*?\*/", "", src)
+    src = re.sub(r"^\s*//.*$", "", src, flags=re.M)
+    return src
+
+
+def test_timeline_never_writes_untrusted_text_as_markup():
+    """Titles, checkpoint text and repo paths all come from a transcript."""
+    code = _code_only(EXT / "timeline.js")
+    assert "innerHTML" not in code
+    assert "textContent" in code
+
+
+def test_timeline_inline_script_parses(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    html = _timeline_html()
+    body = html.split("<script nonce=", 1)[1].split(">", 1)[1]
+    script = body.rsplit("</script>", 1)[0]
+    target = tmp_path / "timeline-inline.js"
+    target.write_text(script, encoding="utf-8")
+    proc = subprocess.run([node, "--check", str(target)],
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_timeline_view_never_switches_by_itself():
+    """O3.6: switching must go through the handoff engine.
+
+    The view is a consumer: it may hand the user the canonical CLI command,
+    but it must not grow a second switch path (no switch op of its own).
+    """
+    code = _code_only(EXT / "timeline.js")
+    assert "voyager switch" in code, "it should offer the canonical command"
+    for forbidden in ('type: "switch"', 'request("switch"', "handoff_thread"):
+        assert forbidden not in code, forbidden
 
 
 def test_one_click_switch_command_is_wired_end_to_end(pkg, extension_js):

@@ -1565,6 +1565,32 @@ def cmd_thread(args) -> int:
                 t["id"], t["status"], t["members"], t["repo_root"] or "?"))
             print("    " + (t["title"] or "")[:100])
         return 0
+    if action == "timeline":
+        # O3: one canonical timeline (voyager/timeline.py).  This command is a
+        # renderer, not a second aggregation.
+        from .timeline import build_thread_timeline, render_text
+
+        kinds = [k.strip() for k in (getattr(args, "kind", None) or "").split(",")
+                 if k.strip()]
+        if getattr(args, "retained_only", False):
+            state = "retained"
+        elif getattr(args, "live_only", False):
+            state = "live"
+        else:
+            state = None
+        tl = build_thread_timeline(
+            store, args.thread, limit=getattr(args, "limit", None),
+            kinds=kinds or None, provider=getattr(args, "provider", None),
+            state=state)
+        if getattr(args, "json", False):
+            # the stable contract the UIs consume; they never parse the prose
+            print(json.dumps(tl, indent=2, ensure_ascii=False, default=str))
+            return 0 if "error" not in tl else 1
+        if "error" in tl:
+            print(tl["error"], file=sys.stderr)
+            return 1
+        print(render_text(tl, show_ids=True))
+        return 0
     if action in ("activity", "summarize"):
         # One WorkThread, every agent that touched it.  A brief is a derivation
         # over the canonical thread -- never a concatenation of transcripts.
@@ -2048,6 +2074,21 @@ def main(argv=None) -> int:
     tsp.add_argument("--turns", type=int, default=3,
                      help="recent turns to quote per agent")
     tsp.add_argument("--json", action="store_true")
+    tsp.set_defaults(func=cmd_thread)
+    tsp = tsub.add_parser("timeline", parents=[common],
+                          help="lifecycle/milestone timeline for a WorkThread")
+    tsp.add_argument("thread")
+    tsp.add_argument("--limit", type=int, default=None,
+                     help="keep the newest N events (first screen, not a dump)")
+    tsp.add_argument("--kind", help="comma list: HANDOFF,CHECKPOINT_CREATED,...")
+    tsp.add_argument("--provider", help="only events for this provider")
+    g = tsp.add_mutually_exclusive_group()
+    g.add_argument("--live-only", dest="live_only", action="store_true",
+                   help="only events from sessions that are still live")
+    g.add_argument("--retained-only", dest="retained_only", action="store_true",
+                   help="only events from retained (source-missing) history")
+    tsp.add_argument("--json", action="store_true",
+                     help="the stable contract the UIs consume")
     tsp.set_defaults(func=cmd_thread)
     tsp = tsub.add_parser("show", parents=[common], help="show one thread and its members")
     tsp.add_argument("thread")

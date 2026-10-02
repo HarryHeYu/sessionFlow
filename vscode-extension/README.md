@@ -13,8 +13,15 @@ This directory is the **Phase 7 client** for the voyager local API
 - WorkThreads tree view (activity bar → Voyager)
 - `Voyager: Preview Continuation Bundle` — renders a bundle in a Markdown
   tab with the token estimate
-- **`Voyager: Open Context Composer`** (also the `＋` on the WorkThreads view
-  title) — the Phase 7 composer:
+- **`Voyager: Open WorkThread Timeline`** (also the `＋` on the WorkThreads view
+  title) — the O3 lifecycle view: what happened to one WorkThread, in order,
+  across every agent that touched it. Filters for provider, event type and
+  live/retained. It is a **consumer** of the `thread_timeline` API op, which is
+  a pass-through to the canonical `voyager.timeline.build_thread_timeline` — the
+  same function the CLI and the dashboard use. It aggregates nothing itself,
+  because two timelines would drift and the drift would be invisible.
+- **`Voyager: Open Context Composer`** (also on the WorkThreads view title) — the
+  Phase 7 composer:
   - checkbox session picker, scoped to the configured repo, newest first
   - goal input + budget selector (`compact` / `balanced` / `full` / `auto`)
   - live Continuation Bundle preview with the token estimate, and the
@@ -32,6 +39,22 @@ This directory is the **Phase 7 client** for the voyager local API
   route around the one safety property the core actually guarantees.
 - timeline view mixing agent events with git history
 - packaging: marketplace listing, published VSIX
+
+## Timeline: what it will and will not do
+
+The timeline shows only what the canonical data proves — a column that already
+carries a time, or the append-only `thread_events` log. It never scans assistant
+prose: "this sentence looks like a milestone" is a guess, and a timeline that
+guesses is worse than a short one (DECISIONS D16).
+
+- **It will not switch anything.** Switching decides who may write a WorkThread,
+  and that lives in the handoff engine (`continuity.handoff_thread`). The view
+  offers *Copy switch command* instead — there is no second switch path.
+- **A retained session is history, not a place to switch into.** Its provider
+  source is gone, so the command offered is the thread-level one; view / search /
+  summarise / inspect are all still available, native resume is not.
+- Timestamps order the display and nothing else. They never settle a WorkThread
+  ambiguity or establish authority.
 
 ## Composer safety notes
 

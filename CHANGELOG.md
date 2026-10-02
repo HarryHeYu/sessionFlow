@@ -10,6 +10,42 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **WorkThread Timeline — one model, every surface** (O3, DECISIONS D16).
+  `voyager thread timeline <id> [--json] [--limit N] [--kind …] [--provider P]
+  [--live-only|--retained-only]` prints the lifecycle of one WorkThread, and the
+  dashboard, the VS Code webview and the stdio API op `thread_timeline` all
+  consume the *same* function (`voyager.timeline.build_thread_timeline`). There
+  is deliberately one aggregation: three would drift, and the drift would be
+  invisible.
+  Events come only from canonical columns that already carry a time
+  (`threads.created_at`, `thread_sessions.attached_at`,
+  `thread_pending.created_at`, `checkpoints.created_at`,
+  `sessions.source_missing_since`) plus a small append-only `thread_events` log
+  for the facts that have no other timestamped home — status transitions and a
+  source coming back. Assistant prose is never scanned: "this sentence looks
+  like a milestone" is a guess, and a timeline that guesses is worse than a
+  short one. `BLOCKER_RESOLVED` appears only when a later checkpoint records the
+  blocker as a milestone; a blocker merely disappearing is not evidence.
+  Timestamps order the display and nothing else — they never settle a
+  WorkThread ambiguity or establish authority (D13/D14).
+  The timeline reads only thread-scoped rows and never touches `events`: it is a
+  lifecycle view, not a transcript dump (60 sessions / 6,000 events still costs
+  a fixed handful of queries, pinned by a regression).
+- **Retained history is first-class in the timeline** (O3.3): a rotated source
+  reads "Provider source disappeared — history retained locally" and a return
+  reads "Provider source restored — session reconciled", marked with a
+  `retained · source unavailable` tag. The vocabulary is a contract: the
+  dashboard and the timeline are tested never to say "deleted" or "lost".
+- **VS Code: `Voyager: Open WorkThread Timeline`** — a webview built on the same
+  safe base as the Context Composer (one self-contained document, nonce CSP, no
+  CDN, no framework) with provider / event-type / live-retained filters, plus
+  copy buttons for the session id and the canonical switch command. It never
+  switches by itself: the handoff engine is the one place that decides who may
+  write a WorkThread, so the view hands over a command instead of growing a
+  second switch path.
+- **Dashboard: a WorkThread timeline panel** with the same three filters, still
+  one self-contained page with no server, no CDN and no network requests.
+
 - **Source rotation no longer deletes history** (`SOURCE_MISSING`, DECISIONS D15).
   When every source file of a session has vanished from disk, `voyager` used to
   `DELETE` the session, its events, its file rows and its FTS rows. But the

@@ -30,6 +30,11 @@ RECENT_TURNS = 60
 #: How many threads are listed per project.
 THREADS_PER_PROJECT = 12
 
+#: O3: how many timeline events the page carries.  A timeline is a
+#: lifecycle/milestone view, not a transcript dump -- the newest events are
+#: the first screen, and the rest is one `voyager thread timeline` away.
+TIMELINE_LIMIT = 40
+
 
 def _q(store, sql: str, args: tuple = ()) -> List[Any]:
     try:
@@ -89,6 +94,17 @@ def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
         except Exception:
             focus_data = {}
 
+    # O3: the timeline comes from the canonical model, never from a second
+    # aggregation built here -- the dashboard is a consumer like any other.
+    focus_timeline: Dict[str, Any] = {}
+    if focus:
+        try:
+            from .timeline import build_thread_timeline
+            focus_timeline = build_thread_timeline(store, focus,
+                                                   limit=TIMELINE_LIMIT)
+        except Exception:
+            focus_timeline = {}
+
     recent: List[Dict[str, Any]] = []
     for row in _q(store, "SELECT e.ts, e.kind, e.content, e.origin, s.provider, "
                          "e.sid FROM events e LEFT JOIN sessions s ON e.sid = s.id "
@@ -108,6 +124,7 @@ def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
         "generated_at": time.time(),
         "focus_thread": focus,
         "focus": focus_data,
+        "focus_timeline": focus_timeline,
         "projects": sorted(projects.values(),
                            key=lambda p: -(p["last_activity"] or 0)),
         "recent": recent,
@@ -163,6 +180,12 @@ ul { margin:0; padding-left:18px; } li { margin:2px 0; }
 .turn:last-child { border-bottom:0; }
 .when { color:var(--muted); font-size:11px; }
 .empty { color:var(--muted); font-style:italic; }
+/* O3: retained history is marked, never hidden.  The wording matters here --
+   a rotated source is not a removal (DECISIONS D15), so this page never uses
+   that vocabulary, not even in a comment. */
+.retained { border-left:3px solid var(--warn); padding-left:8px; }
+.tag { font-size:11px; color:var(--warn); border:1px solid var(--warn);
+       border-radius:999px; padding:0 6px; margin-left:6px; }
 """
 
 _JS = """
@@ -172,6 +195,22 @@ function filterTurns() {
   for (var i = 0; i < rows.length; i++) {
     var t = rows[i].getAttribute('data-text') || '';
     rows[i].style.display = (q === '' || t.indexOf(q) >= 0) ? '' : 'none';
+  }
+}
+
+// O3.4 filters: provider, event type, live/retained.  Pure client-side --
+// the page still makes no requests.
+function filterTimeline() {
+  var p = document.getElementById('tlProv').value;
+  var k = document.getElementById('tlKind').value;
+  var s = document.getElementById('tlState').value;
+  var rows = document.querySelectorAll('#timeline .turn');
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var ok = (p === '' || r.getAttribute('data-provider') === p)
+          && (k === '' || r.getAttribute('data-kind') === k)
+          && (s === '' || r.getAttribute('data-state') === s);
+    r.style.display = ok ? '' : 'none';
   }
 }
 """
@@ -283,6 +322,53 @@ def render_html(data: Dict[str, Any]) -> str:
               % (_e(c.get("provider")), _e(c.get("band")), _e(c.get("events")),
                  _e(c.get("human_turns")), _e(_short(c.get("last_line"), 90))))
         a("</table>")
+    a("</div>")
+
+    # --- timeline (O3) ------------------------------------------------------
+    # Rendered from data["focus_timeline"], which comes from the canonical
+    # voyager/timeline.py -- the page aggregates nothing itself.
+    tl = data.get("focus_timeline") or {}
+    a("<div class='panel'><h2>WorkThread timeline</h2>")
+    if not tl or not tl.get("events"):
+        a("<div class='empty'>no timeline events &mdash; "
+          "<code>voyager thread timeline &lt;id&gt;</code> prints the same model"
+          "</div>")
+    else:
+        a("<div class='muted'>%s &middot; showing %s of %s event(s)</div>"
+          % (_e((tl.get("thread") or {}).get("id")), _e(tl.get("shown")),
+             _e(tl.get("total"))))
+        provs = sorted({e["provider"] for e in tl["events"] if e.get("provider")})
+        kinds = sorted({e["event_type"] for e in tl["events"]})
+        a("<div style='margin:8px 0'>")
+        a("<select id='tlProv' onchange='filterTimeline()'>"
+          "<option value=''>all providers</option>%s</select> "
+          % "".join("<option value='%s'>%s</option>" % (_e(p), _e(p))
+                    for p in provs))
+        a("<select id='tlKind' onchange='filterTimeline()'>"
+          "<option value=''>all event types</option>%s</select> "
+          % "".join("<option value='%s'>%s</option>" % (_e(k), _e(k))
+                    for k in kinds))
+        a("<select id='tlState' onchange='filterTimeline()'>"
+          "<option value=''>all states</option>"
+          "<option value='LIVE'>live</option>"
+          "<option value='SOURCE_MISSING'>retained</option></select>")
+        a("</div>")
+        a("<div id='timeline'>")
+        for e in tl["events"]:
+            state = e.get("source_state") or ""
+            is_retained = state == "SOURCE_MISSING"
+            a("<div class='turn%s' data-provider='%s' data-kind='%s' "
+              "data-state='%s'><span class='when'>%s</span> "
+              "<span class='pill'>%s</span> %s%s%s</div>"
+              % (" retained" if is_retained else "",
+                 _e(e.get("provider") or ""), _e(e["event_type"]), _e(state),
+                 _e(_when(e.get("timestamp"))), _e(e["event_type"]),
+                 ("<span class='mono'>%s</span> " % _e(e["provider"]))
+                 if e.get("provider") else "",
+                 _e(e.get("summary")),
+                 "<span class='tag'>retained &middot; source unavailable</span>"
+                 if is_retained else ""))
+        a("</div>")
     a("</div>")
 
     # --- recent activity (with a client-side filter) ------------------------
