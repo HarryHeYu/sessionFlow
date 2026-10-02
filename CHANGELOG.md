@@ -10,6 +10,21 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **`docs/PERF_O1.md`** — performance forensics on the scan and read paths,
+  with the counters spelled out, including two that had been lying: `commit()`
+  cannot see `store.replace_session`'s `BEGIN` (so the transaction count read
+  as 2 for 10,000 sessions until a `BEGIN` counter was added), and `q` counts
+  `Store.q()` reads rather than statements. Records the 1M-event `scan_force`
+  as `ENVIRONMENT_LIMITED` — peak RSS 2.97 GB, then evicted to a 60 MB working
+  set with no write progress for 12 minutes — and keeps four distinct debts
+  apart: `SCAN_BATCH_TRANSACTION_OPTIMIZATION` (measured: 10,000 transactions
+  for 10,000 sessions), `STARTUP_GIT_SUBPROCESS_AMPLIFICATION` (10,000
+  `git_info` calls collapsed to 3 spawns by the per-cwd cache, so it scales
+  with workspaces, not sessions), `OVERVIEW_RECENT_SESSIONS_N1`, and
+  `SCAN_MATERIALISE_ALL_BEFORE_WRITE`. It also explains why the reported
+  "incremental 93 s > forced 61 s" was a measurement artifact — the old harness
+  timed two scans for `scan_inc` — and why `246.3 s → 66.4 s` may not be quoted
+  as a speedup ratio.
 - **VS Code Context Composer** (roadmap Phase 7 / issue #8, the remaining half).
   `Voyager: Open Context Composer` — also the `＋` on the WorkThreads view title
   — opens a webview with a checkbox session picker scoped to the configured

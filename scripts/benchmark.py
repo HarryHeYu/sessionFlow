@@ -50,7 +50,8 @@ WORDPOOL = (
      "coverage", "roadmap", "phase", "handoff", "switch", "artifact"])
 PROVIDERS = ("codex", "claude", "grok", "zcode")
 
-COUNTS = {"subprocess": 0, "q": 0, "git_calls": 0}
+COUNTS = {"subprocess": 0, "q": 0, "git_calls": 0, "execute": 0, "commit": 0,
+          "txn": 0}
 BG = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
 
@@ -209,7 +210,8 @@ def gen_codex(out: Path, sessions: int, per: int) -> None:
 # instrumentation
 # ---------------------------------------------------------------------------
 
-COUNTS = {"subprocess": 0, "q": 0, "git_calls": 0}
+COUNTS = {"subprocess": 0, "q": 0, "git_calls": 0, "execute": 0, "commit": 0,
+          "txn": 0}
 BG = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
 
@@ -248,6 +250,39 @@ def _install_instrumentation():
         return real_popen(*a, **kw)
 
     subprocess.Popen = counting_popen
+
+    # Statement, transaction and commit counters.  `q` only counts Store.q()
+    # reads, and `commit` only counts Connection.commit() -- but
+    # store.replace_session opens its transaction with `execute("BEGIN")`, so
+    # neither can tell a batched write from a per-session one.  Counting BEGIN
+    # is what makes SCAN_BATCH_TRANSACTION_OPTIMIZATION measurable.
+    class CountingConnection(sqlite3.Connection):
+        def execute(self, *a, **kw):
+            COUNTS["execute"] += 1
+            sql = a[0] if a else kw.get("sql", "")
+            if isinstance(sql, str) and sql.lstrip()[:5].upper() == "BEGIN":
+                COUNTS["txn"] += 1
+            return super().execute(*a, **kw)
+
+        def executemany(self, *a, **kw):
+            COUNTS["execute"] += 1
+            return super().executemany(*a, **kw)
+
+        def executescript(self, *a, **kw):
+            COUNTS["execute"] += 1
+            return super().executescript(*a, **kw)
+
+        def commit(self):
+            COUNTS["commit"] += 1
+            return super().commit()
+
+    real_connect = sqlite3.connect
+
+    def counting_connect(*a, **kw):
+        kw.setdefault("factory", CountingConnection)
+        return real_connect(*a, **kw)
+
+    sqlite3.connect = counting_connect
 
     import voyager.store as store_mod
     real_store = store_mod.Store
@@ -323,29 +358,58 @@ def _task_compile(db, repo, thread):
 
 
 def _scan_task(task, db, src):
+    """One measured scan pass.  Any setup (the initial ingest that seeds
+    fingerprints) happens in _scan_setup OUTSIDE the timed window."""
     import voyager.adapters.codex as codex_mod
     import voyager.store as store_mod
     from voyager.cli import run_scan
+    # Resolve Store through the module, not the import-time binding: the
+    # instrumentation replaces store_mod.Store, and a plain `Store(db)` here
+    # would silently use the pre-patch class (that is why the q counter read 0
+    # for a scan that had been 10006).
     store = store_mod.Store(db)
     codex_mod.SESSIONS_DIR = Path(src)
     codex_mod.STATE_DB = Path(src) / "_no_state.sqlite"
     codex_mod.THREAD_HISTORY_DB = Path(src) / "_no_history.sqlite"
-    if task == "scan_initial":
-        return run_scan(store, providers=["codex"], quiet=True)
     if task == "scan_inc":
-        run_scan(store, providers=["codex"], quiet=True)
         return run_scan(store, providers=["codex"], quiet=True)
     if task == "scan_touch":
-        run_scan(store, providers=["codex"], quiet=True)
         files = sorted(Path(src).rglob("rollout-*.jsonl"))
         step = max(1, len(files) // 20)
         for f in files[::step]:
             os.utime(f, None)
         return run_scan(store, providers=["codex"], quiet=True)
-    if task == "scan_force":
+    if task in ("scan_initial", "scan_force"):
         return run_scan(store, providers=["codex"], force=True, quiet=True)
     raise ValueError(task)
 
+
+def _scan_setup(task, db, src):
+    """Untimed preparation for the measured pass."""
+    import voyager.adapters.codex as codex_mod
+    import voyager.store as store_mod
+    from voyager.cli import run_scan
+    if task in ("scan_inc", "scan_touch"):
+        store = store_mod.Store(db)
+        codex_mod.SESSIONS_DIR = Path(src)
+        codex_mod.STATE_DB = Path(src) / "_no_state.sqlite"
+        codex_mod.THREAD_HISTORY_DB = Path(src) / "_no_history.sqlite"
+        run_scan(store, providers=["codex"], quiet=True)   # seed fingerprints
+        store.close()
+        if task == "scan_touch":
+            files = sorted(Path(src).rglob("rollout-*.jsonl"))
+            step = max(1, len(files) // 20)
+            for f in files[::step]:
+                os.utime(f, None)
+
+
+SCAN_SETUP = {
+    # Bind the task name here: worker() calls setup(db, src), and _scan_setup
+    # takes (task, db, src) -- mapping the function directly raised
+    # "missing 1 required positional argument: 'src'" for every scan_inc run.
+    "scan_inc": lambda db, src: _scan_setup("scan_inc", db, src),
+    "scan_touch": lambda db, src: _scan_setup("scan_touch", db, src),
+}
 
 WORKERS = {
     "overview": lambda db, repo, thread, src=None: _task_overview(db, repo, thread),
@@ -380,6 +444,14 @@ def worker(task, db, src, repo, thread):
         print(json.dumps({"task": task, "status": "n/a"}), flush=True)
         return
     _install_instrumentation()
+    setup = SCAN_SETUP.get(task)
+    if setup is not None:
+        setup(db, src)
+    # Zero the counters after setup: setup runs a real (untimed) scan, and its
+    # statements would otherwise be attributed to the measured pass -- that is
+    # why scan_inc read q=20012 (setup 10006 + measured 10006).
+    for _k in COUNTS:
+        COUNTS[_k] = 0
     fn = WORKERS[task]
     t0 = time.perf_counter()
     c0 = time.process_time()
@@ -390,7 +462,10 @@ def worker(task, db, src, repo, thread):
         "task": task, "status": "ok", "wall": round(wall, 4),
         "cpu": round(cpu, 4), "peak_rss": peak_rss_bytes(),
         "subprocess": COUNTS["subprocess"], "q": COUNTS["q"],
-        "git_calls": COUNTS["git_calls"], "result": _jmake(res),
+        "git_calls": COUNTS["git_calls"],
+        "execute": COUNTS["execute"], "commit": COUNTS["commit"],
+        "txn": COUNTS["txn"],
+        "result": _jmake(res),
     }, ensure_ascii=True), flush=True)
 
 
@@ -451,7 +526,12 @@ def run_suite(full: bool, out_json) -> None:
 
     results = []
     for task, db, src, r, th in jobs:
-        dbp = ":memory:" if task.startswith("scan_") else db
+        # Respect an explicit db.  This used to be
+        # `":memory:" if task.startswith("scan_") else db`, which silently ran
+        # the 1M scan in RAM even though its job passes a file path on purpose
+        # -- that override is why the large run kept dying on memory instead of
+        # producing a number.
+        dbp = db or ":memory:"
         res = _spawn_worker(task, dbp, src, r, th)
         results.append(res)
         print("done: %s -> wall=%s" % (task, res.get("wall")), flush=True)
