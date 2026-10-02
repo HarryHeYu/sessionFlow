@@ -316,7 +316,13 @@ def get_continuation_context(store: Optional[Store] = None,
                     "context": None}
 
         tid = thread["id"]
-        members = store.thread_members(tid)
+        # O2: continuity is compiled from LIVE members only.  A session whose
+        # sources have all vanished is retained as history and stays visible in
+        # thread display, but it must not feed a continuation context or be
+        # offered as a native-resume candidate.
+        members = store.live_thread_members(tid)
+        retained = [m["id"] for m in store.thread_members(tid)
+                    if m["id"] not in {x["id"] for x in members}]
 
         # automatic safe attach: the caller's own unattached session
         auto_attach = None
@@ -329,7 +335,7 @@ def get_continuation_context(store: Optional[Store] = None,
                 store._continuity_log("auto-attach", thread=tid,
                                       session=own, provider=provider)
                 auto_attach = own
-                members = store.thread_members(tid)
+                members = store.live_thread_members(tid)
 
         facts = extract_candidate_facts(store, members)
         ranked = rank_candidates(facts, goal=goal)
@@ -370,6 +376,7 @@ def get_continuation_context(store: Optional[Store] = None,
             "thread": {"id": tid, "title": thread["title"],
                        "goal": thread["goal"], "status": thread["status"]},
             "members": [m["id"] for m in members],
+            "retained_members": retained,
             "context": packed,
             "estimated_tokens": info["estimated_tokens"],
             "budget": info["budget"],

@@ -57,11 +57,20 @@ CREATE TABLE IF NOT EXISTS sessions (
     can_fork      INTEGER DEFAULT 0,
     resume_cmd    TEXT,
     metadata_json TEXT,
-    raw_metadata_json TEXT
+    raw_metadata_json TEXT,
+    -- O2 retention.  NULL means LIVE (the pre-O2 value, and the value a
+    -- manual insert gets); 'SOURCE_MISSING' means every one of this session's
+    -- source files has vanished from disk and the canonical history is being
+    -- kept anyway.  There is deliberately no separate 'RETAINED' state: O2
+    -- behaves identically for it, and a state nothing sets is a state that
+    -- gets set wrongly.
+    source_state          TEXT,
+    source_missing_since  REAL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider);
 CREATE INDEX IF NOT EXISTS idx_sessions_repo ON sessions(repo_root);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
+CREATE INDEX IF NOT EXISTS idx_sessions_source_state ON sessions(source_state);
 
 CREATE TABLE IF NOT EXISTS events (
     id          INTEGER PRIMARY KEY,
@@ -141,6 +150,12 @@ CREATE TABLE IF NOT EXISTS sources (
     sid      TEXT NOT NULL,
     mtime    REAL,
     size     INTEGER,
+    -- O2 source identity history: when we last saw this file on disk, and
+    -- since when it has been missing.  Keeping this per-source (rather than a
+    -- single bool on the session) is what lets doctor/timeline explain *why*
+    -- a history was retained instead of just asserting that it was.
+    last_seen     REAL,
+    missing_since REAL,
     PRIMARY KEY (provider, path, sid)
 );
 
@@ -316,6 +331,24 @@ class Store:
         ev_cols = [r[1] for r in self.con.execute("PRAGMA table_info(events)")]
         if ev_cols and "origin" not in ev_cols:
             self.con.execute("ALTER TABLE events ADD COLUMN origin TEXT")
+        # additive migration: O2 retention.  Existing rows keep NULL, which
+        # reads as LIVE.  Nothing is backfilled: "was this session's source on
+        # disk when the row was written" is not recoverable after the fact, and
+        # guessing would mark live sessions as retained.  ALTER/CREATE only —
+        # no destructive rewrite.
+        ses_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sessions)")]
+        if ses_cols:
+            for col, decl in (("source_state", "TEXT"),
+                              ("source_missing_since", "REAL")):
+                if col not in ses_cols:
+                    self.con.execute(
+                        f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
+        src_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sources)")]
+        if src_cols:
+            for col, decl in (("last_seen", "REAL"), ("missing_since", "REAL")):
+                if col not in src_cols:
+                    self.con.execute(
+                        f"ALTER TABLE sources ADD COLUMN {col} {decl}")
         self.con.executescript(SCHEMA)
         if not _fts_has_sid(self.con):
             _rebuild_fts(self.con)
@@ -357,6 +390,8 @@ class Store:
         evs = list(events)
         raw_meta = session.get("raw_metadata") or {}
         meta = session.get("metadata") or {}
+        import time as _time
+        seen_at = _time.time()
         self.con.execute("BEGIN")
         try:
             self.con.execute(
@@ -371,8 +406,9 @@ class Store:
                        cwd, repo_root, git_remote, git_branch, git_commit,
                        model, message_count, tool_count,
                        can_resume, can_fork, resume_cmd,
-                       metadata_json, raw_metadata_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       metadata_json, raw_metadata_json,
+                       source_state, source_missing_since)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'LIVE',NULL)""",
                 (
                     sid, provider, session.get("native_session_id"),
                     session.get("title"), session.get("started_at"),
@@ -438,16 +474,22 @@ class Store:
                      json.dumps(f.get("versions_json") or [], ensure_ascii=False)),
                 )
             mtime, size = self.source_fingerprint(source_path)
+            # last_seen/missing_since are cleared here: re-ingesting a source is
+            # exactly the "source came back" reconcile, and leaving a stale
+            # missing_since would make doctor report a healthy source as gone.
             self.con.execute(
-                "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size) VALUES (?,?,?,?,?)",
-                (provider, str(source_path), sid, mtime, size),
+                "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size,"
+                " last_seen, missing_since) VALUES (?,?,?,?,?,?,NULL)",
+                (provider, str(source_path), sid, mtime, size, seen_at),
             )
             for p in extra_sources or []:
                 try:
                     m2, s2 = self.source_fingerprint(p)
                     self.con.execute(
-                        "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size) VALUES (?,?,?,?,?)",
-                        (provider, str(p), sid, m2, s2),
+                        "INSERT OR REPLACE INTO sources(provider, path, sid, mtime,"
+                        " size, last_seen, missing_since)"
+                        " VALUES (?,?,?,?,?,?,NULL)",
+                        (provider, str(p), sid, m2, s2, seen_at),
                     )
                 except OSError:
                     pass
@@ -460,16 +502,33 @@ class Store:
             raise
 
     def prune_missing_sessions(self, provider: str, disk_paths: set) -> int:
-        """Drop sessions of `provider` whose source files all vanished.
+        """Mark sessions of `provider` whose source files have ALL vanished.
 
-        Only sessions that HAVE source rows are managed here. Sessions
-        seeded without a source row (synthetic tests, manual inserts) are
-        never touched — the caller cannot know their lifecycle.
+        O2 invariant: **absence of a source is not proof that the user wants the
+        history deleted.**  This used to DELETE the session, its events, its
+        file rows and its FTS rows; because the provider file is already gone at
+        that point, the index held the only normalized copy, so a provider
+        rotating its own storage silently erased history.  It now marks instead:
+
+        * every source of the session missing  -> ``source_state='SOURCE_MISSING'``
+          (events, files and FTS rows are kept; search/timeline/thread summaries
+          still find it, continuity does not);
+        * at least one source still on disk    -> ``source_state`` stays LIVE and
+          the marker is cleared, so a source that comes back reconciles itself.
+
+        Only sessions that HAVE source rows are managed here: sessions seeded
+        without one (synthetic tests, manual inserts) have a lifecycle the
+        caller cannot know, so they are never touched.
+
+        Returns the number of sessions *newly* marked missing.  There is no
+        automatic purge — a real deletion has to be an explicit command.
         """
+        import time as _time
+        now = _time.time()
         rows = self.con.execute(
-            "SELECT id FROM sessions WHERE provider=?", (provider,)
+            "SELECT id, source_state FROM sessions WHERE provider=?", (provider,)
         ).fetchall()
-        gone = []
+        marked = []
         for r in rows:
             sid = r["id"]
             src_rows = self.q(
@@ -477,21 +536,42 @@ class Store:
                 (provider, sid),
             )
             if not src_rows:
-                continue  # manually seeded; not ours to prune
-            if any(sr["path"] in disk_paths for sr in src_rows):
-                continue  # at least one source still on disk
-            gone.append(sid)
-        for sid in gone:
-            self.con.execute(
-                "DELETE FROM event_fts WHERE rowid IN (SELECT id FROM events WHERE sid=?)",
-                (sid,),
-            )
-            self.con.execute("DELETE FROM events WHERE sid=?", (sid,))
-            self.con.execute("DELETE FROM files WHERE sid=?", (sid,))
-            self.con.execute("DELETE FROM sessions WHERE id=?", (sid,))
-            self.con.execute("DELETE FROM sources WHERE provider=? AND sid=?", (provider, sid))
+                continue  # manually seeded; not ours to manage
+            all_missing = not any(sr["path"] in disk_paths for sr in src_rows)
+            if all_missing:
+                # per-source history first: this is what lets doctor/timeline
+                # explain why the history was retained
+                for sr in src_rows:
+                    self.con.execute(
+                        "UPDATE sources SET missing_since=COALESCE(missing_since, ?)"
+                        " WHERE provider=? AND path=? AND sid=?",
+                        (now, provider, sr["path"], sid))
+                self.con.execute(
+                    "UPDATE sources SET last_seen=? WHERE provider=? AND sid=?"
+                    " AND missing_since IS NULL", (now, provider, sid))
+                if r["source_state"] != "SOURCE_MISSING":
+                    marked.append(sid)
+                self.con.execute(
+                    "UPDATE sessions SET source_state='SOURCE_MISSING',"
+                    " source_missing_since=COALESCE(source_missing_since, ?)"
+                    " WHERE id=?", (now, sid))
+            else:
+                # at least one source is back: clear both markers
+                self.con.execute(
+                    "UPDATE sources SET last_seen=?, missing_since=NULL"
+                    " WHERE provider=? AND sid=? AND path IN (%s)"
+                    % ",".join("?" * len(disk_paths)),
+                    (now, provider, sid, *sorted(disk_paths)))
+                self.con.execute(
+                    "UPDATE sources SET missing_since=COALESCE(missing_since, ?)"
+                    " WHERE provider=? AND sid=? AND path NOT IN (%s)"
+                    % ",".join("?" * len(disk_paths)),
+                    (now, provider, sid, *sorted(disk_paths)))
+                self.con.execute(
+                    "UPDATE sessions SET source_state='LIVE',"
+                    " source_missing_since=NULL WHERE id=?", (sid,))
         self.con.commit()
-        return len(gone)
+        return len(marked)
 
     # -- WorkThreads (Phase 2) ---------------------------------------------
 
@@ -553,6 +633,59 @@ class Store:
             """SELECT s.* FROM thread_sessions t
                JOIN sessions s ON s.id = t.session_id
                WHERE t.thread_id=? ORDER BY t.ord""", (tid,))
+
+    def live_thread_members(self, tid: str) -> List[sqlite3.Row]:
+        """Members that may still feed continuity.
+
+        A session whose every source has vanished is retained as history (O2),
+        but it must not be compiled into a continuation context, offered as a
+        native-resume candidate, or counted as live source health.  Display
+        paths keep using `thread_members`, which returns it — marked, not
+        hidden.
+        """
+        return self.q(
+            """SELECT s.* FROM thread_sessions t
+               JOIN sessions s ON s.id = t.session_id
+               WHERE t.thread_id=?
+                 AND COALESCE(s.source_state, 'LIVE') != 'SOURCE_MISSING'
+               ORDER BY t.ord""", (tid,))
+
+    def retained_sessions(self, provider: Optional[str] = None) -> List[sqlite3.Row]:
+        """Sessions retained because every one of their sources vanished."""
+        if provider:
+            return self.q(
+                "SELECT * FROM sessions WHERE source_state='SOURCE_MISSING'"
+                " AND provider=? ORDER BY source_missing_since", (provider,))
+        return self.q(
+            "SELECT * FROM sessions WHERE source_state='SOURCE_MISSING'"
+            " ORDER BY source_missing_since")
+
+    def retained_stats(self) -> Dict[str, Any]:
+        """The cost side of O2: how much retained history is being held.
+
+        `bytes` counts event content/tool payload columns only — it is an
+        approximation of the retained payload, not of the whole database.
+        """
+        rows = self.q(
+            """SELECT s.provider AS provider,
+                      COUNT(DISTINCT s.id) AS sessions,
+                      COUNT(e.id) AS events,
+                      COALESCE(SUM(COALESCE(LENGTH(e.content), 0)
+                                   + COALESCE(LENGTH(e.tool_input), 0)
+                                   + COALESCE(LENGTH(e.tool_output), 0)), 0) AS bytes,
+                      MIN(s.source_missing_since) AS oldest
+               FROM sessions s LEFT JOIN events e ON e.sid = s.id
+               WHERE s.source_state='SOURCE_MISSING'
+               GROUP BY s.provider ORDER BY sessions DESC""")
+        provs = [dict(r) for r in rows]
+        return {
+            "providers": provs,
+            "sessions": sum(p["sessions"] for p in provs),
+            "events": sum(p["events"] for p in provs),
+            "bytes": sum((p["bytes"] or 0) for p in provs),
+            "oldest": min((p["oldest"] for p in provs if p["oldest"]),
+                          default=None),
+        }
 
     def thread_member_ids(self, tid: str) -> List[str]:
         return [r["session_id"] for r in self.q(

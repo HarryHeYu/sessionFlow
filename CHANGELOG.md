@@ -10,6 +10,28 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **Source rotation no longer deletes history** (`SOURCE_MISSING`, DECISIONS D15).
+  When every source file of a session has vanished from disk, `voyager` used to
+  `DELETE` the session, its events, its file rows and its FTS rows. But the
+  provider file is already gone at that point, so the index held the only
+  normalized copy — a provider rotating its own storage (Codex rolling old
+  rollouts, `~/.claude/projects` cleared, ZCode/Cursor swapping a database)
+  permanently erased history the user never asked to remove. "The source is
+  missing" was being read as "the user wants it deleted".
+  Sessions are now **retained** and marked `source_state='SOURCE_MISSING'`:
+  events, files and FTS rows are kept, so search, timeline, thread summaries and
+  checkpoint references still work, while automatic continuity, native-resume
+  candidates and live source health exclude them. Only **all** sources missing
+  marks a session — one surviving source keeps it `LIVE` — and re-ingesting the
+  same native session id reconciles back to one `LIVE` row with the marker
+  cleared. There is no automatic purge. `voyager doctor` reports the retained
+  count, the affected providers, the oldest missing source and the approximate
+  retained size as **non-blocking**, escalating to a warning only when an active
+  WorkThread has no live member left. `api.overview`, `api.thread_detail` and
+  the thread brief carry `source_state` so a UI can mark `[source missing]`
+  rather than hide the row. Migration is additive (`ALTER TABLE ADD COLUMN`);
+  existing rows keep NULL, which reads as `LIVE`.
+
 - **`docs/PERF_O1.md`** — performance forensics on the scan and read paths,
   with the counters spelled out, including two that had been lying: `commit()`
   cannot see `store.replace_session`'s `BEGIN` (so the transaction count read

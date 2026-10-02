@@ -6,6 +6,7 @@ registrations, the last observed trigger, the continuity state and the known
 debts, and classifies everything it finds as:
 
   blocking      -- continuity is broken or untrustworthy right now
+  warning       -- real, not blocking, but with a consequence worth seeing
   non-blocking  -- a debt: real, recorded, not stopping work
   external      -- a provider's own behaviour, outside sessionFlow
 
@@ -188,6 +189,52 @@ def check_continuity(repo: Optional[str] = None,
     return out
 
 
+def check_retention(db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """O2: how much history is retained because its provider sources vanished.
+
+    Retention is the **correct** outcome of a provider rotating its own storage,
+    so on its own this is informational, never a fault: it is reported as a
+    `retention` block plus, at most, a warning.  It only becomes a warning when
+    an *active* WorkThread has no live member left, because then continuity for
+    that thread has nothing left to compile from — that is a real consequence
+    the user should see, not a silent one.
+
+    Never raises.
+    """
+    empty = {"available": False, "sessions": 0, "events": 0, "bytes": 0,
+             "providers": [], "oldest": None, "stranded_threads": []}
+    path = _store_path(db_path)
+    if path is None or not path.exists():
+        return empty
+    try:
+        from .store import Store
+        store = Store(path)
+    except Exception as e:                       # pragma: no cover - defensive
+        out = dict(empty)
+        out["error"] = str(e)
+        return out
+    try:
+        stats = store.retained_stats()
+        stranded = []
+        if stats["sessions"]:
+            for t in store.thread_list("active"):
+                if not store.live_thread_members(t["id"]):
+                    stranded.append({"thread": t["id"],
+                                     "title": t["title"] or ""})
+        stats["stranded_threads"] = stranded
+        stats["available"] = True
+        return stats
+    except Exception as e:                       # pragma: no cover - defensive
+        out = dict(empty)
+        out["error"] = str(e)
+        return out
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
+
+
 def check_cache(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """How many continuity bundles are cached, and how old is the newest?"""
     out: Dict[str, Any] = {"entries": None, "newest_age_s": None}
@@ -277,16 +324,32 @@ def run(repo: Optional[str] = None,
     for debt in KNOWN_DEBTS:
         issues.append(dict(debt))
 
+    # O2: retention is informational.  It only escalates when an active
+    # WorkThread has nothing live left to compile a continuation from.
+    retention = check_retention(db_path)
+    if retention.get("stranded_threads"):
+        issues.append({
+            "kind": "warning",
+            "id": "RETENTION_STRANDED_WORKTHREAD",
+            "detail": "%d active WorkThread(s) have no live member left "
+                      "(all sources missing): %s"
+                      % (len(retention["stranded_threads"]),
+                         ", ".join(t["thread"] for t in
+                                   retention["stranded_threads"])),
+        })
+
     return {
         "context_format": CONTEXT_FORMAT,
         "store": store,
         "continuity": cont,
         "cache": check_cache(db_path),
+        "retention": retention,
         "providers": providers,
         "issues": issues,
         "blocking": [i for i in issues if i["kind"] == "blocking"],
         "external": [i for i in issues if i["kind"] == "external"],
         "non_blocking": [i for i in issues if i["kind"] == "non-blocking"],
+        "warnings": [i for i in issues if i["kind"] == "warning"],
     }
 
 
@@ -321,6 +384,23 @@ def render(report: Dict[str, Any]) -> str:
                  % (cache.get("entries"), cache.get("newest_age_s")))
     lines.append("  context format : %s" % report.get("context_format"))
 
+    # O2 retention: reported, not hidden.  A rotated provider source is a normal
+    # event; the point is that the history behind it is still here.
+    ret = report.get("retention") or {}
+    if ret.get("sessions"):
+        lines.append("  retained       : %s session(s) from missing/rotated "
+                     "sources, %s event(s), ~%s MB"
+                     % (ret.get("sessions"), ret.get("events"),
+                        round((ret.get("bytes") or 0) / 1048576, 1)))
+        by = ", ".join("%s:%s" % (p.get("provider"), p.get("sessions"))
+                       for p in (ret.get("providers") or []))
+        if by:
+            lines.append("  retained by    : %s" % by)
+        if ret.get("oldest"):
+            lines.append("  oldest missing : %s"
+                         % time.strftime("%Y-%m-%d %H:%M",
+                                         time.localtime(ret["oldest"])))
+
     lines.append("")
     lines.append("providers")
     lines.append("  %-12s %-26s %-8s %-8s %-6s %-8s"
@@ -337,6 +417,7 @@ def render(report: Dict[str, Any]) -> str:
                         budget_str))
 
     for title, key in (("blocking", "blocking"),
+                       ("warning", "warnings"),
                        ("external", "external"),
                        ("non-blocking debt", "non_blocking")):
         items = report.get(key) or []

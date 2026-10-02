@@ -273,3 +273,49 @@ Continuation Bundle，默认）或 `package`（单 session 的 Context Package�
 新增 `Store.thread_find_containing()`（包含语义，`thread_find_by_members` 的
 相等语义不够用）。删除 `_merge_and_handoff` / `_handoff_from_row` /
 `_render_budgeted` 三份重复实现。`continue` 补上 `--bundle`。
+
+## D15 — source 消失 ≠ 用户想删历史
+
+**Decision**: provider 的 source 文件**全部**消失时，Voyager **保留**该 session 的
+canonical 历史，只把它标记为 `SOURCE_MISSING`：
+
+- `sessions.source_state`：NULL/`LIVE` 或 `SOURCE_MISSING`；
+  `sessions.source_missing_since` 记录首次不可见的时间。
+- `sources.last_seen` / `sources.missing_since` 记录**每个 source** 的历史
+  （provider / path / 最后见到 / 何时开始缺失 / sid），这样 doctor 与 timeline
+  能解释"这段历史**为什么**被保留"，而不是只报一个 `retained=true`。
+- events / files / FTS 行**一律保留** ⇒ search、timeline、thread summary、
+  checkpoint 引用、历史证据检索全都还能用。
+- **排除**：自动 startup continuity、active-provider 选择、native resume 假设、
+  live source health。实现上是 `Store.live_thread_members()`，
+  `auto.get_continuation_context()` 改用它编译上下文，并回报
+  `retained_members`。
+- **只要还有一个 source 在盘上，session 就是 LIVE**（不是"任一 source 消失即
+  retained"）。source 回来后重新 ingest 同一个 native session id 即
+  **reconcile**：一行 canonical session、无重复、状态回 `LIVE`、
+  `source_missing_since` 清空、events 刷新。
+- **没有自动 purge。** 真正的删除必须是显式动作（将来的 `voyager history purge`），
+  另案设计。
+
+**Reason**: 旧实现是 `prune_missing_sessions()` 直接 `DELETE` session + events +
+files + FTS。但走到那一步时 provider 文件**已经没了**，索引握着的是**唯一一份**
+归一化副本 ⇒ provider 一轮转（Codex 清老 rollout、`~/.claude/projects` 被清、
+ZCode/Cursor 换库）就把用户从没要求删除的历史**永久**抹掉了。
+"source 不见了"被当成了"用户想删"。这两件事没有任何蕴含关系。
+
+**Alternatives**: 只加一个 `retained` bool（doctor/timeline 无法解释原因）；
+`SOURCE_MISSING` 与 `RETAINED` 分成两个状态（O2 里没有任何行为差异 —— 状态只
+存在却不被区分，就会有人把它设错，所以合并成一个）；自动按时间 purge
+（会把"暂时不可见"（网络盘、临时清理）当成"永久删除"）。
+
+**Consequences**: 迁移是**纯 additive**（`ALTER TABLE ADD COLUMN`），旧行
+`source_state` 保持 NULL 并读作 LIVE —— **不回填**，因为"写这行时 source 是否在
+盘上"事后不可知，猜就会把活 session 标成 retained。retained 历史有成本，所以
+`store.retained_stats()` 量出 sessions/events/近似字节，`voyager doctor` 以
+**非阻塞**方式报告（`retention` 块 + `retained N session(s) …`）；只有在
+**某个 active WorkThread 一个 live member 都不剩**时才升级为 `warning`
+（`RETENTION_STRANDED_WORKTHREAD`），因为那时该 thread 的 continuity 已经
+无料可编。`api.overview` / `api.thread_detail` 与 thread brief 都会带上
+`source_state`（**标记，不隐藏**），UI 怎么显示留给 O3。
+回归在 `tests/test_retention.py`（14 个）+ 改写的
+`tests/test_cli.py::test_scan_retains_sessions_whose_source_vanished`。

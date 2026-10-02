@@ -53,9 +53,16 @@ def test_scan_is_idempotent(adapter_of, patch_paths, codex_fixture, tmp_path,
     assert data == {"sessions": 1, "events": 5, "by_provider": {"codex": 1}}
 
 
-def test_scan_prunes_sessions_whose_source_vanished(adapter_of, patch_paths,
-                                                    codex_fixture, tmp_path,
-                                                    capsys):
+def test_scan_retains_sessions_whose_source_vanished(adapter_of, patch_paths,
+                                                     codex_fixture, tmp_path,
+                                                     capsys):
+    """O2: a rotated source retains the history instead of deleting it.
+
+    This test used to assert `pruned 1 vanished session(s)` and
+    `stats["sessions"] == 0`.  That contract was the bug: the provider file is
+    already gone at this point, so the index held the only normalized copy, and
+    "the source is missing" was being read as "the user wants it deleted".
+    """
     ad = adapter_of("codex")
     patch_paths(ad, SESSIONS_DIR=codex_fixture)
     db = tmp_path / "index.db"
@@ -66,8 +73,15 @@ def test_scan_prunes_sessions_whose_source_vanished(adapter_of, patch_paths,
         f.unlink()          # the agent deleted its session file
     assert main(["--db", str(db), "scan", "--platform", "codex"]) == 0
     out = capsys.readouterr().out
-    assert "pruned 1 vanished session(s)" in out
-    assert json.loads(_run(capsys, ["--db", str(db), "stats"]))["sessions"] == 0
+    assert "retained 1 session(s) whose sources vanished" in out
+    # the session is still there -- retained, not deleted
+    assert json.loads(_run(capsys, ["--db", str(db), "stats"]))["sessions"] == 1
+    from voyager.store import Store
+    s = Store(db)
+    try:
+        assert s.retained_sessions(), "it must be marked SOURCE_MISSING"
+    finally:
+        s.close()
 
 
 # --- read commands ---------------------------------------------------------

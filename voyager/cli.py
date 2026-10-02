@@ -102,10 +102,12 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
 
         sources = ad.discover()
         if not sources:
-            # nothing on disk anymore: drop everything this provider had
+            # nothing on disk anymore: the provider's history is RETAINED, not
+            # dropped (O2 — a vanished source is not a request to delete)
             gone = store.prune_missing_sessions(ad.provider, set())
             if gone and not quiet:
-                print(f"  {ad.provider}: pruned {gone} vanished session(s)")
+                print(f"  {ad.provider}: retained {gone} session(s) whose "
+                      f"sources vanished")
             elif not quiet:
                 print(f"  {ad.provider}: no sources found")
             continue
@@ -181,7 +183,8 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
 
         gone = store.prune_missing_sessions(ad.provider, disk_paths)
         if gone and not quiet:
-            print(f"  {ad.provider}: pruned {gone} vanished session(s)")
+            print(f"  {ad.provider}: retained {gone} session(s) whose "
+                  f"sources vanished")
 
         stats = store.stats()
         if not quiet:

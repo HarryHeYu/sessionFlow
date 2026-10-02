@@ -57,12 +57,17 @@ class Contribution:
     last_ts: Optional[float]
     last_line: Optional[str] = None
     native_session_id: Optional[str] = None
+    #: O2 retention state.  A contribution whose sources have all vanished is
+    #: still part of the thread's history — the brief marks it rather than
+    #: dropping it, so "this agent contributed" stays true after a rotation.
+    source_state: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {"sid": self.sid, "provider": self.provider, "band": self.band,
                 "events": self.events, "human_turns": self.human_turns,
                 "last_ts": self.last_ts, "last_line": self.last_line,
-                "native_session_id": self.native_session_id}
+                "native_session_id": self.native_session_id,
+                "source_state": self.source_state}
 
 
 @dataclass
@@ -184,6 +189,8 @@ def activity(store, thread_id: str, limit: int = 20) -> Dict[str, Any]:
             last_ts=(ev["last"] if ev else None),
             last_line=last_lines.get(sid),
             native_session_id=(sess["native_id"] if "native_id" in sess.keys() else None),
+            source_state=(sess["source_state"]
+                          if "source_state" in sess.keys() else None),
         ))
     # most recent contribution first; deterministic tie-break on sid
     rows.sort(key=lambda c: (-(c.last_ts or 0), c.sid))
@@ -266,9 +273,13 @@ def render(brief: Brief) -> str:
     if not brief.contributions:
         lines.append("  (none attached)")
     for c in brief.contributions:
-        lines.append("  %-9s %-8s events=%-6d human=%-4d %s"
+        # O2: mark, never hide.  A rotated source does not stop this agent from
+        # having contributed to the thread.
+        marker = " [source missing]" if c.source_state == "SOURCE_MISSING" else ""
+        lines.append("  %-9s %-8s events=%-6d human=%-4d %s%s"
                      % (c.provider, c.band, c.events, c.human_turns,
-                        ("last %s" % int(c.last_ts)) if c.last_ts else ""))
+                        ("last %s" % int(c.last_ts)) if c.last_ts else "",
+                        marker))
         if c.last_line:
             lines.append("      %s" % c.last_line)
 

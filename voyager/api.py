@@ -86,6 +86,9 @@ def overview(db: Optional[Path] = None, repo: Optional[str] = None,
             "updated_at": r["updated_at"], "title": r["title"],
             "last_user": last_user,
             "message_count": r["message_count"], "tool_count": r["tool_count"],
+            # O2: machine-readable retention state, so a UI can mark
+            # "[source missing]" instead of silently hiding the row.
+            "source_state": r["source_state"],
         })
     store.close()
     recent.sort(key=lambda x: x["updated_at"] or 0, reverse=True)
@@ -106,7 +109,8 @@ def thread_detail(db: Optional[Path] = None, thread_id: str = "") -> Dict[str, A
     members = [
         {k: m[k] for k in ("id", "provider", "native_id", "title",
                            "message_count", "tool_count", "updated_at",
-                           "can_resume")}
+                           "can_resume", "source_state",
+                           "source_missing_since")}
         for m in store.thread_members(t["id"])
     ]
     pending = [dict(p) for p in store.thread_pending_list(t["id"])]

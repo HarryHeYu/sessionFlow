@@ -1,6 +1,14 @@
 """Minimal regression tests for the index layer (no provider data needed).
 
 Run:  python tests/test_store.py
+
+NOTE: this file is a **manual script**, not a pytest module — it has no
+`test_*` functions, so `pytest tests/` collects nothing from it (verify with
+`pytest tests/test_store.py --collect-only`).  It had drifted for that reason:
+it passed session *ids* to `prune_missing_sessions`, which compares *paths*, so
+it would have failed loudly had anything ever run it.  The collected equivalents
+are `tests/test_retention.py` (O2 retention semantics) and `tests/test_store.py`
+peers such as `tests/test_threads.py`.
 """
 
 import os
@@ -48,14 +56,9 @@ def main() -> int:
         if not cond:
             failures.append(name)
 
-    # like cmd_scan does: live_ids seeded from source rows still on disk
-    def live_from_disk(store: Store, provider: str, disk_paths: set) -> set:
-        return {
-            r["sid"] for r in store.q(
-                "SELECT path, sid FROM sources WHERE provider=?", (provider,))
-            if r["sid"] and r["path"] in disk_paths
-        }
-
+    # like cmd_scan does: the set of source PATHS still on disk.  The helper
+    # this used to be returned session ids, which is not what
+    # prune_missing_sessions compares against -- see the module docstring.
     with Store(DB) as store:
         # 1. multi-session artifact: N sessions from ONE source path
         src = make_source("multi")
@@ -67,39 +70,44 @@ def main() -> int:
         check("multi: 3 source rows (one per sid)",
               store.q("SELECT COUNT(*) n FROM sources")[0]["n"] == 3)
 
-        # 2. source unchanged -> source_changed False; prune (with live ids
-        #    derived the way cmd_scan derives them) keeps every session
+        # 2. source unchanged -> source_changed False; prune with the path still
+        #    on disk keeps every session LIVE
         check("multi: unchanged detected",
               not store.source_changed("prov", src))
-        live = live_from_disk(store, "prov", {str(src)})
-        store.prune_missing_sessions("prov", live)
-        check("multi: unchanged source survives prune",
+        store.prune_missing_sessions("prov", {str(src)})
+        check("multi: unchanged source keeps every session",
               store.q("SELECT COUNT(*) n FROM sessions")[0]["n"] == 3)
+        check("multi: still LIVE",
+              store.q("SELECT COUNT(*) n FROM sessions WHERE "
+                      "COALESCE(source_state,'LIVE')='LIVE'")[0]["n"] == 3)
 
-        # 3. rescan now returns only s1,s2 -> s3 pruned
-        for sid in ("s1", "s2"):
-            s, evs = bundle(sid)
-            store.replace_session(s, evs, "prov", src)
-        store.prune_missing_sessions("prov", {"prov:s1", "prov:s2"})
-        check("multi: missing session pruned",
-              store.q("SELECT COUNT(*) n FROM sessions")[0]["n"] == 2)
+        # 3. the source vanishes -> O2 RETAINS the history; it does not delete.
+        #    (This block used to assert `== 2`, i.e. that a session was dropped.)
+        store.prune_missing_sessions("prov", set())
+        check("multi: vanished source retains every session",
+              store.q("SELECT COUNT(*) n FROM sessions")[0]["n"] == 3)
+        check("multi: marked SOURCE_MISSING",
+              store.q("SELECT COUNT(*) n FROM sessions WHERE "
+                      "source_state='SOURCE_MISSING'")[0]["n"] == 3)
 
         # 4. touch the source -> changed True again
         src.write_bytes(b"y")
         check("multi: content change detected",
               store.source_changed("prov", src))
 
-        # 5. single-session artifact per file: delete one file -> only it prunes
+        # 5. single-session artifact per file: removing one file retains only it
         f1, f2 = make_source("f1"), make_source("f2")
         for sid, f in (("a", f1), ("b", f2)):
             s, evs = bundle(sid)
             store.replace_session(s, evs, "prov2", f)
         os.remove(f1)
-        live = live_from_disk(store, "prov2", {str(f2)})
-        store.prune_missing_sessions("prov2", live)
-        ids = {r["native_id"] for r in store.q(
-            "SELECT native_id FROM sessions WHERE provider='prov2'")}
-        check("single: deleted source pruned, other kept", ids == {"b"})
+        store.prune_missing_sessions("prov2", {str(f2)})
+        rows = {r["native_id"]: r["source_state"] for r in store.q(
+            "SELECT native_id, source_state FROM sessions WHERE provider='prov2'")}
+        check("single: both sessions kept", set(rows) == {"a", "b"})
+        check("single: only the vanished one is SOURCE_MISSING",
+              rows.get("a") == "SOURCE_MISSING"
+              and rows.get("b") in (None, "LIVE"))
 
         # 6. FTS: rowid alignment + search
         s, evs = bundle("fts", 3)
