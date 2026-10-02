@@ -13,14 +13,39 @@ This directory is the **Phase 7 client** for the voyager local API
 - WorkThreads tree view (activity bar → Voyager)
 - `Voyager: Preview Continuation Bundle` — renders a bundle in a Markdown
   tab with the token estimate
+- **`Voyager: Open Context Composer`** (also the `＋` on the WorkThreads view
+  title) — the Phase 7 composer:
+  - checkbox session picker, scoped to the configured repo, newest first
+  - goal input + budget selector (`compact` / `balanced` / `full` / `auto`)
+  - live Continuation Bundle preview with the token estimate, and the
+    dropped / trimmed section names when a budget bites
+  - `Copy CLI command` — yields the equivalent
+    `voyager handoff <id> --goal "…" --budget … --to <agent>` or
+    `voyager merge <ids> …`, ready to paste
+  - `Copy bundle` — the rendered Markdown
 
 ## What is scaffold / pending
 
-- Context Composer webview (checkbox session picker → live preview →
-  launch) — the API op (`bundle_preview`) already exists
-- One-click Switch (uses the same core as `voyager switch`; the lease flow
-  makes unattended launch risky, so launch stays manual for now)
-- Packaging/icon (media/voyager.svg is a placeholder)
+- One-click Switch: the Composer deliberately hands you a command instead of
+  launching. `bundle_preview` writes nothing, and the lease flow (D13) is what
+  decides who may write a WorkThread — starting an agent from a webview would
+  route around the one safety property the core actually guarantees.
+- timeline view mixing agent events with git history
+- packaging: marketplace listing, published VSIX
+
+## Composer safety notes
+
+- The webview is one self-contained document with a nonce-based CSP: no CDN,
+  no network, no external asset.
+- Session titles and paths come from agent transcripts and are untrusted, so
+  every field is written with `textContent` — never as markup.
+- Nothing in the Composer writes: no file, no provider store, no index. The
+  only side effect a click can have is putting text on your clipboard.
+- `tests/test_vscode_extension.py` guards the parts CI cannot run: that
+  `package.json` only points at files that exist, that every contributed
+  command has a handler, that the document is self-contained, and that the
+  embedded script still parses (the document is built from a JS template
+  literal, so a stray backtick silently truncates it).
 
 ## Try it
 

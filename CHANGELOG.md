@@ -10,6 +10,30 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **VS Code Context Composer** (roadmap Phase 7 / issue #8, the remaining half).
+  `Voyager: Open Context Composer` — also the `＋` on the WorkThreads view title
+  — opens a webview with a checkbox session picker scoped to the configured
+  repo, a goal input, a budget selector, a live Continuation Bundle preview
+  with the token estimate (and the dropped/trimmed section names when a budget
+  bites), and two copy buttons: the rendered Markdown, or the equivalent
+  `voyager handoff <id> --goal "…" --budget … --to <agent>` /
+  `voyager merge <ids> …` command. It **never launches**: `bundle_preview`
+  writes nothing, and the lease flow (D13) is what decides who may write a
+  WorkThread, so starting an agent from a webview would route around the one
+  safety property the core actually guarantees. The document is one
+  self-contained file behind a nonce-based CSP (no CDN, no network, no
+  external asset), and every session field — titles come from agent
+  transcripts and are untrusted — is written with `textContent`, never as
+  markup.
+- **`tests/test_vscode_extension.py`** — the extension is a scaffold CI cannot
+  execute, so this guards the parts a human would otherwise have to check by
+  hand: that `package.json` only points at files that exist, that every
+  contributed command has a handler, that the webview document is
+  self-contained and its nonce reaches both the CSP and the script tag, that
+  nothing assigns untrusted text via `innerHTML`, and that the embedded script
+  still parses (the document is built from a JS template literal, so a stray
+  backtick silently truncates it).
+
 - **`voyager doctor`** — one command that answers "is this healthy, and why not":
   store/schema, per-provider source paths, hook registration and config validity,
   the last observed trigger, pending attaches, active WorkThreads, ambiguity,
@@ -284,6 +308,18 @@ All notable changes to Voyager are documented here. Format loosely follows
   taken when work actually changes hands, and is released when the target has
   no launch path. See `docs/DECISIONS.md` D14 and
   `tests/test_handoff_convergence.py`.
+- **The VS Code activity-bar icon had never existed.** `package.json` has
+  pointed `contributes.viewsContainers.activitybar[].icon` at
+  `media/voyager.svg` since the scaffold landed, but the `media/` directory
+  was never created — so the Voyager icon in the activity bar was blank, and
+  `vscode-extension/README.md` described the file as "a placeholder". The icon
+  now exists, and `tests/test_vscode_extension.py` fails if `package.json`
+  ever points at a missing file again.
+- **The API bridge leaked an output channel per stderr chunk.** `getBridge`
+  called `vscode.window.createOutputChannel("Voyager")` *inside* the
+  `stderr.on("data")` handler, so a chatty child created a new channel on
+  every write. One channel is now created for the bridge's lifetime and
+  registered as a disposable.
 
 ### Added
 - **`tests/test_switch.py`: Claude → Grok cross-provider continuity, end to end.**

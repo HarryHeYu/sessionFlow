@@ -15,6 +15,7 @@
 
 const vscode = require("vscode");
 const { spawn } = require("child_process");
+const composer = require("./composer");
 
 let bridge = null;
 let requestSeq = 0;
@@ -42,10 +43,13 @@ function getBridge(context) {
   const child = spawn(pythonPath(), ["-m", "voyager.api", "serve"], {
     cwd: repoPath() || undefined,
   });
-  child.stderr.on("data", (d) => {
-    const ch = vscode.window.createOutputChannel("Voyager");
-    ch.appendLine("[voyager api stderr] " + d.toString());
-  });
+  // One channel for the bridge's lifetime. The scaffold created a channel per
+  // stderr chunk, so a chatty child leaked a new channel on every write.
+  const stderrChannel = vscode.window.createOutputChannel("Voyager");
+  context.subscriptions.push(stderrChannel);
+  child.stderr.on("data", (d) =>
+    stderrChannel.appendLine("[voyager api stderr] " + d.toString())
+  );
   const pending = new Map();
   let buffer = "";
   child.stdout.on("data", (d) => {
@@ -149,6 +153,88 @@ async function previewBundle(context) {
   }
 }
 
+let composerPanel = null;
+
+/**
+ * Context Composer — the remaining half of Phase 7 / issue #8.
+ *
+ * Checkbox session picker -> live Continuation Bundle preview -> token
+ * estimate -> a CLI command you can copy. It deliberately does NOT launch:
+ * `bundle_preview` writes nothing, and the lease flow (D13) is what decides
+ * who may write a WorkThread, so starting an agent from a webview would route
+ * around the one safety property the core actually guarantees.
+ */
+function openComposer(context) {
+  if (composerPanel) {
+    composerPanel.reveal(vscode.ViewColumn.Beside);
+    return;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    "voyager.composer",
+    "Voyager: Context Composer",
+    vscode.ViewColumn.Beside,
+    { enableScripts: true, retainContextWhenHidden: true }
+  );
+  composerPanel = panel;
+  panel.webview.html = composer.html(
+    String(Date.now()) + String(Math.random()).slice(2)
+  );
+
+  async function sendSessions() {
+    try {
+      const res = await getBridge(context).request("sessions", {
+        repo: repoPath(),
+        limit: 200,
+      });
+      if (res.error) return showError(res.error);
+      panel.webview.postMessage({ type: "sessions", items: res.result || [] });
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    try {
+      if (msg.type === "ready") {
+        await sendSessions();
+      } else if (msg.type === "preview") {
+        if (!msg.refs || !msg.refs.length) {
+          panel.webview.postMessage({
+            type: "preview", ok: true, bundle: "", tokens: null,
+          });
+          return;
+        }
+        const res = await getBridge(context).request("bundle_preview", {
+          session_refs: msg.refs,
+          goal: msg.goal || null,
+          budget: msg.budget || null,
+        });
+        if (res.error) {
+          panel.webview.postMessage({
+            type: "preview", ok: false, error: res.error,
+          });
+          return;
+        }
+        const r = res.result;
+        panel.webview.postMessage({
+          type: "preview", ok: true, bundle: r.bundle,
+          tokens: r.estimated_tokens, budget: r.budget,
+          dropped: r.dropped || [], trimmed: r.trimmed || [],
+        });
+      } else if (msg.type === "copy") {
+        await vscode.env.clipboard.writeText(msg.text || "");
+        vscode.window.showInformationMessage("Voyager: copied to clipboard.");
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+
+  panel.onDidDispose(() => {
+    composerPanel = null;
+  });
+}
+
 class ThreadsProvider {
   constructor(context) {
     this._bridge = getBridge(context);
@@ -187,6 +273,9 @@ function activate(context) {
     ),
     vscode.commands.registerCommand("voyager.bundlePreview", () =>
       previewBundle(context)
+    ),
+    vscode.commands.registerCommand("voyager.openComposer", () =>
+      openComposer(context)
     ),
     vscode.commands.registerCommand("voyager.refresh", () => provider.refresh())
   );

@@ -7,15 +7,21 @@
 
 ## 1. VS Code Context Composer (issue #8, remainder)
 
-The extension scaffold ships an overview channel, a WorkThreads tree and a
-bundle-preview flow. Still pending:
+**Shipped 2026-10-02**: the Context Composer webview — checkbox session
+picker scoped to the repo, goal + budget controls, live Continuation Bundle
+preview with the token estimate, dropped/trimmed reporting, and a copyable
+CLI command. The activity-bar icon `media/voyager.svg` also now exists;
+`package.json` had pointed at it since the scaffold landed, but `media/` was
+never created, so the icon had always been blank.
 
-- Context Composer webview: checkbox session picker → live bundle preview
-  → token estimate → launch button
-- one-click Switch (today launch stays in the CLI: `voyager switch
-  <agent> --launch` — the lease flow makes unattended launch risky to UX)
+Still pending:
+
+- one-click Switch. The Composer deliberately hands you the command rather
+  than launching: `bundle_preview` writes nothing, and the lease flow (D13)
+  is what decides who may write a WorkThread, so an unattended launch from a
+  webview would route around the core's one real safety property.
 - timeline view mixing agent events with git history
-- packaging: icon, marketplace listing, published VSIX
+- packaging: marketplace listing, published VSIX
 
 ## 2. Auto-clustering research (re-scoped from issue #3)
 

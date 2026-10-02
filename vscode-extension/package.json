@@ -7,13 +7,27 @@
   "license": "MIT",
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Other"],
-  "activationEvents": ["onCommand:voyager.overview"],
+  "activationEvents": [
+    "onCommand:voyager.overview",
+    "onCommand:voyager.openComposer",
+    "onView:voyager.threads"
+  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
       { "command": "voyager.overview", "title": "Voyager: Show Overview" },
-      { "command": "voyager.bundlePreview", "title": "Voyager: Preview Continuation Bundle" }
+      { "command": "voyager.bundlePreview", "title": "Voyager: Preview Continuation Bundle" },
+      { "command": "voyager.openComposer", "title": "Voyager: Open Context Composer" }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "voyager.openComposer",
+          "when": "view == voyager.threads",
+          "group": "navigation"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         { "id": "voyager", "title": "Voyager", "icon": "media/voyager.svg" }

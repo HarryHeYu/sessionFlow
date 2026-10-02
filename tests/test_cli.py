@@ -193,7 +193,17 @@ def test_isolation_guard_redirects_real_paths(_isolated_from_the_real_machine,
 
     assert not _isolated_from_the_real_machine.exists()   # "no agent storage"
     default_db = store_mod.default_db_path()
-    assert ".voyager" not in str(default_db)
+    # Assert *where* it landed, not what the path spells.  This used to be
+    # `assert ".voyager" not in str(default_db)`, which is a proxy for "not the
+    # real ~/.voyager/index.db" — but the basetemp is chosen by the harness, so
+    # any run with `--basetemp=.../.voyager-scratch` failed on a substring that
+    # says nothing about isolation.  Pinning the parent proves the redirection
+    # actually happened, which is the real content of the guard.
+    root = _isolated_from_the_real_machine.parent
+    assert default_db.parent == root, (
+        "the default index must be redirected into the isolated temp root, "
+        "not left pointing at the user's real voyager directory")
+    assert default_db.name == "index.db"
     assert store_mod.Store().db_path == default_db
     assert Path.cwd().parent == tmp_path.parent           # cwd is a temp dir
 
