@@ -361,12 +361,23 @@ def cmd_list(args) -> int:
         print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2, default=str))
         return 0
     print(f"{'ID':<44} {'PROV':<6} {'UPDATED':<17} {'MSG':>4} {'TOOL':>4}  TITLE")
+    retained = 0
     for r in rows:
         native = r["native_id"] or ""
         nid = native if len(native) <= 36 else native[:33] + "..."
+        # O2: mark, do not hide.  A retained session is real history, but it is
+        # not resumable and not part of live continuity.
+        mark = ""
+        if r["source_state"] == "SOURCE_MISSING":
+            mark = "[source missing] "
+            retained += 1
         print(f"{nid:<44} {r['provider']:<6} {_short_ts(r['updated_at']):<17} "
-              f"{r['message_count']:>4} {r['tool_count']:>4}  {(r['title'] or '')[:60]}")
+              f"{r['message_count']:>4} {r['tool_count']:>4}  {mark}{(r['title'] or '')[:60]}")
     print(f"\n{len(rows)} session(s). Use `voyager show <native-id|prefix>` for details.")
+    if retained:
+        print(f"{retained} of them are retained history: every source file is gone, "
+              f"so they stay searchable but are excluded from continuity "
+              f"(`voyager doctor` reports the totals).")
     return 0
 
 
@@ -412,6 +423,10 @@ def cmd_show(args) -> int:
         return 0
     print(f"{row['provider']}:{row['native_id']}")
     print(f"  title   : {row['title']}")
+    if row["source_state"] == "SOURCE_MISSING":
+        # O2: say it here too — otherwise this looks like a resumable session.
+        print(f"  source  : MISSING since {_short_ts(row['source_missing_since'])}"
+              f"  — retained history: searchable, not resumable")
     print(f"  time    : {_short_ts(row['started_at'])} -> {_short_ts(row['updated_at'])}")
     print(f"  cwd     : {row['cwd']}")
     if row["repo_root"]:
@@ -1047,14 +1062,20 @@ def _continue_thread(store: Store, t, args) -> int:
     given (D7) and otherwise compiles the continuation bundle from the
     thread's members.  The banner is printed here because the engine is mute.
     """
-    members = store.thread_members(t["id"])
+    all_members = store.thread_members(t["id"])
+    # O2: retained members (every source vanished) stay in the thread for
+    # display and search, but continuity runs on the live ones only.
+    members = store.live_thread_members(t["id"])
+    retained = len(all_members) - len(members)
     if not members:
-        print("thread " + t["id"] + " has no live member sessions",
-              file=sys.stderr)
+        print("thread " + t["id"] + " has no live member sessions"
+              + (" ({0} retained: every source vanished)".format(retained)
+                 if retained else ""), file=sys.stderr)
         store.close()
         return 1
-    print("thread {0}  [{1}]  {2} member(s)".format(
-        t["id"], t["status"], len(members)))
+    print("thread {0}  [{1}]  {2} member(s){3}".format(
+        t["id"], t["status"], len(members),
+        ", {0} retained".format(retained) if retained else ""))
     target = getattr(args, "to", None)
     if not target:
         resumable = [m for m in members if m["can_resume"] and m["resume_cmd"]]

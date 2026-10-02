@@ -347,6 +347,132 @@ def test_retained_stats_is_zero_when_nothing_is_retained(store, tmp_path):
     assert stats["oldest"] is None
 
 
+# --- 9. the handoff engine must obey the same rule -------------------------
+
+def _thread_with_one_retained(store, tmp_path, *, resume: bool = False):
+    """A thread with one live member and one retained member."""
+    live_src = _src(tmp_path, "hlive.jsonl")
+    gone_src = _src(tmp_path, "hgone.jsonl")
+    store.replace_session(_session("codex:hl", "needle-handoff-live"),
+                          _events("codex:hl", "needle-handoff-live"),
+                          "codex", live_src)
+    store.replace_session(
+        _session("codex:hg", "needle-handoff-gone", can_resume=resume),
+        _events("codex:hg", "needle-handoff-gone"), "codex", gone_src)
+    tid = store.thread_create(repo_root="E:/proj/demo", title="t")
+    store.thread_attach(tid, "codex:hl")
+    store.thread_attach(tid, "codex:hg")
+    gone_src.unlink()
+    store.prune_missing_sessions("codex", {str(live_src)})
+    return tid
+
+
+def test_handoff_thread_excludes_retained_members(store, tmp_path):
+    """The engine compiled retained history into the bundle before this."""
+    from voyager.continuity import handoff_thread
+
+    tid = _thread_with_one_retained(store, tmp_path)
+    out = tmp_path / "bundle.md"
+    res = handoff_thread(store, thread=tid, target="claude", output=out)
+
+    assert res["action"] == "bundle"
+    assert res["member_count"] == 1, "only the live member is handed off"
+    text = out.read_text(encoding="utf-8")
+    assert "needle-handoff-live" in text
+    assert "needle-handoff-gone" not in text, \
+        "a retained session must not be compiled into a continuation bundle"
+
+
+def test_handoff_never_native_resumes_a_retained_session(store, tmp_path):
+    """Its source is gone — the provider has nothing to resume."""
+    from voyager.continuity import handoff_thread
+
+    src = _src(tmp_path, "r.jsonl")
+    store.replace_session(
+        _session("codex:rr", "needle-resume", can_resume=True),
+        _events("codex:rr", "needle-resume"), "codex", src)
+    src.unlink()
+    store.prune_missing_sessions("codex", set())
+
+    row = store.session("codex:rr")[0]
+    res = handoff_thread(store, source=row, target="codex",
+                         output=tmp_path / "p.md")
+    assert res["action"] == "bundle", \
+        "a retained session must fall through to a bundle, not native-resume"
+
+
+def test_handoff_refuses_a_thread_with_only_retained_members(store, tmp_path):
+    from voyager.continuity import handoff_thread
+
+    src = _src(tmp_path, "only.jsonl")
+    store.replace_session(_session("codex:only", "needle-only"),
+                          _events("codex:only", "needle-only"), "codex", src)
+    tid = store.thread_create(repo_root="E:/proj/demo", title="t")
+    store.thread_attach(tid, "codex:only")
+    src.unlink()
+    store.prune_missing_sessions("codex", set())
+
+    res = handoff_thread(store, thread=tid, target="claude",
+                         output=tmp_path / "x.md")
+    assert res["action"] == "refused"
+    assert "retained" in res["error"], "say WHY there is nothing to continue"
+
+
+def test_discover_continuity_latest_holder_ignores_retained(store, tmp_path):
+    from voyager.auto import discover_continuity
+
+    tid = _thread_with_one_retained(store, tmp_path)
+    disc = discover_continuity(store, thread_id=tid)
+    assert disc["continuity_available"]
+    assert disc["latest_session"]["id"] == "codex:hl"
+    assert disc["retained_members"] == 1
+
+
+def test_continue_thread_refuses_when_only_retained_remains(store, tmp_path,
+                                                            capsys):
+    from voyager.cli import main
+
+    src = _src(tmp_path, "c.jsonl")
+    store.replace_session(
+        _session("codex:cr", "needle-continue", can_resume=True),
+        _events("codex:cr", "needle-continue"), "codex", src)
+    tid = store.thread_create(repo_root="E:/proj/demo", title="t")
+    store.thread_attach(tid, "codex:cr")
+    db = store.db_path
+    src.unlink()
+    store.prune_missing_sessions("codex", set())
+    store.close()
+
+    rc = main(["--db", str(db), "continue", "--thread", tid, "--no-launch"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "no live member sessions" in err
+    assert "retained" in err
+
+
+def test_list_and_show_mark_retained(store, tmp_path, capsys):
+    """Otherwise a retained session is indistinguishable from a live one."""
+    from voyager.cli import main
+
+    src = _src(tmp_path, "ls.jsonl")
+    store.replace_session(_session("codex:ls", "needle-list"),
+                          _events("codex:ls", "needle-list"), "codex", src)
+    db = store.db_path
+    src.unlink()
+    store.prune_missing_sessions("codex", set())
+    store.close()
+
+    assert main(["--db", str(db), "list"]) == 0
+    out = capsys.readouterr().out
+    assert "[source missing]" in out
+    assert "retained history" in out
+
+    assert main(["--db", str(db), "show", "codex:ls"]) == 0
+    out = capsys.readouterr().out
+    assert "MISSING since" in out
+    assert "not resumable" in out
+
+
 # --- 6. migration is additive ---------------------------------------------
 
 def test_migration_adds_columns_without_touching_rows(tmp_path):

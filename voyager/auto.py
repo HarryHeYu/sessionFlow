@@ -237,7 +237,11 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
                              "holder": lease["holder"] if lease else None,
                              "pid": lease["pid"] if lease else None}
 
-    members = store.thread_members(thread["id"])
+    # O2: "latest holder" is an active-provider statement, so it comes from
+    # live members; retained history is counted and reported separately.
+    all_members = store.thread_members(thread["id"])
+    members = store.live_thread_members(thread["id"])
+    result["retained_members"] = len(all_members) - len(members)
     if members:
         newest = max(members, key=lambda m: m["updated_at"] or 0)
         result["latest_holder"] = newest["provider"]

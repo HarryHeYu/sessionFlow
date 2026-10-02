@@ -916,6 +916,20 @@ def bundle_command(target: str, bundle_path: Path) -> Optional[List[str]]:
 # ---------------------------------------------------------------------------
 
 
+def is_live(row) -> bool:
+    """O2: can this session still feed continuity?
+
+    A session whose every source file has vanished is retained as history; it
+    stays searchable and visible, but it must not be compiled into a
+    continuation context or offered as a native-resume candidate.  NULL
+    (pre-O2 rows, manual inserts) reads as LIVE.
+    """
+    try:
+        return (row["source_state"] or "LIVE") != "SOURCE_MISSING"
+    except (IndexError, KeyError):
+        return True
+
+
 def resolve_handoff_source(
     store: Store,
     thread: Any = None,
@@ -971,7 +985,10 @@ def resolve_handoff_source(
         if t is None:
             return _fail("thread not found: {0}".format(thread))
         if not members:
-            members = store.thread_members(t["id"])
+            # O2: thread scope compiles from LIVE members only.  Retained
+            # history (every source gone) stays in the thread for display and
+            # search, but it is not something to continue from.
+            members = store.live_thread_members(t["id"])
 
     if t is None and members:
         # Adopt the WorkThread that already OWNS these sessions —
@@ -1064,8 +1081,18 @@ def handoff_thread(
     members = src["members"]
     if not members:
         res["action"] = "refused"
-        res["error"] = ("thread has no live member sessions" if tid
-                        else "no source session to hand off")
+        if tid:
+            # Say *why* there is nothing to continue: a thread whose members
+            # are all retained is a different situation from an empty one.
+            retained = store.retained_sessions()
+            held = [r["id"] for r in retained
+                    if r["id"] in set(store.thread_member_ids(tid))]
+            res["retained_members"] = held
+            res["error"] = ("thread has no live member sessions"
+                            + (" (all {0} member(s) retained: every source "
+                               "vanished)".format(len(held)) if held else ""))
+        else:
+            res["error"] = "no source session to hand off"
         return res
 
     # -- git dirty warning (never stash/reset; computed once, always) ------
@@ -1096,7 +1123,10 @@ def handoff_thread(
     # -- same-provider native resume (D7 priority) -------------------------
     resumable = [m for m in members
                  if target and m["provider"] == target
-                 and m["can_resume"] and m["resume_cmd"]]
+                 and m["can_resume"] and m["resume_cmd"]
+                 # O2: never native-resume a session whose source is gone —
+                 # the provider has nothing to resume.
+                 and is_live(m)]
     if resumable and mode == "bundle" and not force_bundle:
         cand = max(resumable, key=lambda x: x["updated_at"] or 0)
         if tid:

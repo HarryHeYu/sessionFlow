@@ -317,5 +317,17 @@ ZCode/Cursor 换库）就把用户从没要求删除的历史**永久**抹掉了
 （`RETENTION_STRANDED_WORKTHREAD`），因为那时该 thread 的 continuity 已经
 无料可编。`api.overview` / `api.thread_detail` 与 thread brief 都会带上
 `source_state`（**标记，不隐藏**），UI 怎么显示留给 O3。
-回归在 `tests/test_retention.py`（14 个）+ 改写的
+
+**"排除 continuity"必须是全路径的，不只是 startup 那条。** 第一次实现只改了
+`auto.get_continuation_context()`，结果 handoff 引擎仍在把 retained 历史编进
+bundle、并把 retained session 当作 native-resume 候选（`resolve_handoff_source`
+用的是 `thread_members`）。补齐后：`resolve_handoff_source` 的 thread scope 走
+`live_thread_members`；`handoff_thread` 的 resume 候选额外要求 `is_live()`，
+所以**即使显式指名**一个 retained session 也不会去 resume（退回 bundle）；
+`discover_continuity` 的 `latest_holder` 也只从 live member 里选；
+`continue --thread` 在全 retained 时**说明原因**再拒绝。
+`voyager list` / `show` 也会标记。**教训：加一条"某类 session 不参与 X"的规则时，
+要把 X 的每条路径都找出来，不能只改你第一个想到的那个。**
+
+回归在 `tests/test_retention.py`（22 个）+ 改写的
 `tests/test_cli.py::test_scan_retains_sessions_whose_source_vanished`。

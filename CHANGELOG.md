@@ -31,6 +31,13 @@ All notable changes to Voyager are documented here. Format loosely follows
   the thread brief carry `source_state` so a UI can mark `[source missing]`
   rather than hide the row. Migration is additive (`ALTER TABLE ADD COLUMN`);
   existing rows keep NULL, which reads as `LIVE`.
+  Every continuity path obeys the rule, not just the startup one: the handoff
+  engine (`resolve_handoff_source` → `live_thread_members`) compiles from live
+  members only, a retained session is never offered for native resume even when
+  it is named explicitly, `discover_continuity`'s "latest holder" ignores it, and
+  `continue --thread` refuses with a reason when every member is retained.
+  `voyager list` and `voyager show` mark it, so it cannot be mistaken for a
+  session that is still resumable.
 
 - **`docs/PERF_O1.md`** — performance forensics on the scan and read paths,
   with the counters spelled out, including two that had been lying: `commit()`
