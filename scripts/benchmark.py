@@ -348,13 +348,13 @@ def _scan_task(task, db, src):
 
 
 WORKERS = {
-    "overview": lambda db, repo, thread: _task_overview(db, repo, thread),
-    "sessions": lambda db, repo, thread: _task_sessions(db, repo, thread),
-    "thread_detail": lambda db, repo, thread: _task_thread_detail(
+    "overview": lambda db, repo, thread, src=None: _task_overview(db, repo, thread),
+    "sessions": lambda db, repo, thread, src=None: _task_sessions(db, repo, thread),
+    "thread_detail": lambda db, repo, thread, src=None: _task_thread_detail(
         db, repo, thread),
-    "search": lambda db, repo, thread: _task_search(db, repo, thread),
-    "summarize": lambda db, repo, thread: _task_summarize(db, repo, thread),
-    "compile": lambda db, repo, thread: _task_compile(db, repo, thread),
+    "search": lambda db, repo, thread, src=None: _task_search(db, repo, thread),
+    "summarize": lambda db, repo, thread, src=None: _task_summarize(db, repo, thread),
+    "compile": lambda db, repo, thread, src=None: _task_compile(db, repo, thread),
     "scan_initial": lambda db, repo, thread, src=None: _scan_task(
         "scan_initial", db, src),
     "scan_inc": lambda db, repo, thread, src=None: _scan_task(
@@ -403,7 +403,7 @@ def _spawn_worker(task, db, src, repo, thread) -> dict:
         [sys.executable, str(Path(__file__).resolve()),
          "worker", "--task", task, "--db", str(db), "--src", str(src or ""),
          "--repo", str(repo or ""), "--thread", str(thread or "")],
-        capture_output=True, text=True, timeout=3600, **BG)
+        capture_output=True, text=True, timeout=7200, **BG)
     lines = [l for l in r.stdout.splitlines() if l.strip().startswith("{")]
     if not lines:
         return {"task": task, "status": "worker-failed",
@@ -444,7 +444,10 @@ def run_suite(full: bool, out_json) -> None:
                  for t in read_tasks]
         if not codex100k.exists():
             gen_codex(codex100k, 100_000, 10)
-        jobs += [("scan_force", ":memory:", str(codex100k), None, None)]
+        # 1M events: file-backed (RAM pressure makes :memory: exceed the
+        # worker timeout)
+        jobs += [("scan_force", str(bench / "scan100k.db"), str(codex100k),
+                  None, None)]
 
     results = []
     for task, db, src, r, th in jobs:
