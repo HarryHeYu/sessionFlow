@@ -44,8 +44,14 @@ only). Still unsupported, each needs its own repeatable gate:
   follow-up; today `continue/handoff/merge` scan all providers)
 - **filesystem event watcher** — replace the 300s `voyager watch` poll
   with OS file events (correctness must not depend on it, D12)
-- ZCode incremental watermark (per-session max sequence) instead of
-  full-provider re-scan on mtime change
+- ~~ZCode incremental watermark (per-session max sequence) instead of
+  full-provider re-scan on mtime change~~ — **measured 2026-10-02 and NOT
+  justified.** The full re-scan's wall clock is ~100 % process-startup tax
+  (31 `git` spawns × 1.34 s in this sandbox), not database work: the parse
+  itself is sub-second, and `git_info`'s per-cwd cache already collapses 78
+  sessions to 9 lookups, so there is no N+1 to remove. Building the watermark
+  would optimise a cost that does not exist while adding a "missed session"
+  risk. See DECISIONS.md D4. Re-open only behind a non-sandbox measurement.
 - Cursor token counts (currently often 0) — dig into `agentKv` usage
   payloads
 

@@ -49,6 +49,26 @@ SQLite ≥3.34 即可用（本机 3.50）。
 
 **Consequences**: 有活动 ZCode 会话时每次 scan 多花 ~9s。后续可优化。
 
+**2026-10-02 复测（重要更正）**: 本机 ZCode DB 已涨到 71.4 MB / 78 session /
+8,868 event / 16,652 part，全量重扫 **41.6 s**。但拆开看：
+
+- 整个扫描只派生 **31 次 `subprocess.run`**，而本机沙箱每次进程启动约 **1.34 s**
+  ⇒ **≈100% 的耗时是进程启动税，不是数据库**。
+- ZCode 自己的解析（16k 次 JSON parse、8,868 个 event）在亚秒级。
+- `git_info` 的 per-cwd 缓存**工作正常**：78 个 session → 9 个不同目录 → 31 次 spawn
+  （而不是 78 × 4）。也就是说这里**没有** N+1。
+
+⇒ **上面的 Alternatives（per-session max(sequence) 水位）目前没有测量支持。**
+它要优化的是不存在的成本，却会引入「漏会话」的正确性风险（message/part 表没有水位，
+改动得自己维护游标）。**在真实终端（非沙箱）测出扫描确实成为瓶颈之前，不要做。**
+
+**顺带发现（与环境无关，值得记）**: 扫描的进程数 ≈ 不同工作区数 × 最多 4 条 git 命令
+（`rev-parse --show-toplevel` / `--abbrev-ref HEAD` / `rev-parse HEAD` / `remote get-url`）。
+本机 9 个仓库 → 31 次。若用户有 ~200 个仓库，真实终端下约 800 次 spawn（15–30 s）——
+那才是真正的可扩展性风险，而且**不限 ZCode**（`finish_session(session, git_info(cwd))`
+对每个 adapter 都按 session 调用）。真要优化，方向是把 4 条 git 命令合并成 1–2 条
+（`git rev-parse` 一次可接受多个参数），而不是改 ZCode 的扫描策略。
+
 ## D5 — Codex 按"文件名内嵌 session_id"分组合并 rollout
 
 **Decision**: 同一 session 的多个 rollout 文件（VSCode/Desktop 的 window 续接）合并为一个
