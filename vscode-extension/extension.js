@@ -251,12 +251,15 @@ class ThreadsProvider {
     try {
       const res = await this._bridge.request("overview", { repo: repoPath() });
       if (res.error) return [];
-      return res.result.threads.map(
-        (t) =>
-          new vscode.TreeItem(
-            `${t.id.slice(0, 14)}  members:${t.members}  ${t.title || ""}`
-          )
-      );
+      return res.result.threads.map((t) => {
+        const item = new vscode.TreeItem(
+          `${t.id.slice(0, 14)}  members:${t.members}  ${t.title || ""}`
+        );
+        item.contextValue = "thread";
+        item.threadId = t.id;
+        item.tooltip = "Right-click for one-click switch";
+        return item;
+      });
     } catch (e) {
       return [];
     }
@@ -277,8 +280,37 @@ function activate(context) {
     vscode.commands.registerCommand("voyager.openComposer", () =>
       openComposer(context)
     ),
-    vscode.commands.registerCommand("voyager.refresh", () => provider.refresh())
+    vscode.commands.registerCommand("voyager.refresh", () => provider.refresh()),
+    vscode.commands.registerCommand("voyager.switchThread", (item) =>
+      switchThread(context, item)
+    )
   );
+}
+
+async function switchThread(context, item) {
+  if (!item || !item.threadId) {
+    vscode.window.showErrorMessage("Voyager: no WorkThread selected.");
+    return;
+  }
+  const target = await vscode.window.showQuickPick(
+    ["codex", "claude", "grok"],
+    {
+      placeHolder:
+        "Voyager one-click switch: hand the WorkThread to which agent?",
+      title: "Voyager switch",
+    }
+  );
+  if (!target) return;
+  const terminal = vscode.window.createTerminal({
+    name: `voyager switch -> ${target}`,
+    cwd: repoPath() || undefined,
+  });
+  terminal.show(true);
+  terminal.sendText(`voyager switch ${target}`);
+  vscode.window.showInformationMessage(
+    `Voyager: handing the WorkThread to ${target} (lease + continuation + launch).`
+  );
+  vscode.commands.executeCommand("voyager.refresh");
 }
 
 function deactivate() {}

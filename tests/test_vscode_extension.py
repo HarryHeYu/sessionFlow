@@ -160,3 +160,25 @@ def test_extension_js_parses(tmp_path):
         proc = subprocess.run([node, "--check", str(EXT / name)],
                               capture_output=True, text=True)
         assert proc.returncode == 0, "%s: %s" % (name, proc.stderr)
+
+
+def test_one_click_switch_command_is_wired_end_to_end(pkg, extension_js):
+    """Phase 7 one-click switch: the tree items are switch targets, the
+    command is contributed with an inline menu on the threads view, and the
+    handler runs `voyager switch <target>` through the CLI surface (the
+    P9 read-only API stays read-only — the engine is shared, not forked)."""
+    commands = {c["command"]: c for c in pkg["contributes"]["commands"]}
+    assert "voyager.switchThread" in commands
+    menus = pkg["contributes"]["menus"]["view/item/context"]
+    entry = next(m for m in menus if m["command"] == "voyager.switchThread")
+    assert entry["when"] == "view == voyager.threads && viewItem == thread"
+    assert entry["group"].startswith("inline")
+
+    assert 'contextValue = "thread"' in extension_js
+    assert "voyager.switchThread" in extension_js
+    assert "voyager switch ${target}" in extension_js
+    # the switch goes through the CLI engine — the read-only API gains no
+    # handoff op: the P9 boundary is pinned by checking the op registry
+    api_text = (EXT.parent / "voyager" / "api.py").read_text(encoding="utf-8")
+    ops_block = api_text.split("_OPS = {", 1)[1].split("}", 1)[0]
+    assert "handoff" not in ops_block
