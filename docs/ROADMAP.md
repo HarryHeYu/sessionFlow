@@ -5,10 +5,10 @@
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
 **Phase 1b shipped (`5e8271c`); Phase 2 COMPLETE — 2a WorkThread (`b580001`/`934dfd5`), 2b lease (`c41f99b`), 2c deferred items closed (MCP voyager_thread + deterministic --repo thread resolution; multi-signal auto-clustering re-scoped as a later enhancement under #3).**
 **Phase 3 shipped (`d931b02`); Phase 4 shipped (`96fc752`); Phase 5 shipped (`2f01a7f`); **
-**Phase 6 `voyager switch` shipped; Phase 7 partially shipped — core API + stdio bridge + VS Code extension scaffold (Composer webview + one-click switch UI still pending; see CHANGELOG).**
+**Phase 6 `voyager switch` shipped; Phase 7 partially shipped — core API + stdio bridge + VS Code extension scaffold + Context Composer webview + timeline view + one-click switch (VSIX packaging still pending; see CHANGELOG).**
 
 **Continuity Engine 主线到此完整：`index → WorkThread → goal rank → budget → skill → lease → switch → API/UI client`。**
-Phase 7 is partially shipped (API/bridge/scaffold + Context Composer webview done; one-click switch UI, timeline view and VSIX packaging pending).
+Phase 7 is partially shipped (API/bridge/scaffold + Context Composer webview + timeline view + one-click switch done; VSIX packaging pending).
 
 **Final assessment (2026-09-20; classification corrected 2026-09-23)**: All roadmap phases complete. Zero-Touch Startup Continuity core implementation verified via pytest (`374 collected → 372 passed, 2 skipped` with the full dev extras; `356 passed, 18 skipped` simulated core-only).
 
@@ -855,7 +855,7 @@ voyager switch codex
 
 User-visible: one command. Internally: scan → select → compile → launch.
 
-### Phase 7 — VS Code sidebar / Context Composer  *(partially shipped: API + bridge + extension scaffold + Context Composer webview; one-click switch UI, timeline view and VSIX packaging pending — docs/POST-1.0.md)*
+### Phase 7 — VS Code sidebar / Context Composer  *(partially shipped: API + bridge + extension scaffold + Context Composer webview + timeline view + one-click switch; VSIX packaging pending — docs/POST-1.0.md)*
 
 Only after Phases 1–4 exist, so the UI is a client of the compiler.
 
@@ -885,7 +885,7 @@ Treat the checkboxes as the implementation contract.
 | [#6](https://github.com/HarryHeYu/sessionFlow/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 *(shipped `2f01a7f`)* |
 | [#7](https://github.com/HarryHeYu/sessionFlow/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *(shipped — see CHANGELOG)* |
 | [#10](https://github.com/HarryHeYu/sessionFlow/issues/10) | Optional transcript transplant (per-adapter writers) | later | #9, **#11** — **stays OPEN**: codex/grok writers shipped (opt-in, lease-gated); claude/dsh unsupported pending probe gates |
-| [#8](https://github.com/HarryHeYu/sessionFlow/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 — **partially shipped** (API + bridge + extension scaffold + Context Composer webview ✅; one-click switch UI, timeline view and VSIX packaging pending) |
+| [#8](https://github.com/HarryHeYu/sessionFlow/issues/8) | VS Code sidebar / Context Composer | 7 | #3, #4, #5 — **partially shipped** (API + bridge + extension scaffold + Context Composer webview + timeline view + one-click switch ✅; VSIX packaging pending) |
 
 #1 is the umbrella. Close it when #2–#7, #9 and #11 are done; #8 and
 #10 are post-moat (#10 is now Grok/Codex-shaped, still lease-gated).

@@ -17,7 +17,6 @@ import json
 import os
 import subprocess
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,6 +24,7 @@ from .model import text_of
 from .provenance import order_rows_for_l1, session_band
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import Store
+from .util import fmt_ts
 from .winsubprocess import background_subprocess_kwargs
 
 PROMPT_TARGETS = {
@@ -56,12 +56,6 @@ def get_bundles_dir() -> Path:
     except OSError:
         pass
     return p
-
-
-def _fmt_ts(ts) -> str:
-    if not ts:
-        return "?"
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
 def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
@@ -570,7 +564,7 @@ def build_continuation_bundle(
             first_row, first_ev = all_user_msgs[0]
             L.append(
                 f"**Initial request** ([{first_row['provider']}:{first_row['native_id'][:16]}] "
-                f"at {_fmt_ts(first_ev['ts'])}):"
+                f"at {fmt_ts(first_ev['ts'])}):"
             )
             L.append("")
             L.append(first_ev["content"][: _USER_MAX * 2])
@@ -580,7 +574,7 @@ def build_continuation_bundle(
                 L.append("")
                 for r, ev in all_user_msgs[1:]:
                     L.append(
-                        f"- [{_fmt_ts(ev['ts'])}] `[{r['provider']}:{r['native_id'][:16]}]`: "
+                        f"- [{fmt_ts(ev['ts'])}] `[{r['provider']}:{r['native_id'][:16]}]`: "
                         f"{ev['content'][:_USER_MAX]}"
                     )
                 L.append("")
@@ -637,7 +631,7 @@ def build_continuation_bundle(
             if ev["kind"] == "assistant" and ev["content"]
         ]
         if asst:
-            ts_str = _fmt_ts(r["updated_at"] or asst[-1]["ts"])
+            ts_str = fmt_ts(r["updated_at"] or asst[-1]["ts"])
             snippet = asst[-1]["content"].strip().replace("\n", " ")[:250]
             older_conclusions.append(
                 f"- `[{r['provider']}:{r['native_id'][:16]}]` ({ts_str}): {snippet}"
@@ -741,14 +735,14 @@ def build_continuation_bundle(
     for r in sorted_rows:
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "error" and ev["content"]:
-                all_errs.append(f"[{_fmt_ts(ev['ts'])}] {ev['content'][:250]}")
+                all_errs.append(f"[{fmt_ts(ev['ts'])}] {ev['content'][:250]}")
             elif (
                 ev["kind"] == "tool_call"
                 and (ev["exit_code"] or 0) not in (0, None)
                 and ev["command"]
             ):
                 cmd_short = " ".join(str(ev["command"]).split())[:200]
-                all_errs.append(f"[{_fmt_ts(ev['ts'])}] exit {ev['exit_code']}: `{cmd_short}`")
+                all_errs.append(f"[{fmt_ts(ev['ts'])}] exit {ev['exit_code']}: `{cmd_short}`")
 
     if all_errs:
         L.append("## Errors encountered")
@@ -767,7 +761,7 @@ def build_continuation_bundle(
     for r in sorted_rows:
         prov = r["provider"]
         nid = r["native_id"]
-        t_span = f"{_fmt_ts(r['started_at'])} → {_fmt_ts(r['updated_at'])}"
+        t_span = f"{fmt_ts(r['started_at'])} → {fmt_ts(r['updated_at'])}"
         title = r["title"] or "(no title)"
         counts = f"{r['message_count']} msgs / {r['tool_count']} tools"
         repo = f" repo=`{r['repo_root'] or r['cwd'] or '?'}`"

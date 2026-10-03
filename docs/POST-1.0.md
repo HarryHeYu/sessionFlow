@@ -14,13 +14,15 @@ CLI command. The activity-bar icon `media/voyager.svg` also now exists;
 `package.json` had pointed at it since the scaffold landed, but `media/` was
 never created, so the icon had always been blank.
 
+**Shipped since** (O6 truth-up, 2026-10-03): the **timeline view**
+(`vscode-extension/timeline.js`, command `voyager.openTimeline`, backed by
+`voyager/timeline.py`) and the **one-click switch** (`voyager.switchThread`).
+The switch does not launch the agent from the webview: it runs
+`voyager switch <agent>` in a terminal, so the lease flow (D13) still decides
+who may write the WorkThread and the webview never writes directly.
+
 Still pending:
 
-- one-click Switch. The Composer deliberately hands you the command rather
-  than launching: `bundle_preview` writes nothing, and the lease flow (D13)
-  is what decides who may write a WorkThread, so an unattended launch from a
-  webview would route around the core's one real safety property.
-- timeline view mixing agent events with git history
 - packaging: marketplace listing, published VSIX
 
 ## 2. Auto-clustering research (re-scoped from issue #3)
@@ -46,8 +48,13 @@ only). Still unsupported, each needs its own repeatable gate:
 
 ## 4. Performance & robustness
 
-- **scoped scan** — provider/repo-limited incremental scans (Phase 1b
-  follow-up; today `continue/handoff/merge` scan all providers)
+- ~~scoped scan~~ — **provider-limited scan done (O6)**: `handoff` / `merge`
+  scan only the providers they can read (the named sessions' providers plus
+  their WorkThread's member providers), falling back to a full scan whenever
+  that set cannot be proven; `continue` honours an explicit `--platform`.
+  `switch` still scans all (its thread is resolved inside the engine, and
+  resolving it early would duplicate that logic).  Repo-limited scanning is
+  **not** done — the O1 cost model (spawn count, not bytes) does not justify it.
 - **filesystem event watcher** — replace the 300s `voyager watch` poll
   with OS file events (correctness must not depend on it, D12)
 - ~~ZCode incremental watermark (per-session max sequence) instead of

@@ -28,6 +28,10 @@ Usage:
 2. Generate full matrix: ``from voyager.capability_matrix import matrix; matrix()``
 3. Check individual provider: ``from voyager.capability_matrix import provider_state; provider_state('codex')``
 
+This module is imported, not run: the command-line view is
+``voyager verify [--matrix] [--json]`` (O6 removed the old
+``python -m voyager.capability_matrix`` entry point, which duplicated it).
+
 All outputs feed into:
 - ``voyager doctor --json``: Provider health status
 - ``voyager integrate status``: Integration installation state
@@ -570,54 +574,3 @@ def resolve_provider_budget(provider: str, user_specified: Optional[str] = None)
         return BUDGET_PRESETS[auto_target]
 
     return AUTO_BUDGET_TOKENS
-
-
-# --- CLI entry point -------------------------------------------------------
-
-def main():
-    """Command-line interface for capability matrix inspection."""
-    import argparse
-    import json
-
-    parser = argparse.ArgumentParser(description="Provider capability matrix inspector")
-    parser.add_argument("--json", action="store_true", help="Output as JSON")
-    parser.add_argument("--provider", "-p", nargs="+", help="Specific providers to check")
-    parser.add_argument("--matrix", action="store_true", help="Show full provider-by-dimension matrix")
-    parser.add_argument("--summary", action="store_true", help="Show summary statistics (default)")
-
-    args = parser.parse_args()
-
-    if args.matrix or (not args.summary and not args.json):
-        # Full matrix output
-        data = matrix(args.provider)
-        if args.json:
-            print(json.dumps(data, indent=2))
-        else:
-            # Pretty-print non-JSON format
-            for provider in sorted(data.keys()):
-                print(f"\n{provider.upper()}:")
-                print("-" * 60)
-                for dimension in DIMENSIONS:
-                    cell = data[provider][dimension]
-                    state = cell["state"]
-                    note = cell["note"][:50] + "..." if len(cell["note"]) > 50 else cell["note"]
-                    print(f"  {dimension:35} {state:30} {note}")
-    else:
-        # Summary output
-        data = summary()
-        if args.json:
-            print(json.dumps(data, indent=2))
-        else:
-            # Pretty-print summary
-            print("Provider Capability Summary")
-            print("=" * 80)
-            for provider in sorted(data["providers"].keys()):
-                info = data["providers"][provider]
-                print(f"\n{provider.upper()}: {info['state']}")
-                print(f"  Installed: {info['installed']}, Hook registered: {info['hook_registered']}, Hook fired: {info['hook_fired']}")
-                if info['last_trigger']:
-                    print(f"  Last trigger: {info['last_trigger']}")
-
-
-if __name__ == "__main__":
-    main()

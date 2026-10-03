@@ -436,11 +436,11 @@ class TestTieredBundle:
 
     def test_flat_path_remains_byte_identical(self, tmp_path, monkeypatch):
         """Formal invariant 1: the tiered work left the flat builder's document
-        byte-identical.  Timestamps render through the same _fmt_ts call
+        byte-identical.  Timestamps render through the same fmt_ts call
         (pinned here to a fixed token) and tmp paths are masked; everything
         else must match byte for byte."""
         store, thread, members, rows = self._fixture(tmp_path)
-        monkeypatch.setattr("voyager.continuity._fmt_ts", lambda ts: "TS")
+        monkeypatch.setattr("voyager.continuity.fmt_ts", lambda ts: "TS")
         out = build_continuation_bundle(store, rows, live_git=False)
         out = out.replace(str(tmp_path), "<TMP>")
         assert out == (

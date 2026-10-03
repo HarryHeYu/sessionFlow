@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import List
 
 from .store import Store
-
-
-def _fmt_ts(ts: Optional[float]) -> str:
-    if not ts:
-        return "?"
-    return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+from .util import fmt_ts_seconds
 
 
 def _md_escape(s) -> str:
@@ -29,8 +23,8 @@ def export_markdown(store: Store, srow, events) -> str:
     lines.append(f"- **Provider**: {srow['provider']}")
     lines.append(f"- **Session ID**: `{srow['native_id']}`")
     lines.append(f"- **Voyager ID**: `{srow['id']}`")
-    lines.append(f"- **Started**: {_fmt_ts(srow['started_at'])}")
-    lines.append(f"- **Updated**: {_fmt_ts(srow['updated_at'])}")
+    lines.append(f"- **Started**: {fmt_ts_seconds(srow['started_at'])}")
+    lines.append(f"- **Updated**: {fmt_ts_seconds(srow['updated_at'])}")
     lines.append(f"- **Model**: {srow['model'] or '?'}")
     lines.append(f"- **CWD**: `{srow['cwd'] or '?'}`")
     if srow["repo_root"]:
@@ -51,7 +45,7 @@ def export_markdown(store: Store, srow, events) -> str:
     lines.append("")
     open_file_blocks = []   # files modified (from old/new or snapshots)
     for ev in events:
-        t = _fmt_ts(ev["ts"])
+        t = fmt_ts_seconds(ev["ts"])
         kind = ev["kind"]
         if kind == "user":
             lines.append(f"### 🧑 User — {t}")

@@ -480,3 +480,50 @@ KEY 忽略。
 
 **Source rotation** (O5.11): verification evidence 是历史事实，source rotation
 （D15）不删除或不否认它。`verification_events` 表与 `sessions` 表独立。
+
+---
+
+## D19 — 共享 helper 收敛到 `voyager/util.py`；pre-compile scan 可限定 provider
+
+**Decision**:
+
+1. 复制后**漂移**的小 helper 收敛到单一模块 `voyager/util.py`，并把**两种语义
+   显式命名**而不是各自藏在私有拷贝里：
+   - `same_repo(a, b)` — 严格：相等，或一方是另一方的**路径后缀**。
+   - `same_repo_loose(a, b)` — 严格 **加** 原始子串包含。
+   - `fmt_ts(ts)` — `YYYY-MM-DD HH:MM`（本地时区）。
+   - `fmt_ts_seconds(ts)` — `YYYY-MM-DD HH:MM:SS`（export 用；同分钟事件可排序）。
+2. 删除 `capability_matrix.main()`（死重复 CLI）。
+3. `handoff` / `merge` 的 pre-compile scan 允许**限定 provider**
+   （`cli._scan_scope_for_sessions`），`continue` 已有的 `--platform` 限定保留。
+
+**Reason**: `_same_repo` 曾有 **5 份拷贝、2 种语义** —— `startup` 用严格匹配
+（auto-attach 前判断两个 active thread 是否同 repo，**误匹配**会把 session 挂到
+错的 thread），`api`/`auto`/`cli` 用宽松匹配（命令行输入短名 `code` 要能匹配
+索引里的全路径 `E:/code/voyager`）。同一个名字藏两种含义，正是"两个调用点对
+'同一个 repo' 的理解不一致"的成因。`_fmt_ts` 同理：4 份拷贝、2 种格式。
+
+**改动**:
+
+1. `voyager/util.py` 新增（只依赖 stdlib，避免 import cycle）；`api`/`auto`/`cli`
+   改用 `same_repo_loose`，`startup` 改用 `same_repo`；`cli`/`continuity`/`handoff`
+   改用 `fmt_ts`，`export` 改用 `fmt_ts_seconds`。行为**不变**。
+2. 删掉随之不再使用的 `from datetime import datetime`（continuity/handoff/export）。
+   `export.py` 原来的 `Optional[float]` 注解其实**从未 import**（被
+   `from __future__ import annotations` 掩盖）——删拷贝顺带消掉这个隐患。
+3. `capability_matrix.main()` 与 `__main__` 块删除；模块 docstring 指向
+   `voyager verify [--matrix]`。import API（`summary`/`matrix`/`provider_state`）不变。
+4. `tests/test_continuity.py` 的 monkeypatch 从 `voyager.continuity._fmt_ts`
+   改为 `voyager.continuity.fmt_ts`。
+
+**Scoped scan 的安全边界（重要）**: `_scan_scope_for_sessions(store, refs)` 只在
+**能证明**时才收窄：任一 ref 解析不了（未索引的新 session —— 正是 pre-compile
+scan 存在的理由）、前缀歧义、或 store 异常，都返回 `None`（扫全部）。因此
+scoping 只能**减少**被遍历的 provider，**不可能**漏掉本该刷新的 source。
+`cmd_switch` 不收窄：它的 thread 由 engine 解析，收窄就得把 thread 解析提前，
+那是 engine 的职责，不复制。
+
+**Guard**: `tests/test_util.py`（7）钉住严格/宽松语义、宽松 ⊇ 严格、
+`_same_repo`/`_fmt_ts` 不再定义于任何地方、共享名只定义在 `util.py`、
+且每个原拷贝点都改为 import。`tests/test_scan_scope.py`（7）钉住 scoping 契约
+与回退到全扫的各种情形。

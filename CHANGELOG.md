@@ -10,6 +10,28 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **Architecture hygiene + roadmap completion** (O6, DECISIONS D19).
+  Consolidated helpers that had been copy-pasted and then **silently drifted**:
+  `_same_repo` existed in five places with two behaviours (strict path-suffix in
+  `startup`; substring-tolerant in `api`/`auto`/`cli`) and `_fmt_ts` in four with
+  two formats.  They now live in one stdlib-only module, `voyager/util.py`, with
+  the variants **named**: `same_repo` (strict) / `same_repo_loose` (substring),
+  and `fmt_ts` / `fmt_ts_seconds`.  Behaviour is unchanged — each call site uses
+  the variant it already had, but the difference is now visible instead of
+  hidden in a copy.
+  Added a scoped pre-compile scan: `handoff` / `merge` now refresh only the
+  providers they can read (the named sessions' providers, plus every member
+  provider of their WorkThread), falling back to a full scan whenever that set
+  cannot be proven — a brand-new session, an ambiguous prefix, or a store error.
+  Scoping can only narrow which providers are walked; it can never miss a source
+  the command would otherwise have refreshed.
+  Removed the dead duplicate CLI `python -m voyager.capability_matrix` (no entry
+  point, no test, superseded by `voyager verify [--matrix]`).
+  Truth-up of `docs/POST-1.0.md` / `docs/ROADMAP.md`: the VS Code timeline view
+  and one-click switch had shipped but were still listed as pending (#8).
+  New tests: `tests/test_util.py` (7) and `tests/test_scan_scope.py` (7); the
+  former guards against a helper copy ever coming back.
+
 - **Provider Live Verification Closure** (O5, DECISIONS D18).  Closed the gap
   between "code supports it" and "this machine saw it work" by making the
   `verification_events` evidence table the **sole** source of runtime

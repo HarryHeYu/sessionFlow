@@ -19,6 +19,7 @@ from .adapters import load_all
 from .adapters.base import enabled_adapters, git_info
 from .store import Store, default_db_path, lease_state
 from .integrations.hook import cmd_hook_startup
+from .util import fmt_ts, same_repo_loose
 
 
 # Argument names that carry a filesystem path.  They are expanded once, at the
@@ -326,6 +327,49 @@ def _ensure_fresh(args, store: Store, providers: Optional[List[str]] = None) -> 
     return res
 
 
+def _scan_scope_for_sessions(store: Store, refs) -> Optional[List[str]]:
+    """Provider scope for the pre-compile scan, or ``None`` for "scan all".
+
+    D12 requires a command to refresh the index before compiling from it, but
+    it does not require refreshing *every* provider: when every session the
+    command names is already indexed, the only providers whose files that
+    command can read are those sessions' providers -- plus, for a session that
+    belongs to a WorkThread, every member provider, because the engine
+    compiles the whole thread.  Scoping there skips the filesystem walk and
+    the ``git`` spawns of unrelated providers (the cost O1 measured).
+
+    Scoping is an **optimisation, never a correctness change**: if any named
+    ref is not resolvable -- a brand-new session that has not been scanned yet,
+    which is exactly the case the pre-compile scan exists for -- the scope is
+    unknown, so this returns ``None`` and the caller scans everything.  A scan
+    can therefore never miss a source it would otherwise have refreshed.
+    """
+    if not refs:
+        return None
+    provs: set = set()
+    for ref in refs:
+        try:
+            row, _ambiguous = store.session(ref)
+        except Exception:
+            return None
+        if row is None:
+            return None
+        if row["provider"]:
+            provs.add(row["provider"])
+        try:
+            tid = store.thread_find_containing({row["id"]})
+        except Exception:
+            return None
+        if tid:
+            try:
+                for member in store.thread_members(tid):
+                    if member["provider"]:
+                        provs.add(member["provider"])
+            except Exception:
+                return None
+    return sorted(provs) or None
+
+
 def _sid_of_source(store: Store, provider: str, src: Path):
     row = store.con.execute(
         "SELECT sid FROM sources WHERE provider=? AND path=?",
@@ -379,13 +423,6 @@ def cmd_list(args) -> int:
               f"so they stay searchable but are excluded from continuity "
               f"(`voyager doctor` reports the totals).")
     return 0
-
-
-def _fmt_ts(ts):
-    from datetime import datetime
-    if not ts:
-        return "?"
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
 def _repo_match(row, pattern: str) -> bool:
@@ -1077,17 +1114,6 @@ def cmd_watch(args) -> int:
 
 
 
-def _same_repo(a: str, b: str) -> bool:
-    """Repo identity match: exact, path-suffix or substring (mirrors
-    _repo_match's user-facing semantics — "black_box" must match
-    "E:/models/black_box")."""
-    a = (a or "").replace("\\", "/").rstrip("/").lower()
-    b = (b or "").replace("\\", "/").rstrip("/").lower()
-    if not a or not b:
-        return False
-    return a == b or a.endswith("/" + b) or b.endswith("/" + a)         or a in b or b in a
-
-
 def _continue_thread(store: Store, t, args) -> int:
     """Continue inside a WorkThread.
 
@@ -1155,7 +1181,7 @@ def cmd_continue(args) -> int:
             repo = (git_info(os.getcwd()).get("repo_root")
                     or os.getcwd().replace("\\", "/"))
         cands = [x for x in store.thread_list("active")
-                 if x["repo_root"] and _same_repo(x["repo_root"], repo)]
+                 if x["repo_root"] and same_repo_loose(x["repo_root"], repo)]
         if cands:
             t = max(cands, key=lambda x: x["updated_at"] or 0)
             print("active thread: {0}  ({1})".format(
@@ -1453,7 +1479,7 @@ def cmd_switch(args) -> int:
         repo = repo_ref or (git_info(os.getcwd()).get("repo_root")
                             or os.getcwd().replace("\\", "/"))
         cands = [x for x in store.thread_list("active")
-                 if x["repo_root"] and _same_repo(x["repo_root"], repo)]
+                 if x["repo_root"] and same_repo_loose(x["repo_root"], repo)]
         if not cands:
             print("error: no active WorkThread for this repo ({0}).".format(repo))
             print("Create one: voyager thread create --repo {0} --attach <ids>".format(repo))
@@ -1498,7 +1524,7 @@ def cmd_brief(args) -> int:
                 last_user = " ".join(e["content"].split())[:140]
                 break
         line = last_user or (r["title"] or "")[:140]
-        print(f"[{_fmt_ts(r['updated_at'])}] {r['provider']:<7} {r['native_id'][:16]}")
+        print(f"[{fmt_ts(r['updated_at'])}] {r['provider']:<7} {r['native_id'][:16]}")
         print(f"    {line}")
         print(f"    repo: {r['repo_root'] or r['cwd'] or '?'}"
               + (f"  branch:{r['git_branch']}" if r["git_branch"] else "")
@@ -1516,7 +1542,8 @@ def cmd_handoff(args) -> int:
     implicitly — `voyager merge` is how you get one.
     """
     store = Store(args.db)
-    _ensure_fresh(args, store)
+    _ensure_fresh(args, store,
+                  providers=_scan_scope_for_sessions(store, [args.session]))
     row = _resolve(store, args.session)
     return _handoff_via_engine(store, args, "handoff",
                                source=row, target=getattr(args, "to", None))
@@ -1525,7 +1552,8 @@ def cmd_handoff(args) -> int:
 def cmd_merge(args) -> int:
     """Synthesize multiple sessions into one Continuation Bundle + WorkThread."""
     store = Store(args.db)
-    _ensure_fresh(args, store)
+    _ensure_fresh(args, store,
+                  providers=_scan_scope_for_sessions(store, args.sessions))
     session_refs = args.sessions
     if not session_refs:
         print("error: at least one session id required", file=sys.stderr)

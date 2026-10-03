@@ -28,6 +28,7 @@ from .budget import apply_budget, parse_budget, resolve_auto_budget
 from .continuity import build_continuation_bundle
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import Store, default_db_path
+from .util import same_repo_loose
 
 
 def _row(r) -> Dict[str, Any]:
@@ -44,15 +45,6 @@ def _row(r) -> Dict[str, Any]:
     return d
 
 
-def _same_repo(a: str, b: str) -> bool:
-    a = (a or "").replace("\\", "/").rstrip("/").lower()
-    b = (b or "").replace("\\", "/").rstrip("/").lower()
-    if not a or not b:
-        return False
-    return a == b or a.endswith("/" + b) or b.endswith("/" + a) \
-        or a in b or b in a
-
-
 def overview(db: Optional[Path] = None, repo: Optional[str] = None,
              hours: float = 48.0, limit: int = 12) -> Dict[str, Any]:
     """Everything a sidebar needs on one screen: index stats, active
@@ -67,13 +59,13 @@ def overview(db: Optional[Path] = None, repo: Optional[str] = None,
     ]
     if repo:
         threads = [t for t in threads
-                   if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+                   if t["repo_root"] and same_repo_loose(t["repo_root"], repo)]
     cutoff = time.time() - hours * 3600
     recent = []
     for r in store.sessions():
         if (r["updated_at"] or 0) < cutoff:
             continue
-        if repo and not _same_repo(r["repo_root"] or r["cwd"] or "", repo):
+        if repo and not same_repo_loose(r["repo_root"] or r["cwd"] or "", repo):
             continue
         last_user = ""
         for e in reversed(store.events(r["id"])):
@@ -129,7 +121,7 @@ def sessions(db: Optional[Path] = None, repo: Optional[str] = None,
     rows = store.sessions(platform)
     if repo:
         rows = [r for r in rows
-                if _same_repo(r["repo_root"] or r["cwd"] or "", repo)]
+                if same_repo_loose(r["repo_root"] or r["cwd"] or "", repo)]
     out = [_row(r) for r in rows[:limit]]
     store.close()
     return out

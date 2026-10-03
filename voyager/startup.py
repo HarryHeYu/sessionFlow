@@ -34,6 +34,7 @@ from .adapters.base import git_info
 from .continuity import CONTEXT_FORMAT_FLAT, CONTEXT_FORMAT_TIERED
 from .winsubprocess import background_subprocess_kwargs
 from .store import Store
+from .util import same_repo
 
 
 class StartupContinuityResult:
@@ -631,16 +632,9 @@ def _save_context_cache(store: Store, tid: str, provider: str, budget: str,
 def _find_matching_threads(store: Store, repo_root: str) -> List[Dict[str, Any]]:
     """Find active WorkThreads matching the given repo path."""
     threads = store.thread_list("active")
-    
-    def _same_repo(a: str, b: str) -> bool:
-        a = (a or "").replace("\\", "/").rstrip("/").lower()
-        b = (b or "").replace("\\", "/").rstrip("/").lower()
-        if not a or not b:
-            return False
-        return a == b or a.endswith("/" + b) or b.endswith("/" + a)
-    
-    matching = [t for t in threads 
-                if dict(t).get("repo_root") and _same_repo(t["repo_root"], repo_root)]
+
+    matching = [t for t in threads
+                if dict(t).get("repo_root") and same_repo(t["repo_root"], repo_root)]
     
     # Sort by updated_at descending (newest first)
     return sorted(matching, key=lambda x: x["updated_at"] or 0, reverse=True)
@@ -684,14 +678,7 @@ def _check_auto_attach_safety(store: Store, tid: str, provider: str,
     
     # Repo must match exactly
     if dict(thread).get("repo_root"):
-        def _same_repo(a: str, b: str) -> bool:
-            a = (a or "").replace("\\", "/").rstrip("/").lower()
-            b = (b or "").replace("\\", "/").rstrip("/").lower()
-            if not a or not b:
-                return False
-            return a == b or a.endswith("/" + b) or b.endswith("/" + a)
-        
-        if not _same_repo(thread["repo_root"], repo_root):
+        if not same_repo(thread["repo_root"], repo_root):
             return False
     
     # Cannot have two active threads for same repo (ambiguity prevention)

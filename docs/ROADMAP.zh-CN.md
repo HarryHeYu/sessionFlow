@@ -8,8 +8,8 @@
 **Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；2c 首轮审计延期的两项已收口——MCP voyager_thread 与 `continue --repo` 确定性 thread 解析（`51c1054`））。**
 **Phase 3 shipped（`d931b02`）；Phase 4 已落地（`96fc752`）；Phase 5 已落地（`2f01a7f`）；**
 **状态：Continuity Engine 核心已全部 shipped。** Phase 1/1b/2/3/4/5/6 全部落地；
-Phase 7 为**部分落地**（local API + stdio bridge + VS Code extension scaffold
-已交付；Context Composer webview 与一键 switch UI 待补，见
+Phase 7 为**部分落地**（local API + stdio bridge + VS Code extension scaffold +
+Context Composer webview + 时间线视图 + 一键 switch 已交付；仅剩 VSIX 打包，见
 [docs/POST-1.0.md](POST-1.0.md)）。Issue #10 保持 open——codex/grok writer
 已以 opt-in 方式落地，claude/dsh 因探测未过暂不支持。其余打磨项全部移入
 [docs/POST-1.0.md](POST-1.0.md)。
@@ -743,7 +743,7 @@ voyager switch codex
 
 用户只看到一条命令。内部是 scan → select → compile → launch。
 
-### Phase 7 — VS Code 侧边栏 / Context Composer  *（部分落地：API + bridge + extension scaffold 已交付；Composer webview 与一键 switch UI 待补——docs/POST-1.0.md）*
+### Phase 7 — VS Code 侧边栏 / Context Composer  *（部分落地：API + bridge + extension scaffold + Composer webview + 时间线视图 + 一键 switch 已交付；VSIX 打包待补——docs/POST-1.0.md）*
 
 UI 是编译器的客户端，不复制业务逻辑（核心已全部就绪）。
 
@@ -772,7 +772,7 @@ UI 是编译器的客户端，不复制业务逻辑（核心已全部就绪）�
 | [#6](https://github.com/HarryHeYu/sessionFlow/issues/6) | Voyager Skill + `voyager skill install` | 5 | #2 |
 | [#7](https://github.com/HarryHeYu/sessionFlow/issues/7) | `voyager switch <agent>` | 6 | #3, #4, #5, **#9**, **#11** *（已落地，见 CHANGELOG）* |
 | [#10](https://github.com/HarryHeYu/sessionFlow/issues/10) | 可选 transcript transplant（每家一个 writer） | 更晚 | #9, **#11** —— **保持 open**：codex/grok writer 已 opt-in 落地；claude/dsh 探测未过暂不支持 |
-| [#8](https://github.com/HarryHeYu/sessionFlow/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 —— **部分落地**（API + bridge + extension scaffold ✅；Composer webview 与一键 switch UI 待补） |
+| [#8](https://github.com/HarryHeYu/sessionFlow/issues/8) | VS Code 侧边栏 / Context Composer | 7 | #3, #4, #5 —— **部分落地**（API + bridge + extension scaffold + Composer webview + 时间线视图 + 一键 switch ✅；VSIX 打包待补） |
 
 **Issue #1 结项（伞 issue，「Continuity Engine Core 里程碑」）。**
 核心链路已完成并有合约测试覆盖：

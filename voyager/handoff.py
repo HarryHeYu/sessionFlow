@@ -10,11 +10,11 @@ every agentic CLI that can read a file.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
 from .store import Store
+from .util import fmt_ts
 
 # targets that accept an initial prompt and can read a file themselves
 PROMPT_TARGETS = {
@@ -37,12 +37,6 @@ _MAX_ERRORS = 10
 _MAX_FILES = 60
 
 
-def _fmt_ts(ts) -> str:
-    if not ts:
-        return "?"
-    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
-
-
 def build_context_package(store: Store, srow, goal=None) -> str:
     events = store.events(srow["id"])
     meta = json.loads(srow["metadata_json"] or "{}")
@@ -52,7 +46,7 @@ def build_context_package(store: Store, srow, goal=None) -> str:
     L.append("")
     L.append(f"- Source: **{srow['provider']}** session `{srow['native_id']}`")
     L.append(f"- Title: {srow['title'] or '?'}")
-    L.append(f"- Time: {_fmt_ts(srow['started_at'])} → {_fmt_ts(srow['updated_at'])}")
+    L.append(f"- Time: {fmt_ts(srow['started_at'])} → {fmt_ts(srow['updated_at'])}")
     if srow["repo_root"]:
         L.append(f"- Repository: `{srow['repo_root']}`"
                  + (f" (branch `{srow['git_branch']}`" if srow["git_branch"] else " (")
@@ -83,7 +77,7 @@ def build_context_package(store: Store, srow, goal=None) -> str:
             L.append("**Follow-up instructions (in order):**")
             L.append("")
             for e in user_msgs[1:]:
-                L.append(f"- [{_fmt_ts(e['ts'])}] {e['content'][:_USER_MAX]}")
+                L.append(f"- [{fmt_ts(e['ts'])}] {e['content'][:_USER_MAX]}")
             L.append("")
     else:
         L.append("(no user messages captured)")
@@ -159,9 +153,9 @@ def build_context_package(store: Store, srow, goal=None) -> str:
         L.append("## Errors encountered")
         L.append("")
         for e in errs[:_MAX_ERRORS]:
-            L.append(f"- [{_fmt_ts(e['ts'])}] {(e['content'] or '')[:300]}")
+            L.append(f"- [{fmt_ts(e['ts'])}] {(e['content'] or '')[:300]}")
         for ts, cmd in bad[-_MAX_ERRORS:]:
-            L.append(f"- [{_fmt_ts(ts)}] non-zero exit: `{' '.join(str(cmd).split())[:200]}`")
+            L.append(f"- [{fmt_ts(ts)}] non-zero exit: `{' '.join(str(cmd).split())[:200]}`")
         L.append("")
 
     # ---- recent timeline ------------------------------------------------
@@ -172,10 +166,10 @@ def build_context_package(store: Store, srow, goal=None) -> str:
         if shown >= 30:
             break
         if e["kind"] == "user" and e["content"]:
-            L.append(f"- **User** [{_fmt_ts(e['ts'])}]: {e['content'][:300]}")
+            L.append(f"- **User** [{fmt_ts(e['ts'])}]: {e['content'][:300]}")
             shown += 1
         elif e["kind"] == "assistant" and e["content"]:
-            L.append(f"- **Assistant** [{_fmt_ts(e['ts'])}]: {e['content'][:200]}")
+            L.append(f"- **Assistant** [{fmt_ts(e['ts'])}]: {e['content'][:200]}")
             shown += 1
         elif e["kind"] == "tool_call" and e["command"]:
             L.append(f"- _tool_ `{e['tool_name']}`: {' '.join(e['command'].split())[:150]}")

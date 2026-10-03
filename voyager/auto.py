@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .store import Store
+from .util import same_repo_loose
 
 # A pending attach older than this is marked stale (the continuation it
 # waited for was either abandoned or already handled manually).
@@ -43,15 +44,6 @@ def _now() -> float:
 def _repo_of(row) -> str:
     return (row["repo_root"] or row["cwd"] or "") if "repo_root" in row.keys() \
         else (row["cwd"] or "")
-
-
-def _same_repo(a: str, b: str) -> bool:
-    a = (a or "").replace("\\", "/").rstrip("/").lower()
-    b = (b or "").replace("\\", "/").rstrip("/").lower()
-    if not a or not b:
-        return False
-    return a == b or a.endswith("/" + b) or b.endswith("/" + a) \
-        or a in b or b in a
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +103,7 @@ def resolve_pending_attaches(store: Store, now: Optional[float] = None,
         ):
             if expected_native and s["native_id"] != expected_native:
                 continue
-            if repo_ref and _same_repo(
+            if repo_ref and same_repo_loose(
                     s["repo_root"] or s["cwd"] or "", repo_ref):
                 cands.append(s)
         plans.append((pend, cands))
@@ -181,7 +173,7 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
 
     # Filter active threads for this repo
     active_threads = [t for t in store.thread_list("active")
-                     if t["repo_root"] and _same_repo(t["repo_root"], repo)]
+                     if t["repo_root"] and same_repo_loose(t["repo_root"], repo)]
 
     if thread_id:
         # Explicit thread override - single thread mode
