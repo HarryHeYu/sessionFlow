@@ -50,8 +50,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .capability_matrix import (
     DIMENSIONS, HOOK_CONFIG_PATHS, PROVIDERS, SOURCE_PATHS,
-    collect_evidence, provider_state, resolve_cell,
+    collect_evidence, evidence_ceiling, provider_state, resolve_cell,
     PROVIDER_CONTEXT_BUDGETS,
+    NOT_FOUND, SUPPORTED, CONFIGURED, UNIT_VERIFIED,
+    LIVE_VERIFIED, ZERO_TOUCH_LIVE_VERIFIED, STATE_ORDER,
+    Evidence,
 )
 
 # --- O4 canonical vocabulary -----------------------------------------------
@@ -552,51 +555,87 @@ def check_pending(db_path: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def check_verification(db_path: Optional[Path] = None) -> Dict[str, Any]:
-    """O4.6: verification diagnostics.
+    """O4.6 / O5.7: verification diagnostics.
 
-    For each provider, show three layers:
+    For each provider, show three layers, sourced from
+    :mod:`voyager.verification_harness` (the evidence table) and
+    :data:`DECLARED` (the code-level ceiling):
 
-    * **declared** -- what the capability matrix says the provider supports
-      (the ceiling, from :data:`DECLARED`).
-    * **observed** -- what evidence has actually been collected on this machine
-      (installed, hook registered, hook fired).
-    * **effective** -- the resolved state (the weaker of declared and observed),
-      which is what ``provider_state`` returns.
+    * **declared** -- the strongest state any machine-dependent dimension is
+      declared at in the code (the ceiling).
+    * **observed** -- what the ``verification_events`` table proves on this
+      machine (chains, evidence_count, best_chain, last_live_event).
+    * **effective** -- the weaker of declared and observed; when no evidence
+      exists, capped at ``UNIT_VERIFIED`` for machine-dependent dimensions.
 
-    The point is to avoid crudely showing a provider as "broken" when it is
-    simply not yet observed.  A provider that is declared ``LIVE_VERIFIED``
-    but only has ``UNIT_VERIFIED`` evidence is not broken -- it is waiting for
-    a natural trigger, and that is informational, not a warning.
+    Also surfaces filesystem-level checks (installed, hook_registered) from
+    :func:`collect_evidence`, because those are configuration state, not
+    runtime state.
+
+    A provider with a gap (declared > observed) is **not broken** -- it is
+    waiting for a natural trigger, and that is informational, not a warning.
     """
-    from .capability_matrix import (
-        DECLARED, Evidence, evidence_ceiling, STATE_ORDER,
-    )
+    from .verification_harness import query_status
+    from .capability_matrix import DECLARED, STATE_ORDER as _SO
+
+    _MACHINE_DEPENDENT = frozenset({
+        "startup_hook", "dynamic_context_injection",
+        "native_session_id_at_start", "native_auto_attach",
+        "live_zero_touch_continuity",
+    })
+
+    # Get the three-layer view from the evidence harness
+    vh_status = query_status(db_path=db_path)
     out: Dict[str, Any] = {"providers": {}}
     for p in PROVIDERS:
         ev = collect_evidence(p)
-        declared_ceiling = max(
-            (STATE_ORDER[DECLARED[p][d][0]] for d in DIMENSIONS),
-            default=0,
-        )
-        # The strongest state any dimension is declared at:
-        declared_state = max(
-            (DECLARED[p][d][0] for d in DIMENSIONS),
-            key=lambda s: STATE_ORDER[s],
-        )
-        observed_ceiling = evidence_ceiling(ev)
-        effective = provider_state(p, ev)
+        vh_p = vh_status["providers"].get(p, {})
+        declared = vh_p.get("declared_state", NOT_FOUND)
+        observed = vh_p.get("observed_state")
+        effective = vh_p.get("effective_state", declared)
+        # Use the observed ceiling from evidence for the "has_gap" check.
+        # When observed is None (no evidence), the gap is informational.
+        observed_ceiling = observed or UNIT_VERIFIED
         out["providers"][p] = {
-            "declared": declared_state,
+            "declared": declared,
             "observed": observed_ceiling,
             "effective": effective,
             "installed": ev.installed,
             "hook_registered": ev.hook_registered,
             "hook_fired": ev.hook_fired,
             "last_trigger": ev.last_trigger,
+            # Evidence-table details (O5.7)
+            "chains": vh_p.get("chains", 0),
+            "evidence_count": vh_p.get("evidence_count", 0),
+            "best_chain": vh_p.get("best_chain"),
+            "last_live_event": vh_p.get("last_live_event"),
             # "gap" means declared > observed; this is informational, not a fault
-            "has_gap": STATE_ORDER[observed_ceiling] < STATE_ORDER[declared_state],
+            "has_gap": _SO.get(observed_ceiling, 0) < _SO.get(declared, 0),
+            # Why the effective state is not higher (O5.7)
+            "blocked_reason": _blocked_reason(p, declared, observed, ev),
         }
     return out
+
+
+def _blocked_reason(provider: str, declared: str,
+                    observed: Optional[str], ev: Evidence) -> Optional[str]:
+    """Why the effective state is not higher than it is. Never raises."""
+    try:
+        if declared == NOT_FOUND:
+            return "no startup surface"
+        if not ev.installed:
+            return "provider not installed"
+        if not ev.hook_registered:
+            return "hook not registered"
+        if observed is None:
+            return "no evidence recorded yet (waiting for natural trigger)"
+        if observed == UNIT_VERIFIED:
+            return "hook registered, not yet observed firing"
+        if observed == LIVE_VERIFIED:
+            return "hook observed firing, zero-touch not yet proven"
+        return None  # at the ceiling, nothing blocking
+    except Exception:
+        return None
 
 
 # --- O4 canonical issue collection ------------------------------------------
@@ -1003,6 +1042,43 @@ def render(report: Dict[str, Any]) -> str:
                         "Y" if info.get("hook_registered") else "N",
                         "Y" if info.get("hook_fired") else "N",
                         budget_str))
+
+    # O5.7: verification three-layer view with evidence details
+    verification = report.get("verification") or {}
+    vp = verification.get("providers") or {}
+    if vp:
+        lines.append("")
+        lines.append("verification")
+        lines.append("  %-12s %-26s %-26s %-26s"
+                     % ("provider", "declared", "observed", "effective"))
+        lines.append("  " + "-" * 92)
+        for p, v in vp.items():
+            lines.append("  %-12s %-26s %-26s %-26s"
+                         % (p,
+                            v.get("declared", "-"),
+                            v.get("observed") or "(none)",
+                            v.get("effective", "-")))
+        # Evidence details
+        any_evidence = any(v.get("evidence_count", 0) for v in vp.values())
+        if any_evidence:
+            lines.append("")
+            lines.append("  evidence details:")
+            for p, v in vp.items():
+                if not v.get("evidence_count"):
+                    continue
+                lines.append("    %-12s chains=%-4s events=%-5s chain=%s"
+                             % (p, v.get("chains", 0),
+                                v.get("evidence_count", 0),
+                                v.get("best_chain") or "-"))
+        # Blocked reasons
+        any_blocked = any(v.get("blocked_reason") for v in vp.values())
+        if any_blocked:
+            lines.append("")
+            lines.append("  blocked reasons:")
+            for p, v in vp.items():
+                reason = v.get("blocked_reason")
+                if reason:
+                    lines.append("    %-12s %s" % (p, reason))
 
     for title, key in (("blocking", "blocking"),
                        ("warning", "warnings"),

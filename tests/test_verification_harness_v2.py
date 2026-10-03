@@ -25,7 +25,7 @@ from voyager import verification_harness as vh
 from voyager.verification_harness import (
     ATTACH_PENDING, ATTACH_RESOLVED, CONTEXT_DELIVERED, HOOK_TRIGGERED,
     LIVE_VERIFIED, NATIVE_SESSION_ID_OBSERVED, NOT_FOUND,
-    ZERO_TOUCH_LIVE_VERIFIED,
+    UNIT_VERIFIED, ZERO_TOUCH_LIVE_VERIFIED,
 )
 
 
@@ -164,13 +164,21 @@ def test_an_unknown_event_type_is_refused(db):
 # --- declared vs observed ---------------------------------------------------
 
 def test_declared_state_without_evidence_does_not_write(db):
-    """`verify` must not manufacture a row to have something to show."""
+    """`verify` must not manufacture a row to have something to show.
+
+    O5: ``declared_state`` is the raw ceiling from DECLARED (max of
+    machine-dependent dimensions).  ``effective_state`` is capped at
+    UNIT_VERIFIED when there is no evidence, because "code exists and is
+    tested" is all the evidence supports without a recorded observation.
+    """
     before = _table_digest(db)
     out = vh.query_status()
     assert _table_digest(db) == before, "query_status must not write"
+    # Declared: codex's live_zero_touch_continuity is ZERO_TOUCH_LIVE_VERIFIED
     assert out["providers"]["codex"]["declared_state"] == ZERO_TOUCH_LIVE_VERIFIED
     assert out["providers"]["codex"]["observed_state"] is None
-    assert out["providers"]["codex"]["effective_state"] == ZERO_TOUCH_LIVE_VERIFIED
+    # Effective: capped at UNIT_VERIFIED (no evidence in the table)
+    assert out["providers"]["codex"]["effective_state"] == UNIT_VERIFIED
 
 
 def test_verify_cli_is_read_only(db, capsys):

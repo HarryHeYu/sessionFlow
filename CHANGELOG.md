@@ -10,6 +10,30 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **Provider Live Verification Closure** (O5, DECISIONS D18).  Closed the gap
+  between "code supports it" and "this machine saw it work" by making the
+  `verification_events` evidence table the **sole** source of runtime
+  verification state.  Removed the `ZERO_TOUCH_OBSERVED` hardcoded set and all
+  log-file grepping from `capability_matrix.collect_evidence()`.  Providers
+  now report `UNIT_VERIFIED` when the evidence table has no rows for them —
+  the honest answer ("code exists, not yet observed here").
+  `verification_harness.query_status()` now shows three layers:
+  `declared_state` (raw ceiling from `DECLARED`), `observed_state` (from
+  evidence table), `effective_state` (weaker of the two, capped at
+  `UNIT_VERIFIED` when no evidence).
+  `doctor.check_verification()` now consumes `verification_harness` (not
+  `capability_matrix`), surfacing `chains`, `evidence_count`, `best_chain`,
+  `last_live_event`, and `blocked_reason` per provider.
+  Wired `codex_session_start.py` and `grok_native.session_start()` to
+  `begin_hook` / `note_result` (same pattern as claude/zcode/cursor/kiro/
+  antigravity).
+  New CLI flags: `voyager verify --all` (all providers), `--matrix` (full
+  provider-by-dimension matrix).
+  State machine promotion requires a complete, ordered correlation chain:
+  `HOOK_TRIGGERED → CONTEXT_DELIVERED → NATIVE_SESSION_ID_OBSERVED →
+  ATTACH_RESOLVED`, all in the same chain, same session id.  No
+  cross-chain or cross-session evidence combines.
+
 - **Doctor canonical issue model + safe self-healing** (O4, DECISIONS D17).
   `voyager doctor` now classifies every finding into a canonical `Issue` with
   `code`, `severity` (`info`/`warning`/`critical`), `category`, `message`,

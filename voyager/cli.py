@@ -823,8 +823,14 @@ def _cmd_verify(args) -> int:
     """
     from .verification_harness import cmd_verify
 
-    return cmd_verify(provider=args.provider, verbose=args.verbose,
-                      json_output=args.json, db_path=_db_path_arg(args))
+    provider = args.provider
+    # --all or no provider means all providers
+    if getattr(args, "all", False) or provider is None:
+        provider = None
+
+    return cmd_verify(provider=provider, verbose=args.verbose,
+                      json_output=args.json, db_path=_db_path_arg(args),
+                      matrix=getattr(args, "matrix", False))
 
 
 def cmd_doctor(args) -> int:
@@ -2289,16 +2295,20 @@ def main(argv=None) -> int:
     sp.add_argument("--repo", help="limit continuity checks to this repository")
     sp.set_defaults(func=cmd_doctor)
 
-    # voyager verify <provider> [--verbose]
+    # voyager verify [provider] [--all] [--verbose] [--json] [--matrix]
     sp = sub.add_parser("verify", help="view automatic verification status for providers")
     sp.add_argument("provider", nargs="?", default=None,
                     choices=["codex", "claude", "grok", "zcode", "cursor",
                             "kiro", "antigravity", "dsh"],
-                    help="provider to check; omit for all recorded")
+                    help="provider to check; omit or use --all for all providers")
+    sp.add_argument("--all", action="store_true",
+                    help="show all providers (default when no provider given)")
     sp.add_argument("--verbose", "-v", action="store_true",
-                    help="show recent probe details")
+                    help="show evidence details (chains, events, last_live_event)")
     sp.add_argument("--json", action="store_true",
                     help="machine-readable JSON output")
+    sp.add_argument("--matrix", action="store_true",
+                    help="show full provider-by-dimension matrix")
     sp.set_defaults(func=lambda args: _cmd_verify(args))
 
     # voyager integrate remove <provider>

@@ -40,6 +40,7 @@ from typing import Any, Dict, Optional
 from ..store import Store
 from ..continuity import CONTEXT_FORMAT_TIERED
 from ..startup import startup_continuity
+from ..verification_harness import begin_hook, note_result
 
 #: Name of the generated rule file inside the Grok rules directory.
 RULES_FILENAME = "voyager-continuation.md"
@@ -204,6 +205,11 @@ def session_start(
         or os.getcwd()
     )
 
+    # Record evidence that the hook fired.  This code executing *is* the proof
+    # that Grok fired its SessionStart hook; the chain id ties the later
+    # resolution back to this session.
+    correlation_id = begin_hook("grok", cwd=cwd, native_session_id=session_id)
+
     try:
         result = startup_continuity(
             provider="grok", cwd=cwd, native_session_id=session_id,
@@ -221,6 +227,9 @@ def session_start(
             "cwd": cwd,
             "pending_recorded": False,
         }
+
+    # Record what the continuity core produced for this chain.
+    note_result("grok", correlation_id, result, native_session_id=session_id)
 
     attach_status = getattr(result, "attach_status", None)
     return {

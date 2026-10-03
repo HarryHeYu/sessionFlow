@@ -334,14 +334,19 @@ def _log_dir() -> Path:
     return Path.home() / ".voyager" / "logs"
 
 
-#: Providers whose hook was observed firing on this machine, and the evidence.
-#: Kept explicit rather than derived from log mtimes, because a log line proves
-#: the hook ran while a timestamp only proves a file was touched.
-ZERO_TOUCH_OBSERVED = {"codex", "claude", "grok"}
-
-
 def collect_evidence(provider: str) -> Evidence:
-    """Read the machine state for one provider. Best effort, never raises."""
+    """Read the machine state for one provider. Best effort, never raises.
+
+    Runtime evidence (hook fired, zero-touch observed) comes **only** from the
+    append-only ``verification_events`` table managed by
+    :mod:`voyager.verification_harness`.  No hardcoded sets, no log-file
+    grepping, no "adapter exists = live" shortcuts -- if the evidence table has
+    no rows for a provider, that provider is ``UNIT_VERIFIED`` at best, which
+    is the honest answer ("code exists, not yet observed on this machine").
+
+    ``installed`` and ``hook_registered`` are still checked on the filesystem,
+    because those describe *configuration* state, not *runtime* state.
+    """
     ev = Evidence()
     try:
         src = SOURCE_PATHS.get(provider)
@@ -354,80 +359,33 @@ def collect_evidence(provider: str) -> Evidence:
     except Exception:
         ev.hook_registered = False
 
-    # Check for explicit zero-touch observation flag first
-    if provider in ZERO_TOUCH_OBSERVED:
-        ev.zero_touch_observed = True
-        ev.hook_fired = True
-        return ev
-
+    # Query the evidence table for runtime observations.  This is the sole
+    # source of hook_fired / zero_touch_observed -- no hardcoded sets, no log
+    # grepping.  If the table does not exist or has no events for this
+    # provider, the evidence stays at its defaults (all False), which means
+    # the ceiling is UNIT_VERIFIED.  That is correct.
     try:
-        # Check multiple possible log file names for each provider
-        possible_logs = [
-            "%s-hooks.jsonl" % provider,  # Standard format
-            "%s-session-start.jsonl" % provider,  # Alternative format (e.g., grok)
-        ]
-
-        fired = False
-        last = None
-
-        for log_name in possible_logs:
-            log = _log_dir() / log_name
-            if not log.exists():
-                continue
-
-            import json
-            for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-                if not line.strip():
-                    continue
+        from .verification_harness import _connect, observed_state, has_evidence_table
+        con = _connect()
+        if con is not None:
+            try:
+                if has_evidence_table(con):
+                    obs = observed_state(con, provider)
+                    state = obs.get("observed_state")
+                    if state == ZERO_TOUCH_LIVE_VERIFIED:
+                        ev.zero_touch_observed = True
+                        ev.hook_fired = True
+                    elif state == LIVE_VERIFIED:
+                        ev.hook_fired = True
+                    ev.last_trigger = obs.get("last_live_event")
+            finally:
                 try:
-                    rec = json.loads(line)
+                    con.close()
                 except Exception:
-                    continue
-                # Multiple event formats:
-                # - Context-ready events from Claude/Codex/Grok unified path
-                # - Raw session_start events from grok-session-start.jsonl
-                # - Other provider-specific markers
-                if rec.get("event") in ("context_ready", "no_thread", "ambiguous",
-                                        "no_context", "error"):
-                    fired = True
-                    if rec.get("ts"):
-                        ts_val = rec["ts"]
-                        if last is None or ts_val > last:
-                            last = str(ts_val)
-                # Alternative: status-based logs (e.g., Grok SessionStart wrapper)
-                elif rec.get("status") in ("ok", "context_ready", "no_thread", "error"):
-                    fired = True
-                    # Try various timestamp fields, default to current time if not found
-                    for ts_field in ["timestamp", "ts", "time", "@timestamp"]:
-                        if ts_field in rec:
-                            ts_val = rec[ts_field]
-                            if last is None or str(ts_val) > last:
-                                last = str(ts_val)
-                            break
-                    else:
-                        # No timestamp field found - use marker that hook fired
-                        fired = True
-
-                # Alternative: hook_event marker (older format)
-                elif rec.get("hook_event") in ("session_start", "agent_spawn", "pre_invocation"):
-                    fired = True
-                    # Try various timestamp fields
-                    for ts_field in ["ts", "timestamp", "time"]:
-                        if ts_field in rec:
-                            ts_val = rec[ts_field]
-                            if last is None or str(ts_val) > last:
-                                last = str(ts_val)
-                            break
-
-            # If found in first file, skip checking alternatives
-            if fired and "hooks.jsonl" in log_name:
-                break
-
-        ev.hook_fired = fired
-        ev.last_trigger = last
+                    pass
     except Exception:
-        pass
-    ev.zero_touch_observed = provider in ZERO_TOUCH_OBSERVED
+        pass  # verification_harness not available or DB inaccessible
+
     return ev
 
 
@@ -500,7 +458,11 @@ def provider_state(provider: str, ev: Optional[Evidence] = None) -> str:
 
     The headline is the continuity a user actually gets: ZERO_TOUCH_LIVE_VERIFIED
     when a bare continue was observed resuming the thread, LIVE_VERIFIED when the
-    hook was seen firing, otherwise whatever the startup-hook dimension supports.
+    hook was seen firing, otherwise whatever the startup-hook dimension supports
+    -- **capped at the evidence ceiling**.  A provider whose code declares
+    LIVE_VERIFIED but has no evidence in the table reports UNIT_VERIFIED,
+    because "the handler exists and is tested" is all the evidence supports.
+
     A provider with no startup surface at all reports NOT_FOUND -- it is not
     silently folded into SUPPORTED.
     """
@@ -512,6 +474,13 @@ def provider_state(provider: str, ev: Optional[Evidence] = None) -> str:
         return ZERO_TOUCH_LIVE_VERIFIED
     if ev.hook_fired:
         return LIVE_VERIFIED
+    # No live evidence: cap at the evidence ceiling (UNIT_VERIFIED when no
+    # evidence table or no events).  The declared ceiling may be higher
+    # (LIVE_VERIFIED / ZERO_TOUCH_LIVE_VERIFIED), but without evidence the
+    # honest answer is the ceiling the evidence can justify.
+    ceiling = evidence_ceiling(ev)
+    if STATE_ORDER.get(declared, 0) > STATE_ORDER.get(ceiling, 0):
+        return ceiling
     return declared
 
 

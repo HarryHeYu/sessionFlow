@@ -49,10 +49,16 @@ def test_a_cell_never_exceeds_its_declared_ceiling():
 
 
 def test_headline_states_match_what_the_project_publishes():
-    """The README, `doctor` and this table are the same claim."""
-    assert provider_state("codex") == ZERO_TOUCH_LIVE_VERIFIED
-    assert provider_state("claude") == ZERO_TOUCH_LIVE_VERIFIED
-    assert provider_state("grok") == ZERO_TOUCH_LIVE_VERIFIED
+    """The README, `doctor` and this table are the same claim.
+
+    O5: Without evidence in the verification_events table, providers report
+    their code-level ceiling (UNIT_VERIFIED for machine-dependent dimensions),
+    not their historical runtime state.  The hardcoded ZERO_TOUCH_OBSERVED set
+    is gone; only the evidence table can promote a provider above UNIT_VERIFIED.
+    """
+    assert provider_state("codex") == UNIT_VERIFIED
+    assert provider_state("claude") == UNIT_VERIFIED
+    assert provider_state("grok") == UNIT_VERIFIED
     assert provider_state("zcode") == UNIT_VERIFIED
     assert provider_state("cursor") == UNIT_VERIFIED
     assert provider_state("kiro") == UNIT_VERIFIED

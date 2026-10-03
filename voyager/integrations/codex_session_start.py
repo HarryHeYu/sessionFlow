@@ -38,11 +38,13 @@ try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
+    from voyager.verification_harness import begin_hook, note_result
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
+    from voyager.verification_harness import begin_hook, note_result
 
 #: The providers cap the injected string at 10,000 characters; leave room for
 #: the preamble (L0 + Runtime State + retrieval hint) and the truncation note.
@@ -168,6 +170,11 @@ def handle_codex_session_start(
     # mangled when the path is non-ASCII.
     cwd = cwd or canonical_cwd_from_rollout(session_id) or payload["cwd"]
 
+    # Record evidence that the hook fired.  This code executing *is* the proof
+    # that Codex fired its SessionStart hook; the chain id ties the later
+    # resolution back to this session.
+    correlation_id = begin_hook("codex", cwd=cwd, native_session_id=session_id)
+
     try:
         result = startup_continuity(
             provider="codex",
@@ -184,6 +191,9 @@ def handle_codex_session_start(
         _log_event({"ts": time.time(), "event": "startup_continuity_error",
                     "error": str(e), "cwd": cwd, "session_id": session_id})
         return {"status": "error", "message": str(e)}
+
+    # Record what the continuity core produced for this chain.
+    note_result("codex", correlation_id, result, native_session_id=session_id)
 
     if not result.continuity_available or not result.context:
         out = {

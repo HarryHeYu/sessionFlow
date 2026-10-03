@@ -430,3 +430,53 @@ dict 在旧键之外新增 `leases`、`pending`、`verification` 三个 top-leve
 **O4.13**: O1 的两条性能 debt（`OVERVIEW_RECENT_SESSIONS_N1`、
 `SCAN_MATERIALISE_ALL_BEFORE_WRITE`）只在 doctor 里**报告**，不修。
 `KNOWN_DEBTS` 和 `O1_DEBTS` 都用 canonical 字段，不再用旧的 `kind`/`id`/`detail`。
+
+## D18 — Provider Verification 只由 evidence 推导（关闭 hardcoded set）
+
+**Decision**: 删除 `capability_matrix.ZERO_TOUCH_OBSERVED` 硬编码集合和日志文件
+grepping。runtime evidence（hook_fired、zero_touch_observed）**只**来自
+`verification_events` 追加表（`verification_harness`）。
+
+**Reason**: 硬编码集合让 codex/claude/grok 在任何机器上都报
+`ZERO_TOUCH_LIVE_VERIFIED`，无论 evidence 表里有没有记录。这正是"声称 live
+verification 但从未做过"的典型模式，是 O5 要关闭的根本问题。
+
+**Changes**:
+
+1. `collect_evidence()` 改为查询 `verification_harness.observed_state()`，
+   不再检查 `ZERO_TOUCH_OBSERVED` 或 grep 日志文件。
+2. `provider_state()` 在没有 evidence 时 cap 在 `UNIT_VERIFIED`（evidence
+   ceiling），不再返回 DECLARED 里的 `LIVE_VERIFIED`。
+3. `query_status()` 的 `declared_state` 直接取 `DECLARED` 表的
+   machine-dependent 维度 ceiling，不再调 `provider_state()`（那是 resolved，
+   不是 ceiling）。`effective_state` 在没有 evidence 时 cap 在 `UNIT_VERIFIED`。
+4. `doctor.check_verification()` 消费 `verification_harness.query_status()`，
+   不再从 `capability_matrix.collect_evidence()` 取 observed/effective。
+   新增 `chains`、`evidence_count`、`best_chain`、`last_live_event`、
+   `blocked_reason` 字段。
+5. `codex_session_start.py` 和 `grok_native.py::session_start()` 接入
+   `begin_hook` / `note_result`，与 claude/zcode/cursor/kiro/antigravity 一致。
+6. `voyager verify` 新增 `--all`、`--matrix` 标志。
+
+**State machine** (O5.3): promotion 只在 evidence chain 完整且有序时发生：
+
+```
+NOT_FOUND → SUPPORTED → CONFIGURED → UNIT_VERIFIED → LIVE_VERIFIED → ZERO_TOUCH_LIVE_VERIFIED
+```
+
+- `UNIT_VERIFIED → LIVE_VERIFIED`: HOOK_TRIGGERED + CONTEXT_DELIVERED (same chain)
+- `LIVE_VERIFIED → ZERO_TOUCH_LIVE_VERIFIED`: + NATIVE_SESSION_ID_OBSERVED + ATTACH_RESOLVED (same chain, correct order, same session id)
+
+**Correlation chain** (O5.4): 不变（`Chain.status()` 已在
+`verification_harness` 里正确实现并有回归测试）。
+
+**Passive verification** (O5.6): `voyager verify` 是只读的（SQLite read-only
+mode）。不主动打开 provider GUI / VS Code / 登录 / 修改配置。Evidence 只在
+provider 自然启动时由 hook handler 写入。
+
+**Idempotency** (O5.10): `event_id = SHA256(provider|event_type|correlation_id|
+native_session_id|source_session_id|observed_at)`，replayed event 被 PRIMARY
+KEY 忽略。
+
+**Source rotation** (O5.11): verification evidence 是历史事实，source rotation
+（D15）不删除或不否认它。`verification_events` 表与 `sessions` 表独立。

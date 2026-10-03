@@ -380,34 +380,51 @@ def query_status(provider: Optional[str] = None,
                  db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Declared vs observed vs effective. Read-only; writes nothing.
 
-    `declared` comes from the capability matrix (what the code supports),
-    `observed` from the evidence table (what this machine saw).  They are kept
-    apart on purpose: a reader must be able to tell "implemented" from "seen
-    working", and `effective` is the weaker of the two.
+    Three layers, kept apart on purpose so a reader can tell "implemented"
+    from "seen working":
+
+    * **declared** -- the ceiling from :data:`DECLARED`: the strongest state
+      any machine-dependent dimension supports in the code.
+    * **observed** -- what the evidence table proves (None if no evidence).
+    * **effective** -- the weaker of declared and observed.  When there is no
+      evidence, effective is capped at UNIT_VERIFIED for machine-dependent
+      dimensions, because "code exists and is tested" is all the evidence
+      supports without a recorded observation.
     """
-    from .capability_matrix import PROVIDERS, provider_state as declared_state
+    from .capability_matrix import (
+        PROVIDERS, DECLARED, STATE_ORDER as _SO,
+    )
+
+    _MACHINE_DEPENDENT = frozenset({
+        "startup_hook", "dynamic_context_injection",
+        "native_session_id_at_start", "native_auto_attach",
+        "live_zero_touch_continuity",
+    })
 
     providers = [provider] if provider else list(PROVIDERS)
     out: Dict[str, Any] = {"providers": {}}
     con = _connect(db_path=db_path)
     try:
         for p in providers:
-            declared = declared_state(p)
+            declared = max(
+                (DECLARED[p][d][0] for d in _MACHINE_DEPENDENT
+                 if d in DECLARED.get(p, {})),
+                key=lambda s: _SO.get(s, 0),
+                default=NOT_FOUND,
+            )
             if con is None:
                 obs = {"observed_state": None, "chains": 0, "evidence_count": 0,
                        "last_live_event": None, "best_chain": None}
             else:
                 obs = observed_state(con, p)
-            # No evidence: the declared state stands -- "implemented, not yet
-            # observed here" is exactly UNIT_VERIFIED, not NOT_FOUND.  With
-            # evidence, the weaker of the two wins, because observation can only
-            # ever lower a claim, never raise it above what the code supports.
             observed = obs["observed_state"]
             if observed is None:
-                effective = declared
+                effective = (UNIT_VERIFIED
+                             if _SO.get(declared, 0) > _SO.get(UNIT_VERIFIED, 0)
+                             else declared)
             else:
-                effective = (observed if STATE_ORDER.get(observed, 0)
-                             < STATE_ORDER.get(declared, 0) else declared)
+                effective = (observed if _SO.get(observed, 0)
+                             < _SO.get(declared, 0) else declared)
             out["providers"][p] = {
                 "declared_state": declared,
                 "observed_state": obs["observed_state"],
@@ -537,7 +554,8 @@ def note_attach_resolved(provider: str, correlation_id: str, *,
 # --- CLI (read-only) --------------------------------------------------------
 
 def cmd_verify(provider: Optional[str] = None, verbose: bool = False,
-               json_output: bool = False, db_path: Optional[Path] = None) -> int:
+               json_output: bool = False, db_path: Optional[Path] = None,
+               matrix: bool = False) -> int:
     """`voyager verify` -- strictly read-only.
 
     It queries evidence and derives state; it never records, ensures or creates
@@ -545,6 +563,23 @@ def cmd_verify(provider: Optional[str] = None, verbose: bool = False,
     observation, which is the honest answer.
     """
     status = query_status(provider, db_path=db_path)
+
+    # Matrix mode: full provider-by-dimension matrix from capability_matrix
+    if matrix:
+        from .capability_matrix import matrix as cap_matrix, DIMENSIONS, PROVIDERS
+        m = cap_matrix(provider and [provider] or None)
+        if json_output:
+            print(json.dumps(m, indent=2, ensure_ascii=False, default=str))
+            return 0
+        print("provider      " + "  ".join(d[:12] for d in DIMENSIONS))
+        print("-" * (13 + 14 * len(DIMENSIONS)))
+        for p in (m if provider is None else [provider]):
+            if p not in m:
+                continue
+            cells = "  ".join(m[p][d]["state"][:12] for d in DIMENSIONS)
+            print("%-13s %s" % (p, cells))
+        return 0
+
     if json_output:
         print(json.dumps(status, indent=2, ensure_ascii=False, default=str))
         return 0
@@ -560,9 +595,10 @@ def cmd_verify(provider: Optional[str] = None, verbose: bool = False,
         print("")
         print("evidence: chains = lifecycles seen, events = facts recorded.")
         for p, v in status["providers"].items():
-            print("  %-13s chains=%-4s events=%-5s last=%s"
-                  % (p, v["chains"], v["evidence_count"],
-                     ("%.0f" % v["last_live_event"]) if v["last_live_event"] else "-"))
+            print("  %-13s chains=%-4s events=%-5s last=%s  chain=%s" % (
+                p, v["chains"], v["evidence_count"],
+                ("%.0f" % v["last_live_event"]) if v["last_live_event"] else "-",
+                v["best_chain"] or "-"))
         return 0
 
     for p, v in status["providers"].items():

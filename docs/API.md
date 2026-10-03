@@ -19,6 +19,7 @@ as a small Python API. This page documents both.
 | `voyager continue [id] [--repo] [--thread T] [--from ids] [--goal G] [--budget B] [--to] [--launch] [--no-launch]` | pick work back up (native resume or bundle) |
 | `voyager switch <agent> [--thread T] [--repo] [--goal G] [--budget B] [--steal] [--no-launch]` | switch the active WorkThread to another agent (D13 lease) |
 | `voyager doctor [--json] [--fix] [--dry-run]` | installation health check; `--fix` runs only SAFE_DERIVED_REPAIR (O4, D17) |
+| `voyager verify [provider] [--all] [-v] [--json] [--matrix]` | read-only verification status: declared vs observed vs effective (O5, D18) |
 | `voyager thread list\|show\|create\|attach\|close\|unlock` | manage WorkThreads (unlock releases a lease) |
 | `voyager thread timeline <id> [--json] [--limit N] [--kind …] [--provider P] [--live-only\|--retained-only]` | lifecycle/milestone timeline (O3, D16) |
 | `voyager brief [--hours N] [--repo] [--limit N]` | recent-activity digest |
@@ -211,7 +212,9 @@ report["blocking"]      # subset where severity == "critical"
 report["warnings"]      # subset where severity == "warning"
 report["leases"]        # O4.5: lease health
 report["pending"]       # O4.4: pending-attach health
-report["verification"]  # O4.6: declared vs observed vs effective
+report["verification"]  # O4.6/O5.7: declared vs observed vs effective
+                       #          + chains, evidence_count, best_chain,
+                       #            last_live_event, blocked_reason
 
 # Safe fix — only SAFE_DERIVED_REPAIR, never touches:
 #   leases, ambiguity, retained history, pending, provider files
