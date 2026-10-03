@@ -166,11 +166,19 @@ def test_ambuity_counts_only_active_threads(tmp_path, monkeypatch):
 
 
 def test_known_debts_are_classified():
-    kinds = {d["kind"] for d in doctor.KNOWN_DEBTS}
-    assert kinds == {"non-blocking", "external"}
-    ids = {d["id"] for d in doctor.KNOWN_DEBTS}
-    assert "LIVE_VERIFICATION_BLOCKED_BY_PROVIDER_UI" in ids
-    assert "EXTERNAL_CODEX_APPSERVER_CONPTY_POPUP" in ids
+    """O4: debts now carry canonical fields; the legacy ``kind`` is derived
+    by :func:`_legacy_kind` and appears in each issue's ``to_dict()``."""
+    repair_kinds = {d["repair_kind"] for d in doctor.KNOWN_DEBTS}
+    assert doctor.READ_ONLY_DIAGNOSIS in repair_kinds
+    assert doctor.EXTERNAL_PROVIDER_ISSUE in repair_kinds
+    codes = {d["code"] for d in doctor.KNOWN_DEBTS}
+    assert "LIVE_VERIFICATION_BLOCKED_BY_PROVIDER_UI" in codes
+    assert "EXTERNAL_CODEX_APPSERVER_CONPTY_POPUP" in codes
+    # every debt must have the canonical fields
+    for d in doctor.KNOWN_DEBTS:
+        assert "severity" in d
+        assert "category" in d
+        assert "message" in d
 
 
 def test_doctor_can_be_pointed_at_a_specific_index(tmp_path):

@@ -385,3 +385,48 @@ O3.3 的措辞是契约的一部分：SOURCE_MISSING 一律表述为
 O3.6：时间线**自己不切换**。UI 只提供"复制 canonical CLI 命令"，切换继续走
 `continuity.handoff_thread()` —— 不新增第二套切换逻辑（回归会检查 webview 里
 没有自己的 switch 调用）。
+
+## D17 — Doctor 是唯一健康模型，`--fix` 只跑 SAFE_DERIVED_REPAIR
+
+**Context**: `voyager doctor` 在 O4 之前是一个 ad-hoc 字典：`check_store`、
+`check_continuity`、`check_hook_config`、`check_cache`、`check_retention` 各自
+返回形状不同的 dict，issue 只有 `kind`/`id`/`detail` 三个字段。Dashboard
+"自己判断健康"（直接读 `blocking` 数组），CLI 没有 `--fix`。四个新需求
+（lease 健康、pending 健康、verification 诊断、cache 修复）无法塞进旧形状
+而不再混入"provider 没自然触发 = 坏了"的噪音。
+
+**Decision**: O4 定义一个 canonical issue 模型：
+
+- `Issue(code, severity, category, message, evidence, suggested_action,
+  auto_fixable, repair_kind)` —— 每个检查的输出都进这个形状。
+- `severity`: `info` | `warning` | `critical`（三个级别，不多不少）。
+- `repair_kind`: `READ_ONLY_DIAGNOSIS` | `SAFE_DERIVED_REPAIR` |
+  `USER_DECISION_REQUIRED` | `EXTERNAL_PROVIDER_ISSUE`（四类，不多不少）。
+
+`doctor --fix` **只执行** `SAFE_DERIVED_REPAIR` 且 `auto_fixable=True` 的 issue。
+**明确禁止**：
+
+- 删 retained history（`USER_DECISION_REQUIRED`）；
+- 解决 ambiguity（`USER_DECISION_REQUIRED`）；
+- 偷 / 清 lease（`USER_DECISION_REQUIRED`）；
+- 碰 provider 文件（`EXTERNAL_PROVIDER_ISSUE`）；
+- 跑 VACUUM（那是 maintenance，不是 repair）。
+
+`--dry-run` 只打印计划，不执行。plain `doctor` 永远只读。
+
+Dashboard 不再"自己判断健康"——它直接消费 `doctor.run()` 的 canonical issues，
+通过 `severity` / `repair_kind` 分组展示。`render_html()` 新增 leases/pending 行，
+但分组逻辑与 doctor 的 `render()` 一致。
+
+**Mutation guarantee**: `USER_DECISION_REQUIRED` 的 issue 即使传 `--fix` 也
+**一字不改**（回归里有四个 mutation test 钉住：lease、pending、retained
+history、ambiguity 各一个，断言 before == after）。
+
+**Backward compatibility**: `Issue.to_dict()` 同时输出 legacy `id` / `detail` /
+`kind` 键（`kind` 由 `_legacy_kind(severity, repair_kind)` 推导），所以现有
+consumer（dashboard、CLI、测试）不需要 flag-day 改造。`run()` 返回的 report
+dict 在旧键之外新增 `leases`、`pending`、`verification` 三个 top-level key。
+
+**O4.13**: O1 的两条性能 debt（`OVERVIEW_RECENT_SESSIONS_N1`、
+`SCAN_MATERIALISE_ALL_BEFORE_WRITE`）只在 doctor 里**报告**，不修。
+`KNOWN_DEBTS` 和 `O1_DEBTS` 都用 canonical 字段，不再用旧的 `kind`/`id`/`detail`。

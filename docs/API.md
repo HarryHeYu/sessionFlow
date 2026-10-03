@@ -18,6 +18,7 @@ as a small Python API. This page documents both.
 | `voyager merge <ids...> [--goal G] [--budget B] [--to <agent>]` | multi-session continuation bundle + WorkThread |
 | `voyager continue [id] [--repo] [--thread T] [--from ids] [--goal G] [--budget B] [--to] [--launch] [--no-launch]` | pick work back up (native resume or bundle) |
 | `voyager switch <agent> [--thread T] [--repo] [--goal G] [--budget B] [--steal] [--no-launch]` | switch the active WorkThread to another agent (D13 lease) |
+| `voyager doctor [--json] [--fix] [--dry-run]` | installation health check; `--fix` runs only SAFE_DERIVED_REPAIR (O4, D17) |
 | `voyager thread list\|show\|create\|attach\|close\|unlock` | manage WorkThreads (unlock releases a lease) |
 | `voyager thread timeline <id> [--json] [--limit N] [--kind …] [--provider P] [--live-only\|--retained-only]` | lifecycle/milestone timeline (O3, D16) |
 | `voyager brief [--hours N] [--repo] [--limit N]` | recent-activity digest |
@@ -179,6 +180,51 @@ Event types, and the single piece of canonical evidence behind each:
 Assistant prose is never scanned. `state="live"` / `"retained"` filters on
 `source_state`; timestamps order the display and nothing else (they never settle
 an ambiguity or establish authority — see D13/D14).
+
+### Doctor / safe self-healing (`voyager.doctor`, O4 / D17)
+
+```python
+from voyager.doctor import (
+    Issue, collect_issues, apply_fix, run, render,
+    CRITICAL, WARNING, INFO,
+    READ_ONLY_DIAGNOSIS, SAFE_DERIVED_REPAIR,
+    USER_DECISION_REQUIRED, EXTERNAL_PROVIDER_ISSUE,
+)
+
+# The canonical issue model — every finding has this shape:
+issues = collect_issues(db_path=Path("~/.voyager/index.db"))
+for i in issues:
+    i.code            # "STORE_UNAVAILABLE", "CACHE_STALE", ...
+    i.severity        # "info" | "warning" | "critical"
+    i.category        # "store" | "continuity" | "retention" | "lease" | ...
+    i.message         # human-readable one-liner
+    i.evidence        # what was observed
+    i.suggested_action  # what to do
+    i.auto_fixable    # can --fix handle this?
+    i.repair_kind     # READ_ONLY_DIAGNOSIS | SAFE_DERIVED_REPAIR | ...
+
+# The full report (backward-compatible dict + new keys):
+report = run(db_path=Path("~/.voyager/index.db"))
+report["issues"]       # list[dict] — each has code+severity+repair_kind
+                        # AND legacy id/detail/kind for backward compat
+report["blocking"]      # subset where severity == "critical"
+report["warnings"]      # subset where severity == "warning"
+report["leases"]        # O4.5: lease health
+report["pending"]       # O4.4: pending-attach health
+report["verification"]  # O4.6: declared vs observed vs effective
+
+# Safe fix — only SAFE_DERIVED_REPAIR, never touches:
+#   leases, ambiguity, retained history, pending, provider files
+result = apply_fix(db_path=Path("~/.voyager/index.db"), dry_run=True)
+result["fixable"]    # count of auto-fixable issues
+result["executed"]   # list of {code, category, ok/action}
+```
+
+`apply_fix` currently clears stale cache entries (`CACHE_STALE`) whose
+canonical source (sessions table) is intact. The FTS rebuild lives in
+`voyager.db_health.apply_safe_repairs` and is reached via
+`voyager db repair --apply`. `VACUUM` is maintenance (`voyager db compact`),
+never a fix.
 
 ### Switch (`voyager.cli.cmd_switch`)
 

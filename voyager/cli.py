@@ -833,11 +833,38 @@ def cmd_doctor(args) -> int:
     Reads the same canonical capability matrix the README does, so the two cannot
     disagree, and classifies everything it finds as blocking / external /
     non-blocking debt.
-    """
-    from .doctor import render, run
 
-    report = run(repo=getattr(args, "repo", None),
-                 db_path=_db_path_arg(args))
+    O4: ``--fix`` runs only SAFE_DERIVED_REPAIR (currently: clearing stale
+    cache entries).  ``--dry-run`` shows what ``--fix`` would do without doing
+    it.  Plain ``doctor`` is always read-only.
+    """
+    from .doctor import render, run, apply_fix
+
+    db_path = _db_path_arg(args)
+
+    # O4.9: --fix runs only SAFE_DERIVED_REPAIR.  --dry-run is a plan only.
+    if getattr(args, "fix", False):
+        result = apply_fix(db_path=db_path,
+                           dry_run=getattr(args, "dry_run", False))
+        if args.json:
+            print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+        else:
+            if result.get("dry_run"):
+                print("doctor --fix (dry run)")
+            else:
+                print("doctor --fix")
+            print("=" * 62)
+            print("safe repairs: %d fixable" % result.get("fixable", 0))
+            for step in result.get("executed", []):
+                mark = "WOULD" if result.get("dry_run") else (
+                    "OK" if step.get("ok", True) else "FAIL")
+                print("  [%s] %s: %s" % (mark, step.get("code", "?"),
+                                         step.get("action", step.get("error", ""))))
+            if not result.get("executed"):
+                print("  nothing to fix")
+        return 0
+
+    report = run(repo=getattr(args, "repo", None), db_path=db_path)
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
     else:
@@ -2251,9 +2278,14 @@ def main(argv=None) -> int:
     sp.add_argument("--json", action="store_true", help="emit the data, not the page")
     sp.set_defaults(func=cmd_dashboard)
 
-    # voyager doctor [--json]
+    # voyager doctor [--json] [--fix] [--dry-run]
     sp = sub.add_parser("doctor", help="is this installation healthy?")
     sp.add_argument("--json", action="store_true", help="machine-readable report")
+    sp.add_argument("--fix", action="store_true",
+                    help="run only SAFE_DERIVED_REPAIR (stale cache, FTS); "
+                         "never touches leases, ambiguity, or retained history")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="with --fix: show what would be done, do nothing")
     sp.add_argument("--repo", help="limit continuity checks to this repository")
     sp.set_defaults(func=cmd_doctor)
 

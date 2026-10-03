@@ -10,6 +10,25 @@ All notable changes to Voyager are documented here. Format loosely follows
 > provider. Full analysis in `claude_continuity_verdict.md`.
 
 ### Added
+- **Doctor canonical issue model + safe self-healing** (O4, DECISIONS D17).
+  `voyager doctor` now classifies every finding into a canonical `Issue` with
+  `code`, `severity` (`info`/`warning`/`critical`), `category`, `message`,
+  `evidence`, `suggested_action`, `auto_fixable`, and `repair_kind`
+  (`READ_ONLY_DIAGNOSIS` / `SAFE_DERIVED_REPAIR` / `USER_DECISION_REQUIRED` /
+  `EXTERNAL_PROVIDER_ISSUE`).
+  New checks: `check_leases` (expired leases are `USER_DECISION_REQUIRED`),
+  `check_pending` (stale and archived-orphan pending records),
+  `check_verification` (declared vs observed vs effective per provider — a
+  provider that has not naturally triggered is informational, not a fault),
+  upgraded `check_cache` (stale entries are `SAFE_DERIVED_REPAIR` when the
+  canonical source is intact).
+  `voyager doctor --fix` runs *only* `SAFE_DERIVED_REPAIR` (currently: clearing
+  stale cache entries). `--dry-run` shows the plan without executing. `--fix --json`
+  emits machine-readable results. Plain `doctor` is always read-only.
+  Mutation-tested: `USER_DECISION_REQUIRED` issues (leases, pending, retained
+  history, ambiguity) survive `--fix` byte-identical. O1 performance debts are
+  reported, not fixed (O4.13).
+
 - **WorkThread Timeline — one model, every surface** (O3, DECISIONS D16).
   `voyager thread timeline <id> [--json] [--limit N] [--kind …] [--provider P]
   [--live-only|--retained-only]` prints the lifecycle of one WorkThread, and the

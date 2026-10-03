@@ -133,6 +133,9 @@ def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
             "store": health.get("store"),
             "continuity": health.get("continuity"),
             "cache": health.get("cache"),
+            "leases": health.get("leases"),
+            "pending": health.get("pending"),
+            "verification": health.get("verification"),
             "providers": {p: {"state": v["state"],
                               "installed": v["installed"],
                               "hook_registered": v["hook_registered"],
@@ -141,6 +144,7 @@ def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
             "blocking": health.get("blocking") or [],
             "external": health.get("external") or [],
             "non_blocking": health.get("non_blocking") or [],
+            "warnings": health.get("warnings") or [],
         },
     }
 
@@ -267,6 +271,17 @@ def render_html(data: Dict[str, Any]) -> str:
       % (_e(store.get("sessions")), _e(store.get("threads")),
          _e((cont.get("coverage") or {}).get("events")),
          len(health.get("external") or []), len(health.get("non_blocking") or [])))
+    # O4: show leases + pending in the health summary, reusing doctor's model
+    leases = health.get("leases") or {}
+    if leases.get("total"):
+        a("<div class='muted'>leases: %s total, %s active, %s expired</div>"
+          % (_e(leases.get("total")), _e(leases.get("active")),
+             _e(leases.get("expired"))))
+    pending = health.get("pending") or {}
+    if pending.get("open"):
+        a("<div class='muted'>pending attach: %s open, %s stale</div>"
+          % (_e(pending.get("open")),
+             _e(len(pending.get("stale", [])))))
     a("</div>")
 
     a("<div class='grid'>")
@@ -400,9 +415,10 @@ def render_html(data: Dict[str, Any]) -> str:
         a("</table>")
     a("</div>")
 
-    # --- debt ---------------------------------------------------------------
+    # --- debt + warnings (O4 canonical model) -------------------------------
     a("<div class='panel'><h2>Open items</h2><table>")
     for group, items in (("external", health.get("external") or []),
+                         ("warning", health.get("warnings") or []),
                          ("debt", health.get("non_blocking") or [])):
         for i in items:
             a("<tr><td class='mono'>%s</td><td class='muted'>%s</td>"
