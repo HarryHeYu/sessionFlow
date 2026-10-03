@@ -28,7 +28,7 @@ from .budget import apply_budget, parse_budget, resolve_auto_budget
 from .continuity import build_continuation_bundle
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import Store, default_db_path
-from .util import same_repo_loose
+from .util import parse_when, same_repo_loose
 
 
 def _row(r) -> Dict[str, Any]:
@@ -185,6 +185,185 @@ def thread_timeline(db: Optional[Path] = None, thread_id: str = "",
 
 
 # ---------------------------------------------------------------------------
+# machine-readable ops for thin client integrations (DSH plugin, VS Code)
+#
+# These are the *only* additions a client needs from the core, and each is a
+# thin pass-through to a function the CLI already uses -- a second
+# implementation is how the two surfaces drift.
+# ---------------------------------------------------------------------------
+
+#: Bumped only when an op's request or response shape changes.  A client must
+#: fail clearly against an older core instead of misreading a field.
+BRIDGE_SCHEMA_VERSION = 1
+
+
+def _package_version() -> str:
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            return version("voyager")
+        except PackageNotFoundError:
+            return "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _search_row(r) -> Dict[str, Any]:
+    d = dict(r)
+    return {
+        "id": d.get("id"),
+        "provider": d.get("provider"),
+        "native_session_id": d.get("native_id"),
+        "title": d.get("title"),
+        "repo": d.get("repo_root") or d.get("cwd"),
+        "updated_at": d.get("updated_at"),
+        # the matching turn, not just the session: a client shows the excerpt
+        "matched_at": d.get("_ts"),
+        "matched_kind": d.get("_kind"),
+        "matched_tool": d.get("_tool"),
+        "matched_file": d.get("_file"),
+        "excerpt": (d.get("snippet") or "").strip(),
+    }
+
+
+def search(db: Optional[Path] = None, query: str = "", provider: Optional[str] = None,
+           repo: Optional[str] = None, since: Optional[str] = None,
+           until: Optional[str] = None, limit: int = 20) -> Dict[str, Any]:
+    """Substring search over every indexed session.  Read-only.
+
+    Runs the same :meth:`Store.search` the CLI runs, with the same time parser
+    (:func:`voyager.util.parse_when`), so `voyager search --json` and this op
+    cannot return different rows for one query.  ``provider`` is a comma list;
+    ``since`` / ``until`` accept ``2026-09-30`` or ``7d``.
+    """
+    store = Store(db)
+    try:
+        providers = [p.strip() for p in (provider or "").split(",") if p.strip()]
+        rows = store.search(query, limit=int(limit or 20), filters={
+            "providers": providers or None,
+            "repo": repo,
+            "since": parse_when(since),
+            "until": parse_when(until),
+        })
+        return {"query": query, "count": len(rows),
+                "results": [_search_row(r) for r in rows]}
+    finally:
+        store.close()
+
+
+def _newest_thread_for_repo(store: Store, repo: Optional[str]):
+    threads = [t for t in store.thread_list("active")
+               if not repo or (t["repo_root"] and same_repo_loose(t["repo_root"], repo))]
+    threads.sort(key=lambda t: t["updated_at"] or 0, reverse=True)
+    return threads[0] if threads else None
+
+
+def _newest_session_for_repo(store: Store, repo: Optional[str]):
+    rows = list(store.sessions())
+    if repo:
+        rows = [r for r in rows
+                if same_repo_loose(r["repo_root"] or r["cwd"] or "", repo)]
+    rows.sort(key=lambda r: r["updated_at"] or 0, reverse=True)
+    return rows[0] if rows else None
+
+
+def current_work(db: Optional[Path] = None, repo: Optional[str] = None,
+                 goal: Optional[str] = None, budget: Optional[str] = None,
+                 target: Optional[str] = None) -> Dict[str, Any]:
+    """What is the current work for this repo?  Read-only.
+
+    The ``sessionflow_current_work`` endpoint: the active WorkThread (if any),
+    its members, the lease, and a continuation preview, in one round trip --
+    so a client does not stitch several calls together and drift from what the
+    CLI would have chosen.  Falls back to the newest session when there is no
+    WorkThread.
+    """
+    store = Store(db)
+    try:
+        thread = _newest_thread_for_repo(store, repo)
+        out: Dict[str, Any] = {"repo": repo, "has_thread": thread is not None}
+        refs: List[str] = []
+        if thread:
+            out["thread"] = {k: thread[k] for k in
+                             ("id", "title", "repo_root", "status", "goal",
+                              "members", "updated_at")}
+            detail = thread_detail(db, thread["id"])
+            out["members"] = detail.get("members", [])
+            out["lease"] = detail.get("lease")
+            refs = [m["id"] for m in out["members"]]
+        else:
+            row = _newest_session_for_repo(store, repo)
+            if row is not None:
+                out["session"] = _row(row)
+                refs = [row["id"]]
+        out["scope"] = refs
+        if refs:
+            out["continuation"] = bundle_preview(
+                db, session_refs=refs, goal=goal or (thread["goal"] if thread else None),
+                budget=budget, target=target)
+        return out
+    finally:
+        store.close()
+
+
+def continue_context(db: Optional[Path] = None,
+                     session_refs: Optional[List[str]] = None,
+                     thread_id: Optional[str] = None,
+                     repo: Optional[str] = None,
+                     goal: Optional[str] = None,
+                     budget: Optional[str] = None,
+                     target: Optional[str] = None) -> Dict[str, Any]:
+    """The continuation bundle for a scope, chosen the way the CLI chooses it.
+
+    Scope precedence: explicit ``session_refs``, else ``thread_id``, else the
+    newest active WorkThread for ``repo``, else the newest session of ``repo``,
+    else the newest session.  Compilation is
+    :func:`voyager.continuity.build_continuation_bundle` via
+    :func:`bundle_preview` -- the plugin must not grow a second continuation
+    algorithm.  Read-only.
+    """
+    store = Store(db)
+    try:
+        refs = list(session_refs or [])
+        if not refs and thread_id:
+            refs = [m["id"] for m in store.thread_members(thread_id)]
+        if not refs:
+            thread = _newest_thread_for_repo(store, repo)
+            if thread:
+                refs = [m["id"] for m in store.thread_members(thread["id"])]
+        if not refs:
+            row = _newest_session_for_repo(store, repo)
+            if row is not None:
+                refs = [row["id"]]
+        if not refs:
+            return {"error": "no sessions to continue from"}
+    finally:
+        store.close()
+    out = bundle_preview(db, session_refs=refs, goal=goal, budget=budget,
+                         target=target)
+    if isinstance(out, dict):
+        out.setdefault("scope", refs)
+    return out
+
+
+def integration_info() -> Dict[str, Any]:
+    """Version / capability probe for client integrations.  Read-only.
+
+    A thin client must fail clearly when the core is older than the interface
+    it drives, so the bridge ``schema_version`` is reported separately from the
+    package version: the former changes only when an op's shape changes.
+    """
+    return {
+        "name": "sessionFlow",
+        "package": "voyager",
+        "version": _package_version(),
+        "schema_version": BRIDGE_SCHEMA_VERSION,
+        "ops": sorted(_OPS),
+        "capabilities": sorted(_OPS),
+    }
+
+
+# ---------------------------------------------------------------------------
 # stdio JSON-lines bridge: {"id": N, "op": "...", "params": {...}} per line
 # ---------------------------------------------------------------------------
 
@@ -194,6 +373,10 @@ _OPS = {
     "sessions": sessions,
     "bundle_preview": bundle_preview,
     "thread_timeline": thread_timeline,
+    "search": search,
+    "current_work": current_work,
+    "continue_context": continue_context,
+    "integration_info": integration_info,
 }
 
 

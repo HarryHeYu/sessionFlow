@@ -22,6 +22,7 @@ without an import cycle.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -83,3 +84,23 @@ def fmt_ts_seconds(ts: Optional[float]) -> str:
         return "?"
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone().strftime(
         "%Y-%m-%d %H:%M:%S")
+
+
+def parse_when(value: Optional[str]) -> Optional[float]:
+    """``2026-09-30``, ``2026-09-30T12:00``, or ``7d`` (days ago) -> epoch.
+
+    Shared by the CLI's ``--since`` / ``--until`` and the machine-readable
+    search op, so a client cannot interpret a time differently from the command
+    line.  Raises ``ValueError`` on anything else.
+    """
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if text.endswith("d") and text[:-1].isdigit():
+        return time.time() - int(text[:-1]) * 86400
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).timestamp()
+        except ValueError:
+            continue
+    raise ValueError("unrecognised time %r (try 2026-09-30 or 7d)" % value)

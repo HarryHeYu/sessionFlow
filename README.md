@@ -413,6 +413,18 @@ key-value store read-only and Antigravity decodes protobuf blobs
 heuristically (no public schema). Full per-field availability matrix and
 data-source paths for every tool are in [docs/RECON.md](docs/RECON.md).
 
+## DeepSeek Harness integration
+
+Voyager's continuity is available **inside DeepSeek Harness** through
+[`sessionflow-dsh`](https://github.com/HarryHeYu/sessionflow-dsh) — a thin DSH
+plugin that exposes search, current work, continuation and merge as six
+`sessionflow_*` tools, so a DSH agent can pick up work from Codex, Claude Code,
+Grok and the rest without leaving the harness.
+
+It is a *client* of this repo, not a second implementation: the core stays the
+single source of truth, and the plugin talks to it over the stable JSON surface
+(`voyager integration-info --json`, `voyager api`, `voyager merge --json`).
+
 ## Tests & CI
 
 Adapters are the part of Voyager that breaks when a vendor ships a storage

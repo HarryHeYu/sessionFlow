@@ -19,7 +19,7 @@ from .adapters import load_all
 from .adapters.base import enabled_adapters, git_info
 from .store import Store, default_db_path, lease_state
 from .integrations.hook import cmd_hook_startup
-from .util import fmt_ts, same_repo_loose
+from .util import fmt_ts, same_repo_loose, parse_when as _parse_when
 
 
 # Argument names that carry a filesystem path.  They are expanded once, at the
@@ -317,13 +317,19 @@ def cmd_provenance(args) -> int:
 def _ensure_fresh(args, store: Store, providers: Optional[List[str]] = None) -> dict:
     """Phase 1b: incremental scan before compiling/reading sessions.
     Never --force; prints one freshness line so stale bundles are explicable.
-    Set VOYAGER_NO_SYNC=1 to skip (tests, offline inspection)."""
+    Set VOYAGER_NO_SYNC=1 to skip (tests, offline inspection).
+
+    The line is suppressed under ``--json``: a machine-readable stream must not
+    be polluted by a human diagnostic, or the caller cannot parse it."""
+    quiet = bool(getattr(args, "json", False))
     if os.environ.get("VOYAGER_NO_SYNC"):
-        print("freshness: skipped (VOYAGER_NO_SYNC)")
+        if not quiet:
+            print("freshness: skipped (VOYAGER_NO_SYNC)")
         return {"changed_sources": 0, "elapsed": 0.0}
     res = run_scan(store, providers=providers, force=False, quiet=True)
-    print(f"freshness: scanned in {res['elapsed']:.1f}s, "
-          f"{res['changed_sources']} source(s) changed")
+    if not quiet:
+        print(f"freshness: scanned in {res['elapsed']:.1f}s, "
+              f"{res['changed_sources']} source(s) changed")
     return res
 
 
@@ -506,23 +512,6 @@ def cmd_show(args) -> int:
     return 0
 
 
-def _parse_when(value):
-    """`2026-09-30`, `2026-09-30T12:00`, or `7d` (that many days ago)."""
-    if value in (None, ""):
-        return None
-    import time as _time
-    from datetime import datetime, timedelta
-    text = str(value).strip()
-    if text.endswith("d") and text[:-1].isdigit():
-        return _time.time() - int(text[:-1]) * 86400
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, fmt).timestamp()
-        except ValueError:
-            continue
-    raise ValueError("unrecognised time %r (try 2026-09-30 or 7d)" % value)
-
-
 def _search_filters(args) -> dict:
     return {
         "providers": [p.strip() for p in (getattr(args, "provider", None) or "").split(",") if p.strip()],
@@ -694,6 +683,19 @@ def cmd_api(args) -> int:
     """Phase 7: local stdio JSON-lines API (the VS Code sidebar's client)."""
     from .api import serve
     serve(Path(args.db) if getattr(args, "db", None) else None)
+    return 0
+
+
+def cmd_integration_info(args) -> int:
+    """Machine-readable version/capability probe for client integrations.
+
+    A thin client (the DSH plugin, the VS Code extension) must fail clearly
+    when the core is older than the interface it drives, so this reports the
+    bridge ``schema_version`` alongside the package version.  Always JSON: the
+    caller is a program, and a human can pipe it to ``jq``.
+    """
+    from .api import integration_info
+    print(json.dumps(integration_info(), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1444,6 +1446,21 @@ def _handoff_via_engine(store: Store, args, kind: str,
         force_bundle=(kind == "handoff"
                       or getattr(args, "bundle", False)),
         **source)
+    if getattr(args, "json", False):
+        # Machine-readable handoff: the engine already returns a dict, and the
+        # compiled context is the whole point of the call, so include its text
+        # rather than making a client re-open the file it just wrote.
+        payload = dict(res)
+        ctx_path = res.get("context_path") or res.get("bundle_path")
+        if ctx_path:
+            try:
+                payload["context"] = Path(ctx_path).read_text(encoding="utf-8")
+            except Exception:
+                pass
+        store.close()
+        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        code = res.get("exit_code")
+        return int(code) if code is not None else 0
     store.close()
     return _render_handoff(store, res, args, kind)
 
@@ -1587,11 +1604,12 @@ def _thread_from_merge(store: Store, rows: list, args) -> str:
         action = "created"
     for sid in sids:
         store.thread_attach(tid, sid)
-    print("Thread {0} {1}".format(tid, action))
-    print("repo: " + (repo_root or "?"))
-    print("members:")
-    for r in rows:
-        print("  {0} {1}".format(r["provider"], r["native_id"]))
+    if not getattr(args, "json", False):
+        print("Thread {0} {1}".format(tid, action))
+        print("repo: " + (repo_root or "?"))
+        print("members:")
+        for r in rows:
+            print("  {0} {1}".format(r["provider"], r["native_id"]))
     return tid
 
 
@@ -2088,6 +2106,8 @@ def main(argv=None) -> int:
     sp.add_argument("--output", "-o", help="bundle file path (default ~/.voyager/bundles/...)")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the bundle")
     sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
+    sp.add_argument("--json", action="store_true",
+                    help="machine-readable result, including the compiled context")
     sp.set_defaults(func=cmd_merge)
 
     sp = sub.add_parser("watch", help="keep the index in sync automatically",
@@ -2267,6 +2287,8 @@ def main(argv=None) -> int:
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
     sp.add_argument("--no-launch", action="store_true",
                     help="print what would be launched instead of launching")
+    sp.add_argument("--json", action="store_true",
+                    help="machine-readable result, including the compiled context")
     sp.set_defaults(func=cmd_continue)
 
     sp = sub.add_parser("brief", parents=[common],
@@ -2338,6 +2360,13 @@ def main(argv=None) -> int:
     sp.add_argument("--matrix", action="store_true",
                     help="show full provider-by-dimension matrix")
     sp.set_defaults(func=lambda args: _cmd_verify(args))
+
+    # voyager integration-info  (machine-readable version/capability probe)
+    sp = sub.add_parser("integration-info",
+                        help="machine-readable version/capability probe for integrations")
+    sp.add_argument("--json", action="store_true",
+                    help="accepted for symmetry; the output is always JSON")
+    sp.set_defaults(func=cmd_integration_info)
 
     # voyager integrate remove <provider>
     irmp = isp.add_parser("remove", help="remove integration for provider")

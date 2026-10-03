@@ -258,6 +258,17 @@ Cursor 与 Antigravity 适配器标记为实验性：Cursor 只读解析它的 K
 Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。
 每个工具的逐字段可得性矩阵和数据源路径见 [docs/RECON.md](docs/RECON.md)。
 
+## DeepSeek Harness 集成
+
+Voyager 的接续能力可以**在 DeepSeek Harness 里直接用**：通过
+[`sessionflow-dsh`](https://github.com/HarryHeYu/sessionflow-dsh) —— 一个薄的 DSH
+插件，把搜索、当前工作、继续、合并暴露为六个 `sessionflow_*` tool，DSH Agent
+不必离开 harness 就能接着做 Codex / Claude Code / Grok 等 Agent 留下的工作。
+
+它是本仓库的**客户端**，不是第二套实现：核心仍是唯一事实来源，插件通过稳定的 JSON
+接口（`voyager integration-info --json`、`voyager api`、`voyager merge --json`）
+与核心通信。
+
 ## 测试与 CI
 
 适配器是最容易坏的地方——各家 Agent 一改本地存储格式就可能解析失败——所以每个
