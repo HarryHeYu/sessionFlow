@@ -62,18 +62,24 @@ STATE_ORDER = {
 
 #: Facts.  A chain of these is the only thing that can promote a provider.
 HOOK_TRIGGERED = "HOOK_TRIGGERED"
-CONTEXT_DELIVERED = "CONTEXT_DELIVERED"
+CONTEXT_PREPARED = "CONTEXT_PREPARED"        # Context successfully compiled
+CONTEXT_EMITTED = "CONTEXT_EMITTED"          # Protocol payload written to stdout
 NATIVE_SESSION_ID_OBSERVED = "NATIVE_SESSION_ID_OBSERVED"
 ATTACH_PENDING = "ATTACH_PENDING"
 ATTACH_RESOLVED = "ATTACH_RESOLVED"
 
 EVENT_TYPES = (
     HOOK_TRIGGERED,
-    CONTEXT_DELIVERED,
+    CONTEXT_PREPARED,
+    CONTEXT_EMITTED,
     NATIVE_SESSION_ID_OBSERVED,
     ATTACH_PENDING,
     ATTACH_RESOLVED,
 )
+
+#: `CONTEXT_PREPARED` means startup_continuity() successfully compiled context.
+#: `CONTEXT_EMITTED` means emit() successfully wrote protocol payload to stdout.
+#: Only HOOK + CONTEXT_EMITTED proves LIVE_VERIFIED.
 
 #: `ZERO_TOUCH_CONFIRMED` is deliberately **not** an event: it is a conclusion,
 #: and persisting conclusions next to facts is how a system starts proving
@@ -184,11 +190,13 @@ def event_id(provider: str, event_type: str, correlation_id: str,
              observed_at: float) -> str:
     """A deterministic identity for one fact.
 
-    Replaying the same hook, or a watcher observing the same thing twice, must
-    not add a row -- so the identity is a hash of what happened, not of when we
-    got around to storing it.  `observed_at` is quantised to the millisecond,
-    because two observations of one event can differ in the sub-millisecond
-    noise of a clock read.
+    Exact duplicate insertion of the same observed fact is idempotent.
+    Distinct observations at different timestamps are distinct events --
+    there is no stable provider invocation id to collapse them, so the
+    identity is a hash of what happened *including* when we got around to
+    storing it (`observed_at` quantised to the millisecond, because two
+    observations of one event can differ in the sub-millisecond noise of a
+    clock read).
     """
     basis = "|".join([
         provider or "", event_type or "", correlation_id or "",
@@ -282,32 +290,30 @@ class Chain:
 
     def status(self) -> str:
         """The state this chain proves.
-
-        Ordering, exactly as the module docstring states it: the hook precedes the
-        delivered context, and the attach resolves **after both**.  The session id
-        may arrive with or before the hook (providers differ), so it only has to
-        precede the resolution.
-
-        The session ids must also agree.  A chain that observes one session and
-        resolves a different one has not proved continuity -- it has proved that
-        two things happened, and joining them is exactly the false positive this
-        module exists to prevent.
+        
+        Only HOOK_TRIGGERED + CONTEXT_EMITTED (actually written to stdout) proves
+        LIVE_VERIFIED.  CONTEXT_PREPARED alone is insufficient because emit() can
+        fail after context is compiled.
+        
+        Ordering: hook precedes emitted context, attach resolves after both.
+        Session id must be known no later than resolution, and all events in same
+        chain must agree on session identity.
         """
         i_hook = self.first_index(HOOK_TRIGGERED)
-        i_ctx = self.first_index(CONTEXT_DELIVERED)
+        i_ctx = self.first_index(CONTEXT_EMITTED)
         i_sid = self.first_index(NATIVE_SESSION_ID_OBSERVED)
         i_res = self.first_index(ATTACH_RESOLVED)
 
         if i_hook is None or i_ctx is None or i_hook > i_ctx:
-            return UNIT_VERIFIED          # the hook ran, but no delivery proved
+            return UNIT_VERIFIED          # hook ran, but nothing emitted
         if i_res is None or i_sid is None:
-            return LIVE_VERIFIED          # delivered, but nothing attached
+            return LIVE_VERIFIED          # emitted, but nothing attached
         if i_sid > i_res:
-            return LIVE_VERIFIED          # the id came too late to explain it
+            return LIVE_VERIFIED          # session id came too late
         if i_ctx > i_res:
-            return LIVE_VERIFIED          # resolved before it delivered anything
+            return LIVE_VERIFIED          # resolved before emit
         if len(self.session_ids()) > 1:
-            return LIVE_VERIFIED          # two sessions in one chain is not one
+            return LIVE_VERIFIED          # inconsistent session ids
         return ZERO_TOUCH_LIVE_VERIFIED
 
 
@@ -336,24 +342,26 @@ def chains_for(con: sqlite3.Connection, provider: Optional[str] = None
     return out
 
 
-def chain_for_session(con: sqlite3.Connection, provider: str,
-                      native_session_id: str) -> Optional[str]:
-    """The chain a session belongs to, for a resolution that happens later.
+def chain_ids_for_session(con: sqlite3.Connection, provider: str,
+                          native_session_id: str) -> List[str]:
+    """Every correlation chain a native session id appears in.
 
     Codex's pending attach resolves in a scan, long after the hook returned, so
     the resolver has to recover the chain from the session id rather than from an
-    in-process variable.
+    in-process variable.  The distinct-id list is what makes the resolution
+    safe: one chain resolves cleanly; more than one is ambiguous and must be
+    refused rather than silently picking the newest observation.
     """
     if not native_session_id or not has_evidence_table(con):
-        return None
+        return []
     try:
-        row = con.execute(
-            "SELECT correlation_id FROM %s WHERE provider=? AND "
-            "native_session_id=? ORDER BY observed_at LIMIT 1" % TABLE,
-            (provider, native_session_id)).fetchone()
-        return row["correlation_id"] if row else None
+        rows = con.execute(
+            "SELECT DISTINCT correlation_id FROM %s WHERE provider=? AND "
+            "native_session_id=? ORDER BY observed_at" % TABLE,
+            (provider, native_session_id)).fetchall()
+        return [r["correlation_id"] for r in rows]
     except Exception:
-        return None
+        return []
 
 
 def observed_state(con: sqlite3.Connection, provider: str) -> Dict[str, Any]:
@@ -472,10 +480,13 @@ def begin_hook(provider: str, *, cwd: Optional[str] = None,
 def note_result(provider: str, correlation_id: Optional[str], result: Any,
                 *, native_session_id: Optional[str] = None) -> None:
     """Record what the continuity core produced for this chain. Never raises.
-
+    
+    Called immediately after startup_continuity() returns successfully.
+    Records CONTEXT_PREPARED (not CONTEXT_EMITTED - that comes from emit()).
+    
     The mapping is about *outcomes*, not about one status string:
-
-      context available              -> CONTEXT_DELIVERED
+    
+      context available              -> CONTEXT_PREPARED
       a native session id is known   -> NATIVE_SESSION_ID_OBSERVED
       attach_status pending_resolve  -> ATTACH_PENDING
       attach_status already/auto     -> ATTACH_RESOLVED
@@ -486,7 +497,7 @@ def note_result(provider: str, correlation_id: Optional[str], result: Any,
         context = getattr(result, "context", None)
         sid = native_session_id or getattr(result, "current_session", None)
         if context:
-            record_event(provider, CONTEXT_DELIVERED, correlation_id,
+            record_event(provider, CONTEXT_PREPARED, correlation_id,
                          native_session_id=sid, payload={"chars": len(context)})
         if sid:
             record_event(provider, NATIVE_SESSION_ID_OBSERVED, correlation_id,
@@ -521,15 +532,20 @@ def note_attach_resolved_for_session(provider: str,
     if con is None:
         return False
     try:
-        cid = chain_for_session(con, provider, native_session_id)
+        cids = chain_ids_for_session(con, provider, native_session_id)
     finally:
         try:
             con.close()
         except Exception:
             pass
-    if not cid:
+    if not cids:
+        return False                       # no chain: nothing to resolve
+    if len(cids) > 1:
+        # ambiguous: the same native session id appears under more than one
+        # correlation chain.  Resolving would silently pick one lifecycle and
+        # fabricate evidence -- refuse instead, and let a human reconcile.
         return False
-    record_event(provider, ATTACH_RESOLVED, cid,
+    record_event(provider, ATTACH_RESOLVED, cids[0],
                  native_session_id=native_session_id, thread_id=thread_id,
                  source_session_id=source_session_id)
     return True
@@ -604,3 +620,32 @@ def cmd_verify(provider: Optional[str] = None, verbose: bool = False,
     for p, v in status["providers"].items():
         print("%-13s %s" % (p, v["effective_state"]))
     return 0
+
+
+def note_context_emitted(provider: str, correlation_id: Optional[str],
+                         nbytes: int) -> None:
+    """Record that emit() successfully wrote to stdout.
+    
+    This is called from handler emit() paths **after** json.dumps() + sys.stdout.write()
+    + flush() succeeds without raising an exception. Never raises.
+    """
+    if not correlation_id:
+        return
+    try:
+        record_event(provider, CONTEXT_EMITTED, correlation_id, payload={"bytes": nbytes})
+    except Exception:
+        pass
+
+
+def note_context_prepared(provider: str, correlation_id: Optional[str]) -> None:
+    """Record that context was compiled in the handler before emit().
+    
+    Called from handle_*_session_start paths **after** startup_continuity() returns
+    a result with non-empty context, but before write() to stdout. Never raises.
+    """
+    if not correlation_id:
+        return
+    try:
+        record_event(provider, CONTEXT_PREPARED, correlation_id)
+    except Exception:
+        pass

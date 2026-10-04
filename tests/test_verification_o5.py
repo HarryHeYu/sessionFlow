@@ -28,10 +28,19 @@ from unittest.mock import patch
 
 import pytest
 
+# Local mock for tests (not importing from non-existent module)
+class _Result:
+    def __init__(self, context=None, attach_status=None, thread_id=None, goal=None, repo_root=None):
+        self.context = context
+        self.attach_status = attach_status
+        self.thread_id = thread_id
+        self.goal = goal
+        self.repo_root = repo_root
+
 from voyager import verification_harness as vh
 from voyager.verification_harness import (
-    ATTACH_PENDING, ATTACH_RESOLVED, CONTEXT_DELIVERED, HOOK_TRIGGERED,
-    LIVE_VERIFIED, NATIVE_SESSION_ID_OBSERVED, NOT_FOUND,
+    ATTACH_PENDING, ATTACH_RESOLVED, CONTEXT_EMITTED, CONTEXT_PREPARED,
+    HOOK_TRIGGERED, LIVE_VERIFIED, NATIVE_SESSION_ID_OBSERVED, NOT_FOUND,
     UNIT_VERIFIED, ZERO_TOUCH_LIVE_VERIFIED,
 )
 from voyager.capability_matrix import (
@@ -97,19 +106,32 @@ class TestNoHardcodedEvidence:
         assert provider_state("dsh") == NOT_FOUND
 
     def test_collect_evidence_queries_the_evidence_table(self, db):
-        """When the evidence table has a chain, collect_evidence reflects it."""
+        """collect_evidence reflects exactly what the table holds.
+
+        G3-B semantics: CONTEXT_PREPARED alone proves compilation, not
+        delivery -- the ceiling stays UNIT_VERIFIED until the protocol
+        payload is actually written (CONTEXT_EMITTED)."""
         _record("codex", HOOK_TRIGGERED, "c1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", at=2.0)
+        _record("codex", CONTEXT_PREPARED, "c1", at=2.0)
         ev = collect_evidence("codex")
-        assert ev.hook_fired is True
+        assert ev.hook_fired is False      # prepared, not yet emitted
         assert ev.zero_touch_observed is False
-        assert evidence_ceiling(ev) == LIVE_VERIFIED
+        assert evidence_ceiling(ev) == UNIT_VERIFIED
+        # the physical write promotes: emitted -> hook_fired
+        _record("codex", CONTEXT_EMITTED, "c1", at=3.0)
+        ev2 = collect_evidence("codex")
+        assert ev2.hook_fired is True
+        assert evidence_ceiling(ev2) == LIVE_VERIFIED
 
     def test_collect_evidence_finds_zero_touch_in_table(self, db):
-        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", sid="s1", at=2.0)
-        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.0)
-        _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=4.0)
+        # the realistic deferred-attach order: prepared -> emitted ->
+        # resolved (the scan resolves the pending after delivery)
+        base = time.time()
+        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=base + 1)
+        result_obj = _Result(context="doc", attach_status="pending_resolve")
+        vh.note_result("codex", "c1", result_obj, native_session_id="s1")
+        _record("codex", CONTEXT_EMITTED, "c1", sid="s1", at=base + 3)
+        _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=base + 4)
         ev = collect_evidence("codex")
         assert ev.zero_touch_observed is True
         assert ev.hook_fired is True
@@ -138,16 +160,20 @@ class TestQueryStatusThreeLayers:
 
     def test_effective_is_observed_when_lower(self, db):
         _record("codex", HOOK_TRIGGERED, "c1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", at=2.0)
+        result_obj = _Result(context="doc")
+        vh.note_result("codex", "c1", result_obj, native_session_id=None)
+        vh.note_context_emitted("codex", "c1", len("doc"))
         out = vh.query_status("codex")
         assert out["providers"]["codex"]["observed_state"] == LIVE_VERIFIED
         assert out["providers"]["codex"]["effective_state"] == LIVE_VERIFIED
 
     def test_effective_is_zero_touch_with_full_chain(self, db):
-        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", sid="s1", at=2.0)
-        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.0)
-        _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=4.0)
+        base = time.time()
+        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=base + 1)
+        result_obj = _Result(context="doc", attach_status="pending_resolve")
+        vh.note_result("codex", "c1", result_obj, native_session_id="s1")
+        _record("codex", CONTEXT_EMITTED, "c1", sid="s1", at=base + 3)
+        _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=base + 4)
         out = vh.query_status("codex")
         assert out["providers"]["codex"]["effective_state"] == ZERO_TOUCH_LIVE_VERIFIED
 
@@ -183,23 +209,34 @@ class TestStateMachinePromotion:
 
     def test_hook_plus_context_is_live_verified(self, db):
         _record("codex", HOOK_TRIGGERED, "c1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", at=2.0)
+        result_obj = _Result(context="doc")
+        vh.note_result("codex", "c1", result_obj, native_session_id=None)
+        # prepared alone proves compilation, not delivery
+        out = vh.query_status("codex")
+        assert out["providers"]["codex"]["observed_state"] == UNIT_VERIFIED
+        # the physical write completes the transport and promotes to LIVE
+        vh.note_context_emitted("codex", "c1", len("doc"))
         out = vh.query_status("codex")
         assert out["providers"]["codex"]["observed_state"] == LIVE_VERIFIED
 
     def test_pending_without_resolved_is_not_zero_touch(self, db):
         _record("codex", HOOK_TRIGGERED, "c1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", at=2.0)
-        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.0)
-        _record("codex", ATTACH_PENDING, "c1", sid="s1", at=4.0)
+        result_obj = _Result(context="doc", attach_status="pending_resolve")
+        vh.note_result("codex", "c1", result_obj, native_session_id="s1")
+        vh.note_context_emitted("codex", "c1", len("doc"))
         out = vh.query_status("codex")
+        # emitted + pending (never resolved) = LIVE, not ZERO_TOUCH
         assert out["providers"]["codex"]["observed_state"] == LIVE_VERIFIED
 
     def test_full_chain_is_zero_touch(self, db):
-        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", sid="s1", at=2.0)
-        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.0)
-        _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=4.0)
+        # the realistic deferred-attach order: prepared -> emitted ->
+        # resolved (the scan resolves the pending after delivery)
+        base = time.time()
+        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=base + 1)
+        result_obj = _Result(context="doc", attach_status="pending_resolve")
+        vh.note_result("codex", "c1", result_obj, native_session_id="s1")
+        _record("codex", CONTEXT_EMITTED, "c1", sid="s1", at=base + 3)
+        _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=base + 4)
         out = vh.query_status("codex")
         assert out["providers"]["codex"]["observed_state"] == ZERO_TOUCH_LIVE_VERIFIED
 
@@ -211,18 +248,24 @@ class TestCorrelationChain:
 
     def test_cross_chain_evidence_does_not_combine(self, db):
         _record("codex", HOOK_TRIGGERED, "chainA", sid="s1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "chainB", sid="s1", at=2.0)
+        result_obj = _Result(context="doc")
+        vh.note_result("codex", "chainB", result_obj, native_session_id=None)
         _record("codex", NATIVE_SESSION_ID_OBSERVED, "chainA", sid="s1", at=3.0)
         _record("codex", ATTACH_RESOLVED, "chainB", sid="s1", at=4.0)
         out = vh.query_status("codex")
         assert out["providers"]["codex"]["observed_state"] != ZERO_TOUCH_LIVE_VERIFIED
 
     def test_cross_session_evidence_does_not_combine(self, db):
-        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", sid="s1", at=2.0)
-        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.0)
-        _record("codex", ATTACH_RESOLVED, "c1", sid="s2", at=4.0)
+        base = time.time()
+        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=base + 1)
+        result_obj = _Result(context="doc")
+        vh.note_result("codex", "c1", result_obj, native_session_id="s1")
+        _record("codex", CONTEXT_EMITTED, "c1", sid="s1", at=base + 2.5)
+        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=base + 3)
+        _record("codex", ATTACH_RESOLVED, "c1", sid="s2", at=base + 4)
         out = vh.query_status("codex")
+        # delivered, but the resolution names a different session: the two
+        # facts must not combine into zero-touch
         assert out["providers"]["codex"]["observed_state"] == LIVE_VERIFIED
 
 
@@ -251,12 +294,20 @@ class TestCodexHandlerWiring:
         result = cs.handle_codex_session_start(cwd="E:/repo", stdin_raw='{"session_id":"s1"}')
         assert result["status"] == "context_ready"
 
-        # Evidence should be in the table
+        # Emit the context (simulating what main() does after handle_* returns)
+        correlation_id = result.get("_verification_correlation_id")
+        if result.get("context") and correlation_id:
+            vh.note_context_emitted("codex", correlation_id, len(result["context"]))
+
+        # Evidence should be in the table.  The auto-attach flow resolves the
+        # attach during startup_continuity (before delivery), so the honest
+        # derived state is LIVE_VERIFIED -- the deferred-attach zero-touch
+        # flow is pinned by the V2 suite's pending_resolve test.
         con = vh._connect()
         try:
             obs = vh.observed_state(con, "codex")
-            assert obs["evidence_count"] >= 3  # hook + context + session_id + resolved
-            assert obs["observed_state"] == ZERO_TOUCH_LIVE_VERIFIED
+            assert obs["evidence_count"] >= 4  # hook + prepared + nsid + resolved + emitted
+            assert obs["observed_state"] == LIVE_VERIFIED
         finally:
             con.close()
 
@@ -331,12 +382,18 @@ class TestDoctorVerification:
 
     def test_check_verification_has_evidence_details(self, db):
         from voyager.doctor import check_verification
+        
+        class _Result:
+            context = "doc"
+            attach_status = "auto_attached"
+        
         _record("codex", HOOK_TRIGGERED, "c1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", at=2.0)
+        vh.note_result("codex", "c1", _Result(), native_session_id="s1")
+        vh.note_context_emitted("codex", "c1", len("doc"))
         rpt = check_verification()
         v = rpt["providers"]["codex"]
         assert v["chains"] == 1
-        assert v["evidence_count"] == 2
+        assert v["evidence_count"] == 5
         assert v["best_chain"] == "c1"
         assert v["last_live_event"] is not None
 
@@ -389,12 +446,14 @@ class TestCLIVerifyFlags:
 
     def test_verify_verbose_shows_chain_and_evidence(self, db, capsys):
         _record("codex", HOOK_TRIGGERED, "c1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", at=2.0)
+        _record("codex", CONTEXT_PREPARED, "c1", at=2.0)
         rc = vh.cmd_verify(verbose=True)
         assert rc == 0
         out = capsys.readouterr().out
-        assert "chain" in out.lower()
-        assert "c1" in out
+        # the verbose mode prints the three-layer table plus the evidence
+        # summary; the per-provider row for codex must appear
+        assert "evidence" in out.lower()
+        assert "codex" in out
 
 
 # --- O5.10: idempotency -----------------------------------------------------
@@ -427,7 +486,7 @@ class TestIdempotency:
     def test_collect_evidence_is_idempotent(self, db):
         """Calling collect_evidence twice does not write or change state."""
         _record("codex", HOOK_TRIGGERED, "c1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", at=2.0)
+        _record("codex", CONTEXT_PREPARED, "c1", at=2.0)
         ev1 = collect_evidence("codex")
         ev2 = collect_evidence("codex")
         assert ev1.hook_fired == ev2.hook_fired
@@ -442,8 +501,9 @@ class TestSourceRotationInteraction:
 
     def test_evidence_survives_source_rotation(self, db):
         _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=1.0)
-        _record("codex", CONTEXT_DELIVERED, "c1", sid="s1", at=2.0)
-        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.0)
+        _record("codex", CONTEXT_PREPARED, "c1", sid="s1", at=2.0)
+        _record("codex", CONTEXT_EMITTED, "c1", sid="s1", at=3.0)
+        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.5)
         _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=4.0)
         # "Source rotation" -- the session's source file is gone.
         # The evidence table is independent; it is not affected.
@@ -451,6 +511,6 @@ class TestSourceRotationInteraction:
         try:
             obs = vh.observed_state(con, "codex")
             assert obs["observed_state"] == ZERO_TOUCH_LIVE_VERIFIED
-            assert obs["evidence_count"] == 4
+            assert obs["evidence_count"] == 5
         finally:
             con.close()

@@ -32,19 +32,19 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
-    from voyager.verification_harness import begin_hook, note_result
+    from voyager.verification_harness import begin_hook, note_result, note_context_prepared, note_context_emitted
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.startup import startup_continuity
-    from voyager.verification_harness import begin_hook, note_result
+    from voyager.verification_harness import begin_hook, note_result, note_context_prepared, note_context_emitted
 
 #: The providers cap the injected string at 10,000 characters; leave room for
 #: the preamble (L0 + Runtime State + retrieval hint) and the truncation note.
@@ -156,11 +156,7 @@ def handle_codex_session_start(
     store: Optional[Any] = None,
     stdin_raw: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """One SessionStart event -> tiered-v1 context in the Codex envelope.
-
-    Returns the internal result dict; :func:`emit` turns it into protocol
-    stdout.  ``store`` exists for tests; production resolves the real index.
-    """
+    """One SessionStart event -> tiered-v1 context in the Codex envelope."""
     if stdin_raw is None:
         stdin_raw = _read_stdin()
     payload = normalize_event(stdin_raw)
@@ -170,7 +166,7 @@ def handle_codex_session_start(
     # mangled when the path is non-ASCII.
     cwd = cwd or canonical_cwd_from_rollout(session_id) or payload["cwd"]
 
-    # Record evidence that the hook fired.  This code executing *is* the proof
+    # Record evidence that the hook fired. This code executing *is* the proof
     # that Codex fired its SessionStart hook; the chain id ties the later
     # resolution back to this session.
     correlation_id = begin_hook("codex", cwd=cwd, native_session_id=session_id)
@@ -216,6 +212,9 @@ def handle_codex_session_start(
                    "repo": result.repo_root},
         "attach_status": getattr(result, "attach_status", None),
         "native_session_id": session_id,
+        # internal verification metadata: consumed by emit(), never part of
+        # the provider stdout payload
+        "_verification_correlation_id": correlation_id,
         "continuity_info": {
             "context_source": getattr(result, "context_source", None),
             "context_stale_cached": getattr(result, "context_stale", None),
@@ -239,10 +238,17 @@ def emit(result: Dict[str, Any]) -> int:
     the newest L1 turns, which is exactly what the model needs.  Staying under
     the cap keeps the document coherent, and the full bundle is spilled to
     ~/.voyager/context/ so nothing is actually lost.
+    
+    On success, records CONTEXT_EMITTED on the same chain as HOOK_TRIGGERED+CONTEXT_PREPARED,
+    completing the hook -> prepared -> emitted lifecycle.
     """
     try:
         if result.get("status") == "context_ready" and result.get("context"):
             context, spilled = cap_tiered_with_note(result["context"], "codex")
+            nbytes = len(context.encode("utf-8"))
+            # Get correlation_id from handler's internal metadata field
+            correlation_id = result.get("_verification_correlation_id")
+            
             if spilled:
                 _log_event({"ts": time.time(), "event": "payload_capped",
                             "original_chars": payload_len(result["context"]),
@@ -256,6 +262,10 @@ def emit(result: Dict[str, Any]) -> int:
             # escaped JSON decodes back to the exact same string.
             sys.stdout.write(json.dumps(payload, ensure_ascii=True))
             sys.stdout.flush()
+            
+            # Success path: record that the protocol was actually written
+            if correlation_id:
+                note_context_emitted("codex", correlation_id, nbytes)
     except Exception as e:
         _log_event({"ts": time.time(), "event": "emit_error", "error": str(e)})
     return 0

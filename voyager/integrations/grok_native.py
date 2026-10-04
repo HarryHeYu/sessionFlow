@@ -40,7 +40,7 @@ from typing import Any, Dict, Optional
 from ..store import Store
 from ..continuity import CONTEXT_FORMAT_TIERED
 from ..startup import startup_continuity
-from ..verification_harness import begin_hook, note_result
+from ..verification_harness import begin_hook, note_result, note_context_prepared, note_context_emitted
 
 #: Name of the generated rule file inside the Grok rules directory.
 RULES_FILENAME = "voyager-continuation.md"
@@ -232,6 +232,12 @@ def session_start(
     note_result("grok", correlation_id, result, native_session_id=session_id)
 
     attach_status = getattr(result, "attach_status", None)
+    
+    # Grok SessionStart is passive - no context emitted via stdout
+    # But we still record that context was prepared if available
+    if hasattr(result, 'context') and result.context:
+        pass  # CONTEXT_PREPARED already recorded by note_result()
+    
     return {
         "status": "ok",
         "session_id": session_id,

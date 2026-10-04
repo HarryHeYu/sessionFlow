@@ -34,20 +34,20 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.integrations.hook_result import build_result, classify
-    from voyager.verification_harness import begin_hook, note_result
+    from voyager.verification_harness import begin_hook, note_result, note_context_prepared, note_context_emitted
     from voyager.startup import startup_continuity
 except ImportError:  # running as a standalone script from the hooks config
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations.hook_payload import cap_tiered_with_note, payload_len
     from voyager.integrations.hook_result import build_result, classify
-    from voyager.verification_harness import begin_hook, note_result
+    from voyager.verification_harness import begin_hook, note_result, note_context_prepared, note_context_emitted
     from voyager.startup import startup_continuity
 
 PROVIDER = "zcode"
@@ -144,7 +144,7 @@ def handle_zcode_session_start(
                 # Build the L1 inside this provider's cap instead of letting the
                 # provider cut the document afterwards: a cut drops whole sessions.
                 l1_hard_max=PROVIDER_L1_BUDGET,
-        )
+            )
     except Exception as e:
         _log_event({"ts": time.time(), "event": "startup_continuity_error",
                     "error": str(e), "cwd": cwd, "session_id": session_id})
@@ -155,6 +155,10 @@ def handle_zcode_session_start(
     # successful run recorded nothing and a failed one raised
     # UnboundLocalError on `result`.
     note_result(PROVIDER, correlation_id, result, native_session_id=session_id)
+    
+    # Store correlation_id in internal metadata for emit() to use
+    if isinstance(result, dict):
+        result["_verification_correlation_id"] = correlation_id
 
     if not result.continuity_available or not result.context:
         attach_status = getattr(result, "attach_status", None) or ""
@@ -181,6 +185,10 @@ def handle_zcode_session_start(
             "recommended_action": getattr(result, "recommended_action", None),
         },
     }
+    
+    # Store correlation_id in internal metadata for emit() to use  
+    out["_verification_correlation_id"] = correlation_id
+    
     _log_event({"ts": time.time(), "event": "context_ready",
                 "cwd": cwd, "session_id": session_id,
                 "thread_id": result.thread_id,
@@ -196,10 +204,17 @@ def emit(result: Dict[str, Any]) -> int:
     capped payload is still the better trade: the shared cap keeps the tiered
     document coherent and spills the full bundle instead of letting the provider
     cut it wherever it likes.
+    
+    On success, records CONTEXT_EMITTED on the same chain as HOOK_TRIGGERED+CONTEXT_PREPARED,
+    completing the hook -> prepared -> emitted lifecycle.
     """
     try:
         if result.get("status") == "context_ready" and result.get("context"):
             context, spilled = cap_tiered_with_note(result["context"], "zcode")
+            nbytes = len(context.encode("utf-8"))
+            # Get correlation_id from handler's internal metadata field
+            correlation_id = result.get("_verification_correlation_id")
+            
             if spilled:
                 _log_event({"ts": time.time(), "event": "payload_capped",
                             "original_chars": payload_len(result["context"]),
@@ -213,6 +228,10 @@ def emit(result: Dict[str, Any]) -> int:
             # escaped JSON decodes back to the exact same string.
             sys.stdout.write(json.dumps(payload, ensure_ascii=True))
             sys.stdout.flush()
+            
+            # Success path: record that the protocol was actually written
+            if correlation_id:
+                note_context_emitted("zcode", correlation_id, nbytes)
     except Exception as e:
         _log_event({"ts": time.time(), "event": "emit_error", "error": str(e)})
     return 0

@@ -27,7 +27,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 try:
     from voyager.store import Store
@@ -35,7 +35,7 @@ try:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations import hook_payload
     from voyager.integrations.hook_result import build_result, classify
-    from voyager.verification_harness import begin_hook, note_result
+    from voyager.verification_harness import begin_hook, note_result, note_context_prepared, note_context_emitted
 except ImportError:
     # Running as standalone module, parent is voyager dir
     import os
@@ -46,7 +46,7 @@ except ImportError:
     from voyager.continuity import CONTEXT_FORMAT_TIERED
     from voyager.integrations import hook_payload
     from voyager.integrations.hook_result import build_result, classify
-    from voyager.verification_harness import begin_hook, note_result
+    from voyager.verification_harness import begin_hook, note_result, note_context_prepared, note_context_emitted
 
 
 # Hook traces are the only way to tell "the hook never ran" apart from "the hook
@@ -156,28 +156,7 @@ def _log_env_debug():
 
 
 def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
-    """Handle Claude SessionStart event.
-
-    Args:
-        cwd: Current working directory from Claude's stdin JSON
-
-    Returns:
-        {
-            "status": "context_ready" | "no_thread" | "error",
-            "context": str,      # tiered-v1 continuation context (optional if success)
-            "thread": {          # WorkThread info (optional)
-                "id": str,
-                "title": str,
-                "members": int,
-            },
-            "attach_status": str,  # already_attached / auto_attached / pending / no_auto_attach
-            "continuity_info": {   # Metadata about context source
-                "context_source": str,
-                "context_stale_cached": bool,
-                "recommended_action": str,
-            },
-        }
-    """
+    """Handle Claude SessionStart event."""
     # LOG EXECUTION ENVIRONMENT IMMEDIATELY - diagnostic for Claude GUI hooks
     _log_env_debug()
 
@@ -228,6 +207,10 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
             l1_hard_max=PROVIDER_L1_BUDGET,
         )
         note_result("claude", correlation_id, result, native_session_id=session_id)
+
+        # Store correlation_id in internal metadata for emit() to use
+        if isinstance(result, dict):
+            result["_verification_correlation_id"] = correlation_id
 
         _log_debug("claude", "startup_continuity_result",
                    continuity_available=result.continuity_available,
@@ -295,11 +278,15 @@ def handle_claude_session_start(cwd: Optional[str] = None) -> Dict[str, Any]:
         _log_debug("claude", "SessionStart_error",
                    error=str(e)[:200])
 
-        return {
+        out = {
             "status": "error",
             "message": str(e),
             "traceback": traceback.format_exc(),
         }
+        # Store correlation_id in internal metadata for emit() to use (even on error)
+        if not isinstance(out, dict):
+            out["_verification_correlation_id"] = correlation_id
+        return out
 
 
 # Claude Code caps hook JSON string fields (additionalContext, systemMessage,
@@ -421,12 +408,18 @@ def emit_claude_hook_output(result: Dict[str, Any]) -> int:
     SessionStart (or plain text on stdout). A bespoke JSON shape such as
     {"status": ..., "context": ...} is parsed as JSON and then ignored, so the
     continuity context would never reach the model.
+    
+    On success, records CONTEXT_EMITTED on the same chain as HOOK_TRIGGERED+CONTEXT_PREPARED,
+    completing the hook -> prepared -> emitted lifecycle.
     """
     status = result.get("status")
     context = result.get("context") or ""
 
     if status == "context_ready" and context:
         payload_context, spilled_path = _spill_context(context)
+        nbytes = len(payload_context.encode("utf-8"))
+        correlation_id = result.get("_verification_correlation_id")
+        
         _write_stdout_json({
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
@@ -439,6 +432,9 @@ def emit_claude_hook_output(result: Dict[str, Any]) -> int:
             emitted_chars=len(payload_context),
             spilled_to=str(spilled_path) if spilled_path else None,
         )
+        # Success path: record that the protocol was actually written
+        if correlation_id:
+            note_context_emitted("claude", correlation_id, nbytes)
         return 0
 
     if status == "no_thread":
