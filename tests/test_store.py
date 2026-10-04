@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from voyager.model import new_event, new_session
 from voyager.store import Store  # noqa: E402
 
 TMP = Path(tempfile.gettempdir())
@@ -138,3 +139,34 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def test_prune_with_huge_disk_paths_set(tmp_path):
+    """O1 regression: prune_missing_sessions used to build a per-session
+    IN clause with one placeholder per disk path -- "too many SQL variables"
+    at six-figure source counts.  The per-source update path has no limit."""
+    store = Store(tmp_path / "huge.db")
+    src = tmp_path / "huge.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    s = new_session(id="codex:huge", provider="codex", native_session_id="huge",
+                    title="huge scan", started_at=1.0, updated_at=2.0,
+                    cwd="E:/huge", repo_root="E:/huge")
+    store.replace_session(
+        s, [new_event(sid="codex:huge", ts=1.0, seq=0, kind="user",
+                      content="huge scan session")], "codex", src)
+    src_path = str(src)
+
+    # 40,000 paths: past SQLite's default variable ceiling (32766)
+    disk_paths = {f"E:/huge/src/{i}.jsonl" for i in range(40_000)}
+    disk_paths.add(src_path)               # the session's source: still here
+    assert store.prune_missing_sessions("codex", disk_paths) == 0
+    row = store.q("SELECT source_state FROM sessions WHERE id='codex:huge'")[0]
+    assert row["source_state"] != "SOURCE_MISSING"   # a live source: stays LIVE
+
+    # now rotate the source away: the huge set no longer contains it
+    disk_paths.discard(src_path)
+    marked = store.prune_missing_sessions("codex", disk_paths)
+    assert marked == 1                     # SOURCE_MISSING, history retained
+    row = store.q("SELECT source_state FROM sessions WHERE id='codex:huge'")[0]
+    assert row["source_state"] == "SOURCE_MISSING"
+    store.close()

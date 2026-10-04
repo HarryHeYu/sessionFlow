@@ -610,17 +610,22 @@ class Store:
                     " source_missing_since=COALESCE(source_missing_since, ?)"
                     " WHERE id=?", (now, sid))
             else:
-                # at least one source is back: clear both markers
-                self.con.execute(
-                    "UPDATE sources SET last_seen=?, missing_since=NULL"
-                    " WHERE provider=? AND sid=? AND path IN (%s)"
-                    % ",".join("?" * len(disk_paths)),
-                    (now, provider, sid, *sorted(disk_paths)))
-                self.con.execute(
-                    "UPDATE sources SET missing_since=COALESCE(missing_since, ?)"
-                    " WHERE provider=? AND sid=? AND path NOT IN (%s)"
-                    % ",".join("?" * len(disk_paths)),
-                    (now, provider, sid, *sorted(disk_paths)))
+                # at least one source is back: clear both markers.  Per-source
+                # updates instead of a giant IN clause: disk_paths can outrun
+                # SQLite's variable limit at six-figure session counts (O1
+                # found "too many SQL variables" at 100k sources).
+                for sr in src_rows:
+                    if sr["path"] in disk_paths:
+                        self.con.execute(
+                            "UPDATE sources SET last_seen=?, missing_since=NULL"
+                            " WHERE provider=? AND sid=? AND path=?",
+                            (now, provider, sid, sr["path"]))
+                    else:
+                        self.con.execute(
+                            "UPDATE sources SET missing_since=COALESCE("
+                            "missing_since, ?) WHERE provider=? AND sid=?"
+                            " AND path=?",
+                            (now, provider, sr["path"], sid))
                 self.con.execute(
                     "UPDATE sessions SET source_state='LIVE',"
                     " source_missing_since=NULL WHERE id=?", (sid,))

@@ -484,12 +484,33 @@ def test_migration_adds_columns_without_touching_rows(tmp_path):
     before = dict(s.q("SELECT * FROM sessions WHERE id='codex:old'")[0])
     s.close()
 
-    # simulate a pre-O2 database by dropping the new columns (the index has to
-    # go first: SQLite refuses to drop a column an index still references)
+    # simulate a pre-O2 database by rebuilding the sessions table without the
+    # two new columns.  DROP COLUMN is avoided on purpose: it re-splices the
+    # stored CREATE statement, which chokes on the schema's inline comments
+    # ("incomplete input").  The documented SQLite idiom for column removal is
+    # a table rebuild.
     con = sqlite3.connect(db)
     con.execute("DROP INDEX IF EXISTS idx_sessions_source_state")
-    con.execute("ALTER TABLE sessions DROP COLUMN source_state")
-    con.execute("ALTER TABLE sessions DROP COLUMN source_missing_since")
+    con.execute("ALTER TABLE sessions RENAME TO sessions_full")
+    con.execute(
+        """CREATE TABLE sessions (
+               id TEXT PRIMARY KEY, provider TEXT NOT NULL,
+               native_id TEXT NOT NULL, title TEXT, started_at REAL,
+               updated_at REAL, cwd TEXT, repo_root TEXT, git_remote TEXT,
+               git_branch TEXT, git_commit TEXT, model TEXT,
+               message_count INTEGER DEFAULT 0, tool_count INTEGER DEFAULT 0,
+               can_resume INTEGER DEFAULT 0, can_fork INTEGER DEFAULT 0,
+               resume_cmd TEXT, metadata_json TEXT, raw_metadata_json TEXT)"""
+    )
+    con.execute(
+        """INSERT INTO sessions
+           SELECT id, provider, native_id, title, started_at, updated_at,
+                  cwd, repo_root, git_remote, git_branch, git_commit, model,
+                  message_count, tool_count, can_resume, can_fork,
+                  resume_cmd, metadata_json, raw_metadata_json
+           FROM sessions_full"""
+    )
+    con.execute("DROP TABLE sessions_full")
     con.commit()
     cols = [r[1] for r in con.execute("PRAGMA table_info(sessions)")]
     assert "source_state" not in cols
