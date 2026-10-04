@@ -415,8 +415,9 @@ data-source paths for every tool are in [docs/RECON.md](docs/RECON.md).
 
 ## DeepSeek Harness integration
 
-Voyager's continuity is available **inside DeepSeek Harness** through
-[`sessionflow-dsh`](https://github.com/HarryHeYu/sessionflow-dsh) — a thin DSH
+DeepSeek Harness integration: <https://github.com/HarryHeYu/dsh-sessionflow>
+
+[`dsh-sessionflow`](https://github.com/HarryHeYu/dsh-sessionflow) is a thin DSH
 plugin that exposes search, current work, continuation and merge as six
 `sessionflow_*` tools, so a DSH agent can pick up work from Codex, Claude Code,
 Grok and the rest without leaving the harness.

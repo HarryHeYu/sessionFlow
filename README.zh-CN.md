@@ -260,8 +260,9 @@ Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。
 
 ## DeepSeek Harness 集成
 
-Voyager 的接续能力可以**在 DeepSeek Harness 里直接用**：通过
-[`sessionflow-dsh`](https://github.com/HarryHeYu/sessionflow-dsh) —— 一个薄的 DSH
+DeepSeek Harness integration: <https://github.com/HarryHeYu/dsh-sessionflow>
+
+[`dsh-sessionflow`](https://github.com/HarryHeYu/dsh-sessionflow) 是一个薄的 DSH
 插件，把搜索、当前工作、继续、合并暴露为六个 `sessionflow_*` tool，DSH Agent
 不必离开 harness 就能接着做 Codex / Claude Code / Grok 等 Agent 留下的工作。
 
