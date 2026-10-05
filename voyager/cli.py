@@ -907,7 +907,10 @@ def cmd_doctor(args) -> int:
                                          step.get("action", step.get("error", ""))))
             if not result.get("executed"):
                 print("  nothing to fix")
-        return 0
+        # O4: the exit code reflects the state AFTER fixing -- a failed
+        # repair or a remaining blocking issue still means 1.
+        report = run(repo=getattr(args, "repo", None), db_path=db_path)
+        return 1 if report.get("blocking") else 0
 
     report = run(repo=getattr(args, "repo", None), db_path=db_path)
     if args.json:

@@ -358,7 +358,8 @@ def check_retention(db_path: Optional[Path] = None) -> Dict[str, Any]:
     Never raises.
     """
     empty = {"available": False, "sessions": 0, "events": 0, "bytes": 0,
-             "providers": [], "oldest": None, "stranded_threads": []}
+             "providers": [], "oldest": None, "stranded_threads": [],
+             "archived": 0}
     path = _store_path(db_path)
     if path is None or not path.exists():
         return empty
@@ -371,6 +372,9 @@ def check_retention(db_path: Optional[Path] = None) -> Dict[str, Any]:
         return out
     try:
         stats = store.retained_stats()
+        stats["archived"] = store.q(
+            "SELECT COUNT(*) n FROM sessions"
+            " WHERE source_state='ARCHIVED_CANONICAL'")[0]["n"]
         stranded = []
         if stats["sessions"]:
             for t in store.thread_list("active"):
@@ -516,7 +520,8 @@ def check_pending(db_path: Optional[Path] = None) -> Dict[str, Any]:
     provably impossible to resolve, and even then the doctor reports it rather
     than acting, because the user may want to re-open the thread.
     """
-    out: Dict[str, Any] = {"open": 0, "stale": [], "archived_orphans": []}
+    out: Dict[str, Any] = {"open": 0, "stale": [], "archived_orphans": [],
+                           "ambiguous": []}
     try:
         from .store import Store
         path = _store_path(db_path)
@@ -524,6 +529,17 @@ def check_pending(db_path: Optional[Path] = None) -> Dict[str, Any]:
             return out
         store = Store(path)
         try:
+            # O4: an ambiguous pending recorded its outcome -- several
+            # candidates matched.  Picking one is the user's call, never
+            # the doctor's.
+            amb_rows = store.q(
+                "SELECT thread_id, provider, resolved_at FROM thread_pending "
+                "WHERE status='ambiguous' ORDER BY created_at")
+            for r in amb_rows:
+                out["ambiguous"].append({
+                    "thread_id": r["thread_id"], "provider": r["provider"],
+                    "age_s": int(time.time() - (r["resolved_at"] or time.time())),
+                })
             now = time.time()
             open_rows = store.q(
                 "SELECT * FROM thread_pending "
@@ -552,6 +568,35 @@ def check_pending(db_path: Optional[Path] = None) -> Dict[str, Any]:
     except Exception:
         pass
     return out
+
+
+def check_fts(db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """O4: is the FTS index consistent with the canonical events rows?
+
+    Set-based (two COUNTs), never a row-by-row Python walk.  FTS is derived
+    state: a mismatch is a WARNING with a safe rebuild available, never a
+    corruption verdict -- the canonical events table is the truth.
+    """
+    out = {"available": False, "fts_rows": 0, "events": 0, "consistent": True}
+    path = _store_path(db_path)
+    if path is None or not path.exists():
+        return out
+    try:
+        from .store import Store
+        store = Store(path)
+        try:
+            out["events"] = store.q(
+                "SELECT COUNT(*) n FROM events")[0]["n"]
+            out["fts_rows"] = store.q(
+                "SELECT COUNT(*) n FROM event_fts")[0]["n"]
+            out["consistent"] = out["fts_rows"] == out["events"]
+            out["available"] = True
+            return out
+        finally:
+            store.close()
+    except Exception as e:
+        out["error"] = str(e)
+        return out
 
 
 def check_verification(db_path: Optional[Path] = None) -> Dict[str, Any]:
@@ -732,6 +777,17 @@ def collect_issues(repo: Optional[str] = None,
                              "an explicit purge (not yet implemented)",
             repair_kind=READ_ONLY_DIAGNOSIS,
         ))
+    if retention.get("archived"):
+        issues.append(Issue(
+            code="SOURCE_ARCHIVED", severity=INFO, category="retention",
+            message="%s session(s) explicitly archived as canonical copies"
+                    % retention["archived"],
+            evidence="source_state='ARCHIVED_CANONICAL' (an explicit user "
+                     "action, never automatic)",
+            suggested_action="nothing to do; archived history stays searchable "
+                             "and is excluded from live continuity by design",
+            repair_kind=READ_ONLY_DIAGNOSIS,
+        ))
     if retention.get("stranded_threads"):
         issues.append(Issue(
             code="RETENTION_STRANDED_WORKTHREAD", severity=WARNING,
@@ -765,7 +821,7 @@ def collect_issues(repo: Optional[str] = None,
     pending = check_pending(db_path)
     for s in pending.get("stale", []):
         issues.append(Issue(
-            code="PENDING_STALE", severity=INFO, category="pending",
+            code="PENDING_STALE", severity=WARNING, category="pending",
             message="pending attach for %s on %s is %d s old"
                     % (s["thread_id"], s["provider"], s["age_s"]),
             evidence="open pending record, no resolution yet",
@@ -782,6 +838,17 @@ def collect_issues(repo: Optional[str] = None,
             suggested_action="clear the pending record; it can never resolve",
             # Even here -- provably impossible -- we do not auto-fix, because
             # the user may want to re-open the thread and re-launch.
+            repair_kind=USER_DECISION_REQUIRED,
+        ))
+    for s in pending.get("ambiguous", []):
+        issues.append(Issue(
+            code="PENDING_ATTACH_AMBIGUOUS", severity=WARNING,
+            category="pending",
+            message="pending attach for %s on %s resolved ambiguous: several "
+                    "candidates matched" % (s["thread_id"], s["provider"]),
+            evidence="status='ambiguous'; no candidate was chosen",
+            suggested_action="decide which session to attach (voyager thread "
+                             "attach) or cancel the pending record",
             repair_kind=USER_DECISION_REQUIRED,
         ))
 
@@ -801,6 +868,20 @@ def collect_issues(repo: Optional[str] = None,
             suggested_action="clear stale cache entries; the next "
                              "get_continuation_context() call rebuilds them",
             auto_fixable=cache.get("auto_fixable", False),
+            repair_kind=SAFE_DERIVED_REPAIR,
+        ))
+
+    # --- FTS (O4: derived state, safely rebuildable) ------------------------
+    fts = check_fts(db_path)
+    if fts.get("available") and not fts.get("consistent"):
+        issues.append(Issue(
+            code="FTS_INCONSISTENT", severity=WARNING, category="fts",
+            message="FTS index holds %s row(s) against %s canonical event(s)"
+                    % (fts["fts_rows"], fts["events"]),
+            evidence="event_fts vs events COUNT mismatch (search results may "
+                     "be incomplete)",
+            suggested_action="rebuild the FTS index from the canonical events",
+            auto_fixable=True,
             repair_kind=SAFE_DERIVED_REPAIR,
         ))
 
@@ -845,55 +926,118 @@ def apply_fix(db_path: Optional[Path] = None,
     * running VACUUM (that is maintenance, not repair)
     * clearing pending records (``USER_DECISION_REQUIRED``)
 
-    The only thing this does is clear stale cache entries whose canonical
-    source is intact.  The FTS rebuild lives in ``db_health.apply_safe_repairs``
-    and is reached via ``voyager db repair --apply``, not here.
+    The boundary is the explicit ``SAFE_FIXERS`` allowlist below: a repair
+    runs only when its issue code is listed there AND the issue came back as
+    ``SAFE_DERIVED_REPAIR`` + ``auto_fixable``.  Each repair is its own
+    transaction — a failure rolls that repair back and leaves the canonical
+    database untouched (no half-repaired state).  Repairs are idempotent: a
+    second run reports the issue already healthy and changes nothing.
+
+    The FTS rebuild ALSO lives in ``db_health.apply_safe_repairs`` (reached
+    via ``voyager db repair --apply``); both go through the same allowlist.
     """
     path = _store_path(db_path)
     issues = collect_issues(db_path=db_path)
     fixable = [i for i in issues
                if i.repair_kind == SAFE_DERIVED_REPAIR and i.auto_fixable]
+    attempted: List[str] = [i.code for i in fixable]
+    skipped: List[str] = [i.code for i in issues
+                          if i.repair_kind != SAFE_DERIVED_REPAIR
+                          or not i.auto_fixable]
     executed: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = []
 
     if dry_run:
         for i in fixable:
             executed.append({
                 "code": i.code, "category": i.category,
                 "message": i.message,
-                "action": i.suggested_action,
+                "operation": SAFE_FIXERS[i.code].__name__,
+                "target": str(path or "(default index)"),
+                "why_safe": "derived state only; rebuilt or cleared from the "
+                            "canonical tables, which are never touched",
                 "would_execute": True,
             })
         return {"dry_run": True, "fixable": len(fixable),
-                "executed": executed}
+                "attempted": attempted, "executed": executed,
+                "skipped": skipped, "failed": failed}
 
-    # Execute the safe repairs
     from .store import Store
-    try:
-        if path and path.exists():
-            store = Store(path)
-            try:
-                for i in fixable:
-                    if i.code == "CACHE_STALE":
-                        cache_rpt = check_cache(db_path)
-                        for key in cache_rpt.get("stale", []):
-                            store.con.execute(
-                                "DELETE FROM meta WHERE key=?", (key,))
-                        store.con.commit()
-                        executed.append({
-                            "code": i.code, "category": i.category,
-                            "ok": True,
-                            "action": "cleared %d stale cache entr%s" % (
-                                len(cache_rpt.get("stale", [])),
-                                "y" if len(cache_rpt.get("stale", [])) == 1
-                                else "ies"),
-                        })
-            finally:
-                store.close()
-    except Exception as e:
-        executed.append({"code": "ERROR", "ok": False, "error": str(e)})
+    if path and path.exists():
+        store = Store(path)
+        try:
+            for i in fixable:
+                fixer = SAFE_FIXERS.get(i.code)
+                if fixer is None:            # belt: not on the allowlist
+                    skipped.append(i.code)
+                    continue
+                try:
+                    # one repair operation = one transaction
+                    store.con.execute("BEGIN")
+                    detail = fixer(store, db_path)
+                    store.con.commit()
+                    executed.append({
+                        "code": i.code, "category": i.category, "ok": True,
+                        "action": detail,
+                    })
+                except Exception as e:
+                    store.con.rollback()     # all-or-nothing, no half repair
+                    failed.append({"code": i.code, "ok": False,
+                                   "error": str(e)})
+        finally:
+            store.close()
 
     return {"dry_run": False, "fixable": len(fixable),
-            "executed": executed}
+            "attempted": attempted, "executed": executed,
+            "skipped": skipped, "failed": failed}
+
+
+# --- O4 safe fixers (the auditable allowlist) --------------------------------
+
+def _fix_cache_stale(store, db_path: Optional[Path]) -> str:
+    """Clear stale derived cache rows.  The cache holds only pointers into
+    the canonical index -- never the only copy of user history -- and the
+    next get_continuation_context() rebuilds whatever it needs."""
+    cache_rpt = check_cache(db_path)
+    keys = list(cache_rpt.get("stale", []))
+    for key in keys:
+        store.con.execute("DELETE FROM meta WHERE key=?", (key,))
+    return "cleared %d stale cache entr%s" % (
+        len(keys), "y" if len(keys) == 1 else "ies")
+
+
+def _fix_fts_inconsistent(store, db_path: Optional[Path]) -> str:
+    """Rebuild the FTS index from the canonical events rows.  event_fts is
+    a pure projection of `events`: rebuilding it can never lose history.
+
+    Runs inside the caller's transaction, so no executescript here (that
+    would COMMIT implicitly and break all-or-nothing) — the DDL and the
+    projection mirror store._rebuild_fts deliberately.
+    """
+    store.con.execute("DROP TABLE IF EXISTS event_fts")
+    store.con.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5("
+        "body, file_path, command, sid UNINDEXED, tokenize = 'trigram')")
+    store.con.execute(
+        """INSERT INTO event_fts(rowid, body, file_path, command, sid)
+           SELECT id,
+                  COALESCE(content,'') || ' ' || COALESCE(tool_input,'') || ' '
+                    || COALESCE(tool_output,'') || ' ' || COALESCE(command,'')
+                    || ' ' || COALESCE(stdout,''),
+                  COALESCE(file_path,''), COALESCE(command,''),
+                  COALESCE(sid,'')
+           FROM events""")
+    n = store.q("SELECT COUNT(*) n FROM event_fts")[0]["n"]
+    return "rebuilt FTS index from canonical events (%d rows)" % n
+
+
+#: The safe-repair allowlist (O4).  A code not listed here is NEVER executed
+#: by --fix, no matter what flags an issue carries.  Adding an entry requires
+#: proving the repair is derived-only, transactional and idempotent.
+SAFE_FIXERS = {
+    "CACHE_STALE": _fix_cache_stale,
+    "FTS_INCONSISTENT": _fix_fts_inconsistent,
+}
 
 
 # --- the full report (backward-compatible dict) -----------------------------
@@ -936,6 +1080,7 @@ def run(repo: Optional[str] = None,
     cont = check_continuity(repo, db_path)
     retention = check_retention(db_path)
     cache = check_cache(db_path)
+    fts = check_fts(db_path)
     leases = check_leases(db_path)
     pending = check_pending(db_path)
     verification = check_verification(db_path)
@@ -949,6 +1094,7 @@ def run(repo: Optional[str] = None,
         "store": store,
         "continuity": cont,
         "cache": cache,
+        "fts": fts,
         "retention": retention,
         "leases": leases,
         "pending": pending,

@@ -220,7 +220,7 @@ class TestRetentionDiagnostics:
 # --- O4.4: pending attach health --------------------------------------------
 
 class TestPendingHealth:
-    def test_stale_pending_is_info(self, tmp_path, monkeypatch):
+    def test_stale_pending_is_warning(self, tmp_path, monkeypatch):
         store, path = _make_store(tmp_path)
         try:
             tid = store.thread_create(repo_root="/r", title="t", goal="g")
@@ -237,7 +237,7 @@ class TestPendingHealth:
             issues = collect_issues(db_path=path)
             stale = [i for i in issues if i.code == "PENDING_STALE"]
             assert len(stale) == 1
-            assert stale[0].severity == INFO
+            assert stale[0].severity == WARNING
             assert stale[0].repair_kind == USER_DECISION_REQUIRED
             assert not stale[0].auto_fixable
         finally:
@@ -707,3 +707,259 @@ class TestRunBackwardCompat:
             json.dumps(report, ensure_ascii=False, default=str)
         finally:
             store.close()
+# --- O4 patch: FTS / archive / ambiguity / allowlist / exit codes -----------
+
+def _digest_db(path: Path) -> str:
+    """Digest of the canonical DB file (main file only: opening a WAL
+    database rewrites -wal bookkeeping bytes even for pure readers, so the
+    -wal file cannot serve as a read-only witness)."""
+    import hashlib
+    return hashlib.sha256(Path(str(path)).read_bytes()).hexdigest()
+
+
+def _settle(path: Path) -> None:
+    """One throwaway open/close so WAL bookkeeping stabilises before the
+    first digest."""
+    from voyager.store import Store
+    s = Store(path)
+    s.close()
+
+
+class TestArchiveAndAmbiguityDiagnostics:
+
+    def test_archived_sessions_are_informational(self, tmp_path, monkeypatch):
+        """Test 3: ARCHIVED_CANONICAL is a normal state — info, read-only,
+        never blocking."""
+        store, path = _make_store(tmp_path)
+        _seed_session(store, "codex:arch1")
+        store.mark_canonical_archived("codex:arch1")
+        store.close()
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        issues = collect_issues(db_path=path)
+        arch = [i for i in issues if i.code == "SOURCE_ARCHIVED"]
+        assert len(arch) == 1
+        assert arch[0].severity == INFO
+        assert arch[0].repair_kind == READ_ONLY_DIAGNOSIS
+        assert arch[0].auto_fixable is False
+        assert _legacy_kind(arch[0].severity,
+                            arch[0].repair_kind) == "non-blocking"
+
+    def test_ambiguous_pending_is_user_decision(self, tmp_path, monkeypatch):
+        """Test 4: an ambiguous pending is a warning the user must resolve —
+        never auto-fixed, never picked by the doctor."""
+        store, path = _make_store(tmp_path)
+        tid = store.thread_create(repo_root="/repo", title="amb")
+        store.pending_record(tid, "codex", source_provider="claude",
+                             source_session="claude:c1", note="switch")
+        rid = store.q("SELECT rowid rid FROM thread_pending"
+                      " WHERE thread_id=?", (tid,))[0]["rid"]
+        store.pending_mark(rid, "ambiguous")
+        store.close()
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        issues = collect_issues(db_path=path)
+        amb = [i for i in issues if i.code == "PENDING_ATTACH_AMBIGUOUS"]
+        assert len(amb) == 1
+        assert amb[0].severity == WARNING
+        assert amb[0].repair_kind == USER_DECISION_REQUIRED
+        assert amb[0].auto_fixable is False
+
+    def test_stale_pending_is_warning_never_autofixed(self, tmp_path,
+                                                      monkeypatch):
+        """Test 5: stale pending severity follows the O4 spec (warning) and
+        stays out of the fixer's reach."""
+        store, path = _make_store(tmp_path)
+        tid = store.thread_create(repo_root="/repo", title="st")
+        store.pending_record(tid, "codex", note="slow start")
+        store.con.execute("UPDATE thread_pending SET created_at=?"
+                          " WHERE thread_id=?", (time.time() - 3600, tid))
+        store.con.commit()
+        store.close()
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        issues = collect_issues(db_path=path)
+        stale = [i for i in issues if i.code == "PENDING_STALE"]
+        assert len(stale) == 1
+        assert stale[0].severity == WARNING
+        assert stale[0].repair_kind == USER_DECISION_REQUIRED
+
+
+class TestFtsDiagnosticsAndRepair:
+
+    def _make_inconsistent(self, tmp_path, monkeypatch):
+        store, path = _make_store(tmp_path)
+        _seed_session(store, "codex:fts1")
+        store.con.execute(
+            "INSERT INTO events(sid, ts, seq, kind, content)"
+            " VALUES ('codex:fts1', 1.0, 1, 'user', 'needle-fts-corrupt')")
+        store.con.commit()
+        # half the FTS index vanishes: the canonical rows are untouched
+        store.con.execute("DELETE FROM event_fts WHERE rowid > 0")
+        store.con.commit()
+        store.close()
+        _settle(path)     # let the additive migration land before digesting
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        return path
+
+    def test_fts_mismatch_is_reported(self, tmp_path, monkeypatch):
+        """Test 8: a broken FTS index is detected, as safe derived repair."""
+        path = self._make_inconsistent(tmp_path, monkeypatch)
+        issues = collect_issues(db_path=path)
+        fts = [i for i in issues if i.code == "FTS_INCONSISTENT"]
+        assert len(fts) == 1
+        assert fts[0].severity == WARNING
+        assert fts[0].repair_kind == SAFE_DERIVED_REPAIR
+        assert fts[0].auto_fixable is True
+
+    def test_fts_dry_run_writes_nothing(self, tmp_path, monkeypatch):
+        """Test 9: the dry-run plan names operation/target/why-safe and the
+        database is byte-identical afterwards."""
+        path = self._make_inconsistent(tmp_path, monkeypatch)
+        before = _digest_db(path)
+        result = apply_fix(db_path=path, dry_run=True)
+        assert result["dry_run"] is True
+        plan = [e for e in result["executed"] if e["code"] == "FTS_INCONSISTENT"]
+        assert plan, "the plan must include the FTS rebuild"
+        assert plan[0]["operation"] == "_fix_fts_inconsistent"
+        assert plan[0]["target"] == str(path)
+        assert "derived" in plan[0]["why_safe"]
+        assert _digest_db(path) == before, "dry-run must not write"
+
+    def test_fts_fix_rebuilds_and_search_works(self, tmp_path, monkeypatch):
+        """Test 10: after the fix the index matches and search finds rows."""
+        from voyager.store import Store
+        path = self._make_inconsistent(tmp_path, monkeypatch)
+        result = apply_fix(db_path=path)
+        assert [e["code"] for e in result["executed"]] == ["FTS_INCONSISTENT"]
+        assert not result["failed"]
+        s = Store(path)
+        try:
+            assert s.q("SELECT COUNT(*) n FROM events")[0]["n"] == s.q(
+                "SELECT COUNT(*) n FROM event_fts")[0]["n"]
+            assert s.search("needle-fts-corrupt"), "search works again"
+        finally:
+            s.close()
+
+    def test_fts_fix_is_idempotent(self, tmp_path, monkeypatch):
+        """Test 11: the second --fix changes nothing."""
+        path = self._make_inconsistent(tmp_path, monkeypatch)
+        apply_fix(db_path=path)
+        before = _digest_db(path)
+        result = apply_fix(db_path=path)
+        assert [e["code"] for e in result["executed"]
+                if e["code"] == "FTS_INCONSISTENT"] == []
+        assert _digest_db(path) == before
+
+    def test_fts_fix_rolls_back_on_failure(self, tmp_path, monkeypatch):
+        """Test 12: a mid-repair failure leaves the database in its pre-fix
+        state — the index is not half-rebuilt, the canonical rows untouched."""
+        from voyager.store import Store
+        path = self._make_inconsistent(tmp_path, monkeypatch)
+        s = Store(path)
+        try:
+            before_fts = s.q("SELECT COUNT(*) n FROM event_fts")[0]["n"]
+            before_events = s.q("SELECT COUNT(*) n FROM events")[0]["n"]
+        finally:
+            s.close()
+
+        def _boom(store, db_path):
+            raise RuntimeError("boom")
+
+        monkeypatch.setitem(doctor.SAFE_FIXERS, "FTS_INCONSISTENT", _boom)
+        result = apply_fix(db_path=path)
+        assert result["failed"] and result["failed"][0]["code"] ==             "FTS_INCONSISTENT"
+        assert not result["executed"]
+        s = Store(path)
+        try:
+            assert s.q("SELECT COUNT(*) n FROM events")[0]["n"] == before_events
+            assert s.q("SELECT COUNT(*) n FROM event_fts")[0]["n"] == before_fts
+        finally:
+            s.close()
+
+
+class TestSafeFixBoundary:
+
+    def test_safe_fixers_allowlist_is_explicit_and_minimal(self):
+        """Test (§26): the allowlist exists, is auditable, and contains only
+        derived-state repairs."""
+        assert set(doctor.SAFE_FIXERS) == {
+            "CACHE_STALE", "FTS_INCONSISTENT"}
+
+    def test_a_code_off_the_allowlist_is_never_executed(self, tmp_path,
+                                                        monkeypatch):
+        """An issue that claims SAFE_DERIVED_REPAIR but has no allowlist
+        entry is skipped, never dynamically dispatched."""
+        path = _make_store(tmp_path)[1]
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        rogue = doctor.Issue(
+            code="ROGUE_REPAIR", severity=WARNING, category="cache",
+            message="claims to be safe", evidence="-",
+            suggested_action="-", auto_fixable=True,
+            repair_kind=SAFE_DERIVED_REPAIR)
+        monkeypatch.setattr(doctor, "collect_issues",
+                            lambda db_path=None: [rogue])
+        result = apply_fix(db_path=path)
+        assert result["executed"] == []
+        assert "ROGUE_REPAIR" in result["skipped"]
+        assert result["failed"] == []
+
+    def test_fix_report_has_the_four_way_split(self, tmp_path, monkeypatch):
+        """Test (§27): attempted / fixed(executed) / skipped / failed, by
+        code."""
+        path = _make_store(tmp_path)[1]
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        result = apply_fix(db_path=path)
+        for key in ("attempted", "executed", "skipped", "failed"):
+            assert key in result
+        assert isinstance(result["attempted"], list)
+        assert isinstance(result["skipped"], list)
+
+
+class TestExitCodesAndReadOnly:
+
+    def test_exit_zero_with_only_warnings(self, tmp_path, monkeypatch, capsys):
+        """Test 19: warning/info issues must not fail the CLI."""
+        import sys as _sys
+        from voyager.cli import main
+        store, path = _make_store(tmp_path)
+        _seed_session(store, "codex:ex1")
+        store.mark_canonical_archived("codex:ex1")   # INFO only
+        store.close()
+        rc = main(["--db", str(path), "doctor", "--json"])
+        assert rc == 0
+
+    def test_doctor_json_and_verbose_are_read_only(self, tmp_path,
+                                                   monkeypatch, capsys):
+        """Test 1: doctor, doctor --json and a second run leave the DB
+        byte-identical (digest regression)."""
+        from voyager.cli import main
+        store, path = _make_store(tmp_path)
+        _seed_session(store, "codex:ro1")
+        tid = store.thread_create(repo_root="/repo", title="ro")
+        store.thread_attach(tid, "codex:ro1")
+        store.close()
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        _settle(path)
+        before = _digest_db(path)
+        assert main(["--db", str(path), "doctor"]) == 0
+        assert main(["--db", str(path), "doctor", "--json"]) == 0
+        assert main(["--db", str(path), "doctor"]) == 0
+        assert _digest_db(path) == before
+
+    def test_doctor_never_creates_evidence(self, tmp_path, monkeypatch):
+        """Test (§30): doctor must not write verification events."""
+        from voyager.store import Store
+        store, path = _make_store(tmp_path)
+        store.con.execute(
+            "CREATE TABLE IF NOT EXISTS verification_events("
+            "id INTEGER PRIMARY KEY, provider TEXT, correlation_id TEXT,"
+            " kind TEXT, ts REAL, session_id TEXT, detail_json TEXT)")
+        store.con.commit()
+        before = store.q("SELECT COUNT(*) n FROM verification_events")[0]["n"]
+        store.close()
+        monkeypatch.setattr(doctor, "_store_path", lambda db_path=None: path)
+        collect_issues(db_path=path)
+        s = Store(path)
+        try:
+            after = s.q("SELECT COUNT(*) n FROM verification_events")[0]["n"]
+        finally:
+            s.close()
+        assert before == after == 0, "doctor must never fabricate evidence"
