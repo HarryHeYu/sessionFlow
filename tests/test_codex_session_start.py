@@ -131,6 +131,34 @@ def test_fail_open_on_garbage_and_unknown_repo(tmp_path, monkeypatch):
     assert out.getvalue() == ""  # silent: nothing to inject
 
 
+def test_no_thread_preserves_correlation_id_for_emit(tmp_path, monkeypatch):
+    """Regression: correlation_id must survive no_thread early return.
+    
+    emit() reads _verification_correlation_id from result dict to attribute
+    CONTEXT_EMITTED. Without this fix, early returns would lose the chain.
+    """
+    # Run with bogus input → no_thread outcome
+    bogus = str(tmp_path / "nowhere")
+    result = _run(monkeypatch, "not json {{{", cwd=bogus)
+    assert result["status"] == "no_thread"
+    
+    # CRITICAL: correlation_id MUST be present
+    assert "_verification_correlation_id" in result, \
+        "emit() needs correlation_id to record transport success"
+    
+    correlation_id = result["_verification_correlation_id"]
+    assert isinstance(correlation_id, str), "Must be string ID"
+    assert len(correlation_id) > 0, "Cannot be empty"
+    
+    # Emit should succeed (return 0) even with no context
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    assert emit(result) == 0
+    
+    # Verify emit outputs nothing (by design for no_thread)
+    assert out.getvalue() == ""
+
+
 def test_context_ready_is_logged_and_log_stays_bounded(
         repo_store, tmp_path, monkeypatch):
     store, repo = repo_store

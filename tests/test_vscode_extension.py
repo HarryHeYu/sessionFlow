@@ -104,7 +104,7 @@ def _webview_html(module: str, nonce: str = "TESTNONCE") -> str:
         pytest.skip("node not installed")
     script = "const c=require(%s);process.stdout.write(c.html(%s));" % (
         json.dumps(str(EXT / module)), json.dumps(nonce))
-    proc = subprocess.run([node, "-e", script], capture_output=True, text=True)
+    proc = subprocess.run([node, "-e", script], capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
     return proc.stdout
 
@@ -156,7 +156,7 @@ def test_composer_inline_script_parses(tmp_path):
     target = tmp_path / "composer-inline.js"
     target.write_text(script, encoding="utf-8")
     proc = subprocess.run([node, "--check", str(target)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
 
 
@@ -166,7 +166,7 @@ def test_extension_js_parses(tmp_path):
         pytest.skip("node not installed")
     for name in ("extension.js", "composer.js", "timeline.js"):
         proc = subprocess.run([node, "--check", str(EXT / name)],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8")
         assert proc.returncode == 0, "%s: %s" % (name, proc.stderr)
 
 
@@ -227,7 +227,7 @@ def test_timeline_inline_script_parses(tmp_path):
     target = tmp_path / "timeline-inline.js"
     target.write_text(script, encoding="utf-8")
     proc = subprocess.run([node, "--check", str(target)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
 
 

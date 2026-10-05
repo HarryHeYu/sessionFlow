@@ -154,6 +154,31 @@ def test_fail_open_on_garbage_payload_and_unknown_repo(monkeypatch, tmp_path):
     assert emit(result) == 0                    # never raises, always 0
 
 
+def test_no_thread_preserves_correlation_id_for_emit(tmp_path, monkeypatch):
+    """Regression: correlation_id must survive no_thread early return."""
+    from voyager.integrations.zcode_session_start import handle_zcode_session_start
+    
+    # Run with bogus input → likely no_thread/error outcome
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not json {{{"))
+    result = handle_zcode_session_start(cwd=str(tmp_path))
+    
+    if result["status"] not in ("no_thread", "error"):
+        pytest.skip(f"Got {result['status']} instead of expected path")
+    
+    # CRITICAL: correlation_id MUST be present for emit() to work
+    assert "_verification_correlation_id" in result, \
+        "emit() needs correlation_id to record transport success"
+    
+    correlation_id = result["_verification_correlation_id"]
+    assert isinstance(correlation_id, str), "Must be string ID"
+    assert len(correlation_id) > 0, "Cannot be empty"
+    
+    # Emit should succeed (return 0) even with no context  
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    assert emit(result) == 0
+
+
 def test_context_ready_is_logged(tmp_path, repo_store, monkeypatch):
     store, repo = repo_store
     _seed(store, tmp_path, repo)

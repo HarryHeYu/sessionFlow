@@ -156,10 +156,10 @@ def handle_zcode_session_start(
     # UnboundLocalError on `result`.
     note_result(PROVIDER, correlation_id, result, native_session_id=session_id)
     
-    # Store correlation_id in internal metadata for emit() to use
+    # Store correlation_id in internal metadata (for emit() to read via dict.get())
     if isinstance(result, dict):
         result["_verification_correlation_id"] = correlation_id
-
+    
     if not result.continuity_available or not result.context:
         attach_status = getattr(result, "attach_status", None) or ""
         # One shared classification: `no_thread` means the core confirmed there is
@@ -170,7 +170,9 @@ def handle_zcode_session_start(
         _log_event({"ts": time.time(), "event": classification,
                     "cwd": cwd, "session_id": session_id,
                     "attach_status": attach_status})
-        return build_result(result, classification, cwd)
+        out = build_result(result, classification, cwd)
+        out["_verification_correlation_id"] = correlation_id  # Internal metadata for emit()
+        return out
 
     out = {
         "status": "context_ready",

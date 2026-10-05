@@ -199,6 +199,7 @@ def handle_codex_session_start(
                 "context_source": getattr(result, "context_source", None),
                 "recommended_action": getattr(result, "recommended_action", None),
             },
+            "_verification_correlation_id": correlation_id,  # Internal metadata for emit()
         }
         _log_event({"ts": time.time(), "event": "no_context",
                     "cwd": cwd, "session_id": session_id,
