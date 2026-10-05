@@ -137,6 +137,11 @@ def write_context_rules(
     paths, because a launcher must not break the agent it is wrapping.
     """
     path = context_rules_path(home)
+    # O5: grok's startup hook IS this launcher wrapper (the DECLARED matrix
+    # calls it the "rules-writer hook"), so the chain opened here carries the
+    # real context-transport facts.  The passive SessionStart recorder keeps
+    # its own separate chain -- the two are never spliced together.
+    correlation_id = begin_hook("grok", cwd=cwd)
     try:
         result = startup_continuity(provider="grok", cwd=cwd, store=store,
                                     context_format=CONTEXT_FORMAT_TIERED)
@@ -164,11 +169,18 @@ def write_context_rules(
     if not body.endswith("\n"):
         body += "\n"
 
+    # O5: the rules file IS grok's context transport -- CONTEXT_PREPARED is
+    # the compiled document, CONTEXT_EMITTED the successfully written file.
+    # A failed write leaves the chain at PREPARED, never EMITTED.
+    note_result("grok", correlation_id, result)
+
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
     except OSError as exc:
         return {"status": "error", "message": str(exc), "path": str(path)}
+
+    note_context_emitted("grok", correlation_id, len(body.encode("utf-8")))
 
     return {
         "status": "written",

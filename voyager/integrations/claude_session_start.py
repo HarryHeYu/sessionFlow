@@ -393,12 +393,17 @@ def _write_stdout_json(payload: dict) -> None:
     try:
         sys.stdout.write(text)
         sys.stdout.flush()
+        return True
     except Exception:
-        try:
-            sys.stdout.buffer.write(text.encode("ascii"))
-            sys.stdout.buffer.flush()
-        except Exception:
-            pass  # nothing left to try; never take the session down
+        pass
+    try:
+        sys.stdout.buffer.write(text.encode("ascii"))
+        sys.stdout.buffer.flush()
+        return True
+    except Exception:
+        # nothing left to try; never take the session down -- but the caller
+        # must NOT record CONTEXT_EMITTED for a write that never happened
+        return False
 
 
 def emit_claude_hook_output(result: Dict[str, Any]) -> int:
@@ -420,7 +425,7 @@ def emit_claude_hook_output(result: Dict[str, Any]) -> int:
         nbytes = len(payload_context.encode("utf-8"))
         correlation_id = result.get("_verification_correlation_id")
         
-        _write_stdout_json({
+        written = _write_stdout_json({
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
                 "additionalContext": payload_context,
@@ -432,8 +437,9 @@ def emit_claude_hook_output(result: Dict[str, Any]) -> int:
             emitted_chars=len(payload_context),
             spilled_to=str(spilled_path) if spilled_path else None,
         )
-        # Success path: record that the protocol was actually written
-        if correlation_id:
+        # O5: CONTEXT_EMITTED only after the transport really succeeded -- a
+        # failed (or swallowed) stdout write leaves the chain at PREPARED
+        if written and correlation_id:
             note_context_emitted("claude", correlation_id, nbytes)
         return 0
 

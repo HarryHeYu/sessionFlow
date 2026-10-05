@@ -1,7 +1,14 @@
 # O5.1 — Provider Verification Inventory
 
+> **HISTORICAL PRE-O5 AUDIT SNAPSHOT (2026-10-03).**  Everything below the
+> closure section describes the state of the repo *as it was when this audit
+> was written* — including gaps that have since been closed (the
+> CONTEXT_DELIVERED split, the hardcoded `ZERO_TOUCH_OBSERVED` set, the
+> unwired codex/grok handlers).  Do not cite the findings below as current
+> fact; see "CURRENT O5 CLOSURE" at the bottom for what holds at HEAD.
+
 **Date**: 2026-10-03
-**Status**: Complete (audit only; no code changed)
+**Status**: Historical audit snapshot (superseded by the closure section below)
 
 ## Executive Summary
 
@@ -299,3 +306,46 @@ To enforce (O5.6):
 - No code path should open a provider GUI, start VS Code, log in, or modify provider config
 - The only writers are `begin_hook()`, `note_result()`, `note_attach_resolved()`, `note_attach_resolved_for_session()` — all called from within hook handlers that fire when the provider naturally starts
 - No proactive probing or synthetic triggers
+
+
+---
+
+# CURRENT O5 CLOSURE (as of the O5 evidence-truth phase)
+
+What actually holds at CURRENT HEAD:
+
+* **One evidence system.**  `capability_matrix.collect_evidence` reads the
+  append-only `verification_events` table; the hardcoded `ZERO_TOUCH_OBSERVED`
+  set and log-file grepping are gone (guarded by tests).  `query_status`,
+  `provider_state`, `doctor.check_verification` and `voyager verify --json`
+  derive the effective state from the same evidence and agree on it
+  (cross-surface convergence tests).
+* **Canonical event vocabulary**: HOOK_TRIGGERED, CONTEXT_PREPARED,
+  CONTEXT_EMITTED, NATIVE_SESSION_ID_OBSERVED, ATTACH_PENDING,
+  ATTACH_RESOLVED.  `CONTEXT_DELIVERED` no longer exists anywhere in runtime
+  code; PREPARED (compiled) and EMITTED (transport succeeded) are strictly
+  separate, and EMITTED is only written after serialize + write + flush
+  succeeded (claude's stdout writer was corrected to return success and gate
+  the record on it).
+* **Wired writers**: codex, claude, zcode, cursor, kiro, antigravity
+  (begin_hook + note_result; the stdout providers with a LIVE declared
+  ceiling record CONTEXT_EMITTED after the real write).  Grok's transport is
+  the rules file: `write_context_rules` is the declared "rules-writer hook"
+  and records PREPARED after compile and EMITTED only after the file write
+  succeeded; the passive SessionStart recorder keeps a separate chain.  The
+  two grok chains are never spliced into a fake zero-touch.
+* **Promotion rules (evidence-only)**: HOOK+EMITTED → LIVE_VERIFIED;
+  HOOK+EMITTED+SID+RESOLVED in one chain, correctly ordered, single session
+  identity → ZERO_TOUCH_LIVE_VERIFIED.  PREPARED alone never promotes past
+  UNIT.  Multi-chain or cross-session evidence fails closed (refuses, never
+  picks newest/oldest).
+* **DSH**: no startup surface → startup dimensions NOT_FOUND; plugin/CLI
+  capability is a different dimension and does not promote startup
+  verification.
+* **Passive surfaces**: `voyager verify` and doctor are strictly read-only
+  (digest regressions); doctor never fabricates evidence.
+
+Known machine-local note: ZERO_TOUCH_LIVE_VERIFIED *observations* are
+machine-local evidence; the DECLARED matrix describes implementation
+capability, and README claims are capped at declared until a given machine's
+evidence table proves more.

@@ -514,3 +514,249 @@ class TestSourceRotationInteraction:
             assert obs["evidence_count"] == 5
         finally:
             con.close()
+# --- O5 patch: transport truth, grok wiring, payload hygiene, convergence --
+
+
+class TestGrokTransportEvidence:
+    """§7/§33: grok's context transport is the rules file, and its evidence
+    writers sit exactly where that transport succeeds or fails."""
+
+    def _setup(self, tmp_path, monkeypatch):
+        from voyager.integrations import grok_native as gn
+        home = tmp_path / "grok-home"
+        body = "SENTINEL-CONTEXT-_BODY " * 40
+
+        class R:
+            continuity_available = True
+            context = body
+            attach_status = None
+            thread_id = "thr_g1"
+            goal = "g"
+            repo_root = "E:/repo"
+            context_source = "tiered"
+            current_session = None
+
+        monkeypatch.setattr(gn, "startup_continuity", lambda **kw: R())
+        return gn, home, body
+
+    def test_written_rules_file_records_emitted_on_its_own_chain(
+            self, db, tmp_path, monkeypatch):
+        gn, home, body = self._setup(tmp_path, monkeypatch)
+        out = gn.write_context_rules(cwd="E:/repo", home=home)
+        assert out["status"] == "written"
+
+        con = vh._connect()
+        try:
+            chains = list(vh.chains_for(con, "grok").values())
+        finally:
+            con.close()
+        launcher = [c for c in chains
+                    if c.first_index(CONTEXT_EMITTED) is not None
+                    and c.first_index(CONTEXT_EMITTED) >= 0]
+        assert len(launcher) == 1, "exactly one transport chain"
+        c = launcher[0]
+        assert c.first_index(CONTEXT_PREPARED) >= 0
+        assert c.first_index(CONTEXT_EMITTED) >= 0
+        assert c.first_index(CONTEXT_PREPARED) < c.first_index(CONTEXT_EMITTED), \
+            "PREPARED must precede EMITTED"
+        # the launcher IS grok's declared startup hook (rules-writer), so its
+        # chain legitimately opens with HOOK_TRIGGERED
+        assert c.first_index(HOOK_TRIGGERED) >= 0
+        # but no native session id: the passive hook's chain holds that, and
+        # the two chains are never spliced into a fake zero-touch
+        assert c.first_index(NATIVE_SESSION_ID_OBSERVED) is None
+
+    def test_failed_rules_write_leaves_chain_at_prepared(
+            self, db, tmp_path, monkeypatch):
+        gn, home, _ = self._setup(tmp_path, monkeypatch)
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a dir", encoding="utf-8")
+        monkeypatch.setattr(gn, "context_rules_path",
+                            lambda h=None: blocker / "rules" / "voyager.md")
+        out = gn.write_context_rules(cwd="E:/repo", home=home)
+        assert out["status"] == "error"
+
+        con = vh._connect()
+        try:
+            chains = list(vh.chains_for(con, "grok").values())
+        finally:
+            con.close()
+        assert chains, "the hook still fired"
+        for c in chains:
+            assert c.first_index(CONTEXT_EMITTED) is None, \
+                "a failed transport must never record EMITTED"
+
+    def test_status_dict_leaks_no_correlation_id(self, db, tmp_path,
+                                                 monkeypatch):
+        """§5: the public return contract is unchanged by instrumentation."""
+        gn, home, _ = self._setup(tmp_path, monkeypatch)
+        out = gn.write_context_rules(cwd="E:/repo", home=home)
+        blob = json.dumps(out)
+        assert "_verification_correlation_id" not in blob
+        assert "correlation" not in blob
+
+
+class TestEvidencePayloadHygiene:
+    """§28/§29: the evidence table is a metadata log, never a transcript."""
+
+    _SAFE_KEYS = {"chars", "bytes", "attach_status", "cwd"}
+
+    def test_context_body_never_enters_the_evidence_table(
+            self, db, tmp_path, monkeypatch):
+        from voyager.integrations import grok_native as gn
+        sentinel = "USER-CONTENT-SENTINEL-do-not-store"
+        body = sentinel + " " + "filler " * 100
+
+        class R:
+            continuity_available = True
+            context = body
+            attach_status = None
+            thread_id = "thr_p"
+            repo_root = "E:/repo"
+            context_source = "tiered"
+            current_session = None
+
+        monkeypatch.setattr(gn, "startup_continuity", lambda **kw: R())
+        gn.write_context_rules(cwd="E:/repo", home=tmp_path / "gh")
+
+        con = vh._connect()
+        try:
+            rows = con.execute(
+                "SELECT event_type, payload_json FROM verification_events"
+            ).fetchall()
+        finally:
+            con.close()
+        assert rows, "evidence exists"
+        blob = " ".join(str(r["payload_json"] or "") for r in rows)
+        assert sentinel not in blob, "user content leaked into evidence"
+        for r in rows:
+            payload = json.loads(r["payload_json"] or "{}")
+            assert set(payload) <= self._SAFE_KEYS, payload
+
+
+class TestTransportFailureTruth:
+    """§31: EMITTED appears only when serialize+write+flush all succeeded."""
+
+    def test_claude_stdout_failure_records_no_emitted(self, db, capsys,
+                                                      monkeypatch):
+        from voyager.integrations import claude_session_start as cs
+
+        result = {
+            "status": "context_ready",
+            "context": "claude transport body",
+            "_verification_correlation_id": "c-t1",
+        }
+        cs.begin_hook("claude", cwd="E:/repo")   # chain exists (different cid)
+
+        class Boom:
+            def write(self, *_):
+                raise OSError("stdout gone")
+
+            def flush(self):
+                raise OSError("stdout gone")
+
+            @property
+            def buffer(self):
+                return self
+
+        monkeypatch.setattr(cs.sys, "stdout", Boom())
+        rc = cs.emit_claude_hook_output(dict(result))
+        assert rc == 0                        # hooks fail open
+
+        con = vh._connect()
+        try:
+            chains = list(vh.chains_for(con, "claude").values())
+        finally:
+            con.close()
+        for c in chains:
+            assert c.first_index(CONTEXT_EMITTED) is None, \
+                "a failed stdout write must not record EMITTED"
+
+    def test_claude_success_records_emitted(self, db, capsys):
+        from voyager.integrations import claude_session_start as cs
+        cs.begin_hook("claude", cwd="E:/repo")
+        rc = cs.emit_claude_hook_output({
+            "status": "context_ready",
+            "context": "claude transport body",
+            "_verification_correlation_id": "c-t2",
+        })
+        assert rc == 0
+        con = vh._connect()
+        try:
+            chains = list(vh.chains_for(con, "claude").values())
+        finally:
+            con.close()
+        emitted = [c for c in chains
+                   if c.first_index(CONTEXT_EMITTED) is not None]
+        assert emitted, "a real transport success records EMITTED"
+
+    def test_handler_contract_unchanged_by_instrumentation(self, db, capsys):
+        """§5: the correlation id stays internal; stdout is pure protocol."""
+        from voyager.integrations import claude_session_start as cs
+        cs.emit_claude_hook_output({
+            "status": "context_ready",
+            "context": "body",
+            "_verification_correlation_id": "c-secret",
+        })
+        out = capsys.readouterr().out
+        assert "_verification_correlation_id" not in out
+        payload = json.loads(out)          # still exactly the hook protocol
+        assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+
+class TestCrossSurfaceConvergence:
+    """§35: harness, capability matrix, doctor and the CLI must name the
+    same effective state for the same evidence."""
+
+    def test_all_four_surfaces_agree_on_zero_touch(self, db, capsys):
+        from voyager import doctor
+        from voyager.cli import main
+
+        # canonical explicit sequence (same idiom as the promotion tests)
+        _record("codex", HOOK_TRIGGERED, "c1", sid="s1", at=1.0)
+        _record("codex", CONTEXT_PREPARED, "c1", sid="s1", at=2.0)
+        _record("codex", CONTEXT_EMITTED, "c1", sid="s1", at=3.0)
+        _record("codex", NATIVE_SESSION_ID_OBSERVED, "c1", sid="s1", at=3.5)
+        _record("codex", ATTACH_RESOLVED, "c1", sid="s1", at=4.0)
+
+        harness_eff = vh.query_status("codex")["providers"]["codex"][
+            "effective_state"]
+        ev = collect_evidence("codex")
+        matrix_eff = provider_state("codex", ev)
+        doc_eff = doctor.check_verification(db_path=db)["providers"]["codex"][
+            "effective"]
+
+        assert main(["verify", "codex", "--json"]) == 0
+        cli = json.loads(capsys.readouterr().out)
+        cli_eff = (cli.get("providers", {}).get("codex", {})
+                   or cli.get("providers", {}).get("CODEX", {})
+                   or cli).get("effective_state") or cli.get("effective")
+
+        assert harness_eff == ZERO_TOUCH_LIVE_VERIFIED
+        assert matrix_eff == ZERO_TOUCH_LIVE_VERIFIED
+        assert doc_eff == ZERO_TOUCH_LIVE_VERIFIED
+        assert cli_eff == ZERO_TOUCH_LIVE_VERIFIED, cli_eff
+
+    def test_all_four_surfaces_agree_when_only_unit_proven(self, db, capsys):
+        """No live evidence: every surface says UNIT_VERIFIED, none repeats
+        the declared ZERO_TOUCH headline."""
+        from voyager import doctor
+        from voyager.cli import main
+
+        _record("codex", HOOK_TRIGGERED, "c9", sid="s9", at=1.0)
+
+        harness_eff = vh.query_status("codex")["providers"]["codex"][
+            "effective_state"]
+        matrix_eff = provider_state("codex", collect_evidence("codex"))
+        doc_eff = doctor.check_verification(db_path=db)["providers"]["codex"][
+            "effective"]
+        assert main(["verify", "codex", "--json"]) == 0
+        cli = json.loads(capsys.readouterr().out)
+        cli_eff = (cli.get("providers", {}).get("codex", {})
+                   or cli.get("providers", {}).get("CODEX", {})
+                   or cli).get("effective_state") or cli.get("effective")
+
+        assert harness_eff == UNIT_VERIFIED
+        assert matrix_eff == UNIT_VERIFIED
+        assert doc_eff == UNIT_VERIFIED
+        assert cli_eff == UNIT_VERIFIED
