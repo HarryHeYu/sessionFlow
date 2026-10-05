@@ -58,12 +58,20 @@ CREATE TABLE IF NOT EXISTS sessions (
     resume_cmd    TEXT,
     metadata_json TEXT,
     raw_metadata_json TEXT,
-    -- O2 retention.  NULL means LIVE (the pre-O2 value, and the value a
-    -- manual insert gets); 'SOURCE_MISSING' means every one of this session's
-    -- source files has vanished from disk and the canonical history is being
-    -- kept anyway.  There is deliberately no separate 'RETAINED' state: O2
-    -- behaves identically for it, and a state nothing sets is a state that
-    -- gets set wrongly.
+    -- O2 retention.  Canonical runtime states (the only values runtime code
+    -- writes or branches on):
+    --   'ACTIVE_SOURCE'      at least one usable backing source; eligible
+    --                        for live continuity
+    --   'SOURCE_MISSING'     all known provider sources missing; normalized
+    --                        history is retained, search/timeline keep it
+    --   'ARCHIVED_CANONICAL' explicitly archived canonical Voyager copy;
+    --                        historical, not live; only an explicit archive
+    --                        action sets or clears it
+    -- NULL / 'LIVE' / '' are migration INPUTS from pre-O2 databases only --
+    -- the additive migration rewrites them to 'ACTIVE_SOURCE' at open, and
+    -- no runtime path generates them.  There is deliberately no separate
+    -- 'RETAINED' state: O2 behaves identically for it, and a state nothing
+    -- sets is a state that gets set wrongly.
     source_state          TEXT,
     source_missing_since  REAL
 );

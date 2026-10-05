@@ -15,8 +15,10 @@ real locations, tests just redirect them.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -25,32 +27,37 @@ from voyager.model import new_event, new_session
 from voyager.store import Store
 
 
-def pytest_configure(config):
-    """Scratch hygiene (O2 standing rule): every temp artifact the suite
-    produces lands under ``E:/sessionflow-scratch`` — never on the C: temp
-    dirs, which are system-owned and were polluted before this hook existed.
+def apply_scratch_root_policy(config, env=None):
+    """Opt-in local-run scratch policy — never a product default.
 
-    Three redirections, all overridable by an explicit ``--basetemp``:
+    When ``VOYAGER_SCRATCH_ROOT`` is set (the developer explicitly asks to
+    keep test artifacts off the system drive), pytest's basetemp and the
+    ``TMP``/``TEMP``/``TMPDIR`` environment move under that root and
+    ``tempfile`` re-resolves, so child processes inherit it too.  An explicit
+    ``--basetemp`` (checked by the caller) always wins.
 
-    * pytest's own ``tmp_path``/``tmp_path_factory`` root moves to E:;
-    * ``TMP``/``TEMP``/``TMPDIR`` follow it, so child processes (subprocess
-      tests, tool spawns) inherit the E: scratch root too;
-    * ``tempfile``'s cached resolver is reset so in-process ``gettempdir()``
-      re-resolves against the new environment.
+    When the variable is unset, nothing is touched: CI, Linux and other
+    developers get pytest's and tempfile's platform-native defaults, and no
+    drive letter is ever invented here.
     """
-    if config.option.basetemp:
-        return
-    import os
-    import tempfile
-
-    scratch = Path(os.environ.get("VOYAGER_SCRATCH_ROOT",
-                                  "E:/sessionflow-scratch"))
-    tmp_root = scratch / "tmp" / "pytest"
+    if env is None:
+        env = os.environ
+    override = env.get("VOYAGER_SCRATCH_ROOT")
+    if not override:
+        return None
+    tmp_root = Path(override) / "tmp" / "pytest"
     tmp_root.mkdir(parents=True, exist_ok=True)
     config.option.basetemp = str(tmp_root)
     for var in ("TMPDIR", "TMP", "TEMP"):
-        os.environ[var] = str(tmp_root)
+        env[var] = str(tmp_root)
     tempfile.tempdir = None       # force gettempdir() to re-resolve
+    return tmp_root
+
+
+def pytest_configure(config):
+    if config.option.basetemp:
+        return
+    apply_scratch_root_policy(config)
 
 
 @pytest.fixture(autouse=True)

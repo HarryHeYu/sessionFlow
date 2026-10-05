@@ -123,6 +123,9 @@ def _attachments(store, thread_id: str) -> List[Dict[str, Any]]:
                FROM thread_sessions ts JOIN sessions s ON s.id = ts.session_id
                WHERE ts.thread_id=? ORDER BY ts.attached_at, ts.ord""",
             (thread_id,)):
+        # NULL here is a pre-O2 migration input only (the migration backfills
+        # it to ACTIVE_SOURCE at open); reading it as ACTIVE_SOURCE keeps
+        # timelines built from an un-migrated snapshot honest.
         state = r["source_state"] or "ACTIVE_SOURCE"
         out.append(_ev(
             SESSION_ATTACHED, r["at"],
