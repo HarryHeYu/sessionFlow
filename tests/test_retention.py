@@ -14,7 +14,8 @@ database) silently erased history the user never asked to remove.
 
 The contract now:
 
-* `sessions.source_state` is NULL/`LIVE` or `SOURCE_MISSING`. There is no
+* `sessions.source_state` is `ACTIVE_SOURCE` (the O2 migration backfills
+  NULL/`LIVE`) or `SOURCE_MISSING`. There is no
   separate `RETAINED` state: nothing in O2 behaves differently for it, and a
   state that exists only to look tidy is a state that will be set wrongly.
 * only **all** sources missing marks a session — one surviving source keeps it
@@ -117,7 +118,8 @@ def test_one_of_multiple_sources_missing_stays_live(store, tmp_path):
     store.prune_missing_sessions("codex", {str(keep)})
 
     row = store.q("SELECT source_state FROM sessions WHERE id='codex:m'")[0]
-    assert row[0] in (None, "LIVE"), "one surviving source means still LIVE"
+    assert row[0] in (None, "ACTIVE_SOURCE"), \
+        "one surviving source means still ACTIVE"
 
 
 def test_all_sources_missing_marks_the_session(store, tmp_path):
@@ -146,7 +148,7 @@ def test_sessions_without_source_rows_are_never_touched(store, tmp_path):
     store.prune_missing_sessions("codex", set())
     assert store.q("SELECT COUNT(*) n FROM sessions")[0]["n"] == 1
     assert store.q("SELECT source_state FROM sessions WHERE id='codex:manual'")[0][0] \
-        in (None, "LIVE")
+        in (None, "ACTIVE_SOURCE")
 
 
 # --- 3. source returns: reconcile, no duplicate ----------------------------
@@ -170,7 +172,7 @@ def test_source_return_reconciles_to_one_live_session(store, tmp_path):
     assert store.q("SELECT COUNT(*) n FROM events")[0]["n"] == 1, "events refreshed"
     row = store.q("SELECT source_state, source_missing_since FROM sessions "
                   "WHERE id='codex:r'")[0]
-    assert row[0] in (None, "LIVE")
+    assert row[0] in (None, "ACTIVE_SOURCE")
     assert row[1] is None, "the missing marker must be cleared on return"
 
 
@@ -284,7 +286,7 @@ def test_thread_brief_marks_retained_contributions(store, tmp_path):
     assert len(data["contributions"]) == 2, "the retained one is still listed"
     states = {c["sid"]: c["source_state"] for c in data["contributions"]}
     assert states["codex:bg"] == "SOURCE_MISSING"
-    assert states["codex:bl"] in (None, "LIVE")
+    assert states["codex:bl"] in (None, "ACTIVE_SOURCE")
 
     out = render(summarize(store, tid))
     assert "[source missing]" in out, "the brief must mark it, not hide it"
@@ -518,7 +520,8 @@ def test_migration_adds_columns_without_touching_rows(tmp_path):
 
     s = Store(db)                       # migrates additively
     after = dict(s.q("SELECT * FROM sessions WHERE id='codex:old'")[0])
-    assert after["source_state"] is None, "existing rows keep NULL (== LIVE)"
+    assert after["source_state"] == "ACTIVE_SOURCE", (
+        "the O2 migration backfills NULL/LIVE to the canonical ACTIVE_SOURCE")
     for k, v in before.items():
         if k not in ("source_state", "source_missing_since"):
             assert after[k] == v, k
@@ -539,3 +542,98 @@ def test_migration_on_a_fresh_database_is_a_no_op(tmp_path):
     src_cols = [r[1] for r in s.con.execute("PRAGMA table_info(sources)")]
     assert "last_seen" in src_cols and "missing_since" in src_cols
     s.close()
+
+
+# --- 8. ARCHIVED_CANONICAL: an explicit archive, never an automatic one ------
+
+def test_explicit_archive_fixates_the_session(store, tmp_path):
+    """Only an explicit archive action sets ARCHIVED_CANONICAL, and it clears
+    any missing-since marker (an archived session is not 'missing')."""
+    src = _src(tmp_path, "rollout-arch.jsonl")
+    store.replace_session(_session("codex:arch", "needle-archive"),
+                          _events("codex:arch", "needle-archive"), "codex", src)
+    src.unlink()
+    store.prune_missing_sessions("codex", set())
+    assert store.q("SELECT source_state, source_missing_since FROM sessions"
+                   " WHERE id='codex:arch'")[0][0] == "SOURCE_MISSING"
+
+    assert store.mark_canonical_archived("codex:arch") is True
+    state, missing_since = store.q(
+        "SELECT source_state, source_missing_since FROM sessions"
+        " WHERE id='codex:arch'")[0]
+    assert state == "ARCHIVED_CANONICAL"
+    assert missing_since is None, "archived is not missing"
+
+
+def test_archive_is_never_set_automatically(store, tmp_path):
+    """Prune and re-ingest must never produce ARCHIVED_CANONICAL on their
+    own: a vanished source is SOURCE_MISSING, a returning source is
+    ACTIVE_SOURCE."""
+    src = _src(tmp_path, "rollout-auto.jsonl")
+    store.replace_session(_session("codex:auto", "needle-auto"),
+                          _events("codex:auto", "needle-auto"), "codex", src)
+    src.unlink()
+    store.prune_missing_sessions("codex", set())
+    assert store.q("SELECT source_state FROM sessions"
+                   " WHERE id='codex:auto'")[0][0] == "SOURCE_MISSING", \
+        "prune marks retention, never an archive"
+
+    src.write_text("{}", encoding="utf-8")          # source returns
+    store.replace_session(_session("codex:auto", "needle-auto"),
+                          _events("codex:auto", "needle-auto"), "codex", src)
+    assert store.q("SELECT source_state FROM sessions"
+                   " WHERE id='codex:auto'")[0][0] == "ACTIVE_SOURCE", \
+        "re-ingest reconciles to ACTIVE_SOURCE, never auto-archives"
+    assert store.mark_canonical_archived("codex:nope") is False, \
+        "archiving a session that does not exist fails cleanly"
+
+
+def test_reingest_preserves_an_explicit_archive(store, tmp_path):
+    """A passive scan re-ingesting the session must not silently undo the
+    user's explicit archive decision."""
+    src = _src(tmp_path, "rollout-keep.jsonl")
+    store.replace_session(_session("codex:keep", "needle-keep"),
+                          _events("codex:keep", "needle-keep"), "codex", src)
+    store.mark_canonical_archived("codex:keep")
+
+    src.write_text("{}", encoding="utf-8")          # a routine rescan
+    store.replace_session(_session("codex:keep", "needle-keep"),
+                          _events("codex:keep", "needle-keep"), "codex", src)
+    assert store.q("SELECT source_state FROM sessions"
+                   " WHERE id='codex:keep'")[0][0] == "ARCHIVED_CANONICAL", \
+        "re-ingest preserves an explicit archive"
+
+
+def test_archived_session_is_excluded_from_live_paths(store, tmp_path):
+    """ARCHIVED_CANONICAL behaves like retention for continuity: no live
+    members, no latest holder, no L1 window -- but still searchable."""
+    from voyager.auto import get_continuation_context
+    from voyager.startup import _latest_holder_provider
+
+    live_src = _src(tmp_path, "al-live.jsonl")
+    arch_src = _src(tmp_path, "al-arch.jsonl")
+    store.replace_session(_session("codex:al", "needle-arch-live"),
+                          _events("codex:al", "needle-arch-live"),
+                          "codex", live_src)
+    old = _session("codex:aa", "needle-arch-gone")
+    old["updated_at"] = 3000.0                       # newest, would win 'latest'
+    store.replace_session(old, _events("codex:aa", "needle-arch-gone"),
+                          "codex", arch_src)
+    store.mark_canonical_archived("codex:aa")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="t")
+    store.thread_attach(tid, "codex:al")
+    store.thread_attach(tid, "codex:aa")
+
+    assert store.q("SELECT id FROM sessions WHERE id='codex:aa'"),         "precondition: the archived session row still exists"
+    live_ids = [m["id"] for m in store.live_thread_members(tid)]
+    assert "codex:aa" not in live_ids and "codex:al" in live_ids
+    assert _latest_holder_provider(store, tid) == "codex", \
+        "the archived newest member must not become the latest holder"
+
+    res = get_continuation_context(store=store, thread_id=tid)
+    ctx = res.get("context") or ""
+    assert "needle-arch-live" in ctx
+    assert "needle-arch-gone" not in ctx, \
+        "an archived session must not feed active continuity"
+    assert store.search("needle-arch-gone"), \
+        "archived history stays searchable"

@@ -820,8 +820,13 @@ def build_tiered_bundle(
             for i, sid in enumerate(store.thread_member_ids(thread["id"]))}
     rows.sort(key=lambda r: rank.get(r["id"], len(rank)))
 
+    # O2: the L0 "latest session" and the L1 window draw from LIVE members
+    # only -- a retained (SOURCE_MISSING/ARCHIVED_CANONICAL) session is
+    # history, not the thing to continue from.  The full member list still
+    # feeds the L0: the thread owns every one of its sessions.
+    live_members = [m for m in members if is_live(m)]
     l0 = build_thread_state(thread, members, max_field_chars=max_field_chars)
-    latest = _l0_latest_member(list(members))
+    latest = _l0_latest_member(live_members)
     repo_hint = (_l0_get(thread, "repo_root")
                  or (_l0_get(latest, "repo_root") or _l0_get(latest, "cwd")
                      if latest is not None else None))
@@ -841,8 +846,11 @@ def build_tiered_bundle(
         % thread["id"],
     ])
 
-    l1_rows = ([r for r in rows if r["id"] != exclude_session_id]
-               if exclude_session_id else rows)
+    # O2: retained sessions keep their history but do not seed the live
+    # working window; exclude_session_id (self-echo) stacks on top.
+    l1_rows = [r for r in rows
+               if is_live(r)
+               and r["id"] != exclude_session_id]
     # Phase P2: the band decides which sessions get the limited L1 budget.
     # `build_l1_banded` reserves one turn each for the newest WEAK and newest
     # UNKNOWN session and then hands the rest to the same builder, so turn
@@ -913,13 +921,15 @@ def bundle_command(target: str, bundle_path: Path) -> Optional[List[str]]:
 def is_live(row) -> bool:
     """O2: can this session still feed continuity?
 
-    A session whose every source file has vanished is retained as history; it
-    stays searchable and visible, but it must not be compiled into a
-    continuation context or offered as a native-resume candidate.  NULL
-    (pre-O2 rows, manual inserts) reads as LIVE.
+    A session qualifies as a live context source only when its canonical
+    state is ACTIVE_SOURCE.  SOURCE_MISSING is retained history (searchable,
+    visible) but must not be compiled into a continuation context or offered
+    as a native-resume candidate; ARCHIVED_CANONICAL is an explicit archive
+    and is likewise excluded.  NULL (pre-migration rows) reads as
+    ACTIVE_SOURCE -- it never meant "retained".
     """
     try:
-        return (row["source_state"] or "LIVE") != "SOURCE_MISSING"
+        return (row["source_state"] or "ACTIVE_SOURCE") == "ACTIVE_SOURCE"
     except (IndexError, KeyError):
         return True
 

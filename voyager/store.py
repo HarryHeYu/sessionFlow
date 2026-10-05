@@ -357,11 +357,10 @@ class Store:
         ev_cols = [r[1] for r in self.con.execute("PRAGMA table_info(events)")]
         if ev_cols and "origin" not in ev_cols:
             self.con.execute("ALTER TABLE events ADD COLUMN origin TEXT")
-        # additive migration: O2 retention.  Existing rows keep NULL, which
-        # reads as LIVE.  Nothing is backfilled: "was this session's source on
-        # disk when the row was written" is not recoverable after the fact, and
-        # guessing would mark live sessions as retained.  ALTER/CREATE only —
-        # no destructive rewrite.
+        # additive migration: O2 retention + O2 state model.  Existing rows
+        # keep NULL until the backfill below, which normalises the pre-O2
+        # spellings ('LIVE' and NULL) to the canonical ACTIVE_SOURCE.  The
+        # backfill is idempotent: after the first run it updates zero rows.
         ses_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sessions)")]
         if ses_cols:
             for col, decl in (("source_state", "TEXT"),
@@ -369,6 +368,10 @@ class Store:
                 if col not in ses_cols:
                     self.con.execute(
                         f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
+            self.con.execute(
+                "UPDATE sessions SET source_state='ACTIVE_SOURCE'"
+                " WHERE source_state='LIVE' OR source_state IS NULL"
+                " OR source_state=''")
         src_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sources)")]
         if src_cols:
             for col, decl in (("last_seen", "REAL"), ("missing_since", "REAL")):
@@ -425,6 +428,12 @@ class Store:
         prev = self.con.execute(
             "SELECT source_state FROM sessions WHERE id=?", (sid,)).fetchone()
         was_retained = bool(prev) and prev["source_state"] == "SOURCE_MISSING"
+        # O2: an explicit archive is a user decision -- passive re-ingest
+        # must never silently un-archive a session the user fixated.
+        reingest_state = (
+            "ARCHIVED_CANONICAL"
+            if bool(prev) and prev["source_state"] == "ARCHIVED_CANONICAL"
+            else "ACTIVE_SOURCE")
         try:
             self.con.execute(
                 "DELETE FROM event_fts WHERE rowid IN (SELECT id FROM events WHERE sid=?)",
@@ -440,7 +449,7 @@ class Store:
                        can_resume, can_fork, resume_cmd,
                        metadata_json, raw_metadata_json,
                        source_state, source_missing_since)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'LIVE',NULL)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)""",
                 (
                     sid, provider, session.get("native_session_id"),
                     session.get("title"), session.get("started_at"),
@@ -454,6 +463,7 @@ class Store:
                     session.get("resume_cmd"),
                     json.dumps(meta, ensure_ascii=False),
                     json.dumps(raw_meta, ensure_ascii=False),
+                    reingest_state,
                 ),
             )
             for ev in evs:
@@ -627,7 +637,7 @@ class Store:
                             " AND path=?",
                             (now, provider, sr["path"], sid))
                 self.con.execute(
-                    "UPDATE sessions SET source_state='LIVE',"
+                    "UPDATE sessions SET source_state='ACTIVE_SOURCE',"
                     " source_missing_since=NULL WHERE id=?", (sid,))
                 if r["source_state"] == "SOURCE_MISSING":
                     # O3: the return is a timeline fact with nowhere else to
@@ -741,8 +751,9 @@ class Store:
     def live_thread_members(self, tid: str) -> List[sqlite3.Row]:
         """Members that may still feed continuity.
 
-        A session whose every source has vanished is retained as history (O2),
-        but it must not be compiled into a continuation context, offered as a
+        A session that is not an active source (every source vanished, or the
+        user explicitly archived it) is retained as history (O2), but it must
+        not be compiled into a continuation context, offered as a
         native-resume candidate, or counted as live source health.  Display
         paths keep using `thread_members`, which returns it — marked, not
         hidden.
@@ -751,7 +762,8 @@ class Store:
             """SELECT s.* FROM thread_sessions t
                JOIN sessions s ON s.id = t.session_id
                WHERE t.thread_id=?
-                 AND COALESCE(s.source_state, 'LIVE') != 'SOURCE_MISSING'
+                 AND COALESCE(s.source_state, 'ACTIVE_SOURCE')
+                     = 'ACTIVE_SOURCE'
                ORDER BY t.ord""", (tid,))
 
     def retained_sessions(self, provider: Optional[str] = None) -> List[sqlite3.Row]:
@@ -790,6 +802,19 @@ class Store:
             "oldest": min((p["oldest"] for p in provs if p["oldest"]),
                           default=None),
         }
+
+    def mark_canonical_archived(self, sid: str) -> bool:
+        """Explicitly fixate a session as ARCHIVED_CANONICAL (O2).
+
+        Only an explicit archive action may set this state: it declares that
+        Voyager holds the canonical archival copy of the session's history.
+        It is never set automatically (a missing source is SOURCE_MISSING,
+        not an archive).  Returns True when the row was updated."""
+        cur = self.con.execute(
+            "UPDATE sessions SET source_state='ARCHIVED_CANONICAL',"
+            " source_missing_since=NULL WHERE id=?", (sid,))
+        self.con.commit()
+        return cur.rowcount > 0
 
     def thread_member_ids(self, tid: str) -> List[str]:
         return [r["session_id"] for r in self.q(

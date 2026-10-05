@@ -25,6 +25,34 @@ from voyager.model import new_event, new_session
 from voyager.store import Store
 
 
+def pytest_configure(config):
+    """Scratch hygiene (O2 standing rule): every temp artifact the suite
+    produces lands under ``E:/sessionflow-scratch`` — never on the C: temp
+    dirs, which are system-owned and were polluted before this hook existed.
+
+    Three redirections, all overridable by an explicit ``--basetemp``:
+
+    * pytest's own ``tmp_path``/``tmp_path_factory`` root moves to E:;
+    * ``TMP``/``TEMP``/``TMPDIR`` follow it, so child processes (subprocess
+      tests, tool spawns) inherit the E: scratch root too;
+    * ``tempfile``'s cached resolver is reset so in-process ``gettempdir()``
+      re-resolves against the new environment.
+    """
+    if config.option.basetemp:
+        return
+    import os
+    import tempfile
+
+    scratch = Path(os.environ.get("VOYAGER_SCRATCH_ROOT",
+                                  "E:/sessionflow-scratch"))
+    tmp_root = scratch / "tmp" / "pytest"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    config.option.basetemp = str(tmp_root)
+    for var in ("TMPDIR", "TMP", "TEMP"):
+        os.environ[var] = str(tmp_root)
+    tempfile.tempdir = None       # force gettempdir() to re-resolve
+
+
 @pytest.fixture(autouse=True)
 def _no_sync_by_default(monkeypatch):
     """Tests never hit the real HOME stores during continue/handoff/merge.

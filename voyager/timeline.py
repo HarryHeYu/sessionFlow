@@ -123,7 +123,7 @@ def _attachments(store, thread_id: str) -> List[Dict[str, Any]]:
                FROM thread_sessions ts JOIN sessions s ON s.id = ts.session_id
                WHERE ts.thread_id=? ORDER BY ts.attached_at, ts.ord""",
             (thread_id,)):
-        state = r["source_state"] or "LIVE"
+        state = r["source_state"] or "ACTIVE_SOURCE"
         out.append(_ev(
             SESSION_ATTACHED, r["at"],
             eid="attached:%s:%s" % (thread_id, r["id"]),
@@ -277,7 +277,7 @@ def _logged(store, thread_id: str) -> List[Dict[str, Any]]:
         # The state the event leaves the session in -- the same vocabulary the
         # derived events use, so a filter on 'retained' catches both.
         state = {SOURCE_MISSING: "SOURCE_MISSING",
-                 SOURCE_RETURNED: "LIVE"}.get(kind)
+                 SOURCE_RETURNED: "ACTIVE_SOURCE"}.get(kind)
         detail = {}
         if r["detail_json"]:
             try:

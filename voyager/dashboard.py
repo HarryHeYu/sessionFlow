@@ -365,7 +365,7 @@ def render_html(data: Dict[str, Any]) -> str:
                     for k in kinds))
         a("<select id='tlState' onchange='filterTimeline()'>"
           "<option value=''>all states</option>"
-          "<option value='LIVE'>live</option>"
+          "<option value='ACTIVE_SOURCE'>active</option>"
           "<option value='SOURCE_MISSING'>retained</option></select>")
         a("</div>")
         a("<div id='timeline'>")

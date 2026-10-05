@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 
 from .adapters.base import git_info
 from .continuity import CONTEXT_FORMAT_FLAT, CONTEXT_FORMAT_TIERED
+from .continuity import is_live
 from .winsubprocess import background_subprocess_kwargs
 from .store import Store
 from .util import same_repo
@@ -641,8 +642,12 @@ def _find_matching_threads(store: Store, repo_root: str) -> List[Dict[str, Any]]
 
 
 def _latest_holder_provider(store: Store, tid: str) -> Optional[str]:
-    """Get the most recent provider that worked on this thread."""
-    members = store.thread_members(tid)
+    """Get the most recent provider that worked on this thread.
+
+    O2: retained sessions (every source vanished) are history, not holders --
+    the latest holder is the most recent LIVE member."""
+    members = [m for m in store.thread_members(tid)
+               if is_live(m)]
     if not members:
         return None
     newest = max(members, key=lambda m: m["updated_at"] or 0)
@@ -651,7 +656,8 @@ def _latest_holder_provider(store: Store, tid: str) -> Optional[str]:
 
 def _latest_holder_session(store: Store, tid: str) -> Optional[str]:
     """Get the most recent session ID that worked on this thread."""
-    members = store.thread_members(tid)
+    members = [m for m in store.thread_members(tid)
+               if is_live(m)]
     if not members:
         return None
     newest = max(members, key=lambda m: m["updated_at"] or 0)

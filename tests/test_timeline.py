@@ -155,7 +155,7 @@ def test_retained_is_described_as_retained_not_deleted(store, story_thread):
     returned = [e for e in tl["events"]
                 if e["event_type"] == timeline.SOURCE_RETURNED]
     assert returned and "restored" in returned[0]["summary"].lower()
-    assert returned[0]["source_state"] == "LIVE"
+    assert returned[0]["source_state"] == "ACTIVE_SOURCE"
 
 
 # --- evidence discipline ---------------------------------------------------

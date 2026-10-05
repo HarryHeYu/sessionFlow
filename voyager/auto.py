@@ -342,7 +342,8 @@ def get_continuation_context(store: Optional[Store] = None,
             from .budget import resolve_auto_budget
             tokens = resolve_auto_budget(target)
         from .continuity import (build_continuation_bundle,
-                                 build_tiered_bundle, CONTEXT_FORMAT_TIERED)
+                                 build_tiered_bundle, CONTEXT_FORMAT_TIERED,
+                                 is_live)
         if context_format == CONTEXT_FORMAT_TIERED:
             # G3-B self-echo suppression: at SessionStart the calling session
             # is a member whose only content is provider bootstrap echo
@@ -352,13 +353,16 @@ def get_continuation_context(store: Optional[Store] = None,
             # the hint's full-history scale are untouched.
             exclude_sid = (f"{provider}:{native_session_id}"
                            if provider and native_session_id else None)
+            # O2: the L1 window draws from LIVE members only -- retained
+            # history stays searchable but is not continued from.
+            live = [m for m in members if is_live(m)]
             tiered_kwargs: Dict[str, Any] = {"exclude_session_id": exclude_sid}
             if l1_hard_max is not None:
                 # Providers that cap the injected string need a smaller window:
                 # the L1 must be built inside their budget so nothing has to be
                 # cut afterwards, which would starve whole sessions.
                 tiered_kwargs["l1_hard_max"] = l1_hard_max
-            raw_bundle = build_tiered_bundle(store, thread, members, members,
+            raw_bundle = build_tiered_bundle(store, thread, members, live,
                                              **tiered_kwargs)
         else:
             raw_bundle = build_continuation_bundle(store, members, goal=goal)
