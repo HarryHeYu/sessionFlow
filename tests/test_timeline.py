@@ -754,3 +754,120 @@ def test_pending_resolution_is_derived_from_resolved_at(store):
     assert evs[0]["timestamp"] == store.q(
         "SELECT resolved_at a FROM thread_pending WHERE rowid=?", (rid,)
     )[0]["a"]
+
+
+# --- O3 patch: filter contract + adversarial ordering ----------------------
+
+def test_state_filter_partitions_live_retained_archived(store, tmp_path):
+    """state=live admits only ACTIVE_SOURCE (plus stateless thread-level
+    events); retained/archived never bleed into it and never take each
+    other's events."""
+    live_src = _src(tmp_path, "fp-live.jsonl")
+    gone_src = _src(tmp_path, "fp-gone.jsonl")
+    arch_src = _src(tmp_path, "fp-arch.jsonl")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="fp")
+    for sid, src, needle in (("codex:fpl", live_src, "fp live"),
+                             ("codex:fpg", gone_src, "fp gone"),
+                             ("codex:fpa", arch_src, "fp arch")):
+        store.replace_session(_session(sid, "codex", needle),
+                              _events(sid, needle), "codex", src)
+        store.thread_attach(tid, sid)
+    gone_src.unlink()
+    store.prune_missing_sessions("codex", {str(live_src), str(arch_src)})
+    store.mark_canonical_archived("codex:fpa")
+
+    live = timeline.build_thread_timeline(store, tid, state="live")
+    retained = timeline.build_thread_timeline(store, tid, state="retained")
+    archived = timeline.build_thread_timeline(store, tid, state="archived")
+
+    live_sessions = {e["session_id"] for e in live["events"]
+                     if e["session_id"]}
+    assert live_sessions == {"codex:fpl"}, live_sessions
+    assert all(e["source_state"] in (None, "ACTIVE_SOURCE")
+               for e in live["events"]), \
+        "no historical state may pass state=live"
+    # thread-level lifecycle (no session state) stays visible in 'live'
+    assert any(e["event_type"] == timeline.THREAD_CREATED
+               for e in live["events"])
+    assert any(e["event_type"] == timeline.SESSION_ATTACHED
+               and e["session_id"] == "codex:fpl"
+               for e in live["events"])
+
+    assert {e["session_id"] for e in retained["events"]
+            if e["session_id"]} == {"codex:fpg"}
+    assert {e["session_id"] for e in archived["events"]
+            if e["session_id"]} == {"codex:fpa"}
+    # and the three sets share nothing
+    live_s = {e["id"] for e in live["events"] if e["session_id"]}
+    ret_s = {e["id"] for e in retained["events"]}
+    arc_s = {e["id"] for e in archived["events"]}
+    assert not (live_s & ret_s) and not (live_s & arc_s) and not (ret_s & arc_s)
+
+
+def test_pending_same_timestamp_order_is_stable_across_reconnects(store):
+    """Two pendings created in the same second keep one fixed order —
+    derived from the (created_at, provider) SQL order, not query luck —
+    and the order survives a full close/reopen of the database."""
+    tid = store.thread_create(repo_root="E:/proj/demo", title="tiep")
+    store.pending_record(tid, "zcode", source_provider="claude",
+                         source_session="claude:c1", note="to zcode")
+    store.pending_record(tid, "codex", source_provider="claude",
+                         source_session="claude:c1", note="to codex")
+    store.con.execute("UPDATE thread_pending SET created_at=500.0"
+                      " WHERE thread_id=?", (tid,))
+    store.con.commit()                              # force the tie (durably)
+
+    def pend_ids():
+        return [e["id"] for e in
+                timeline.build_thread_timeline(store, tid)["events"]
+                if e["id"].startswith("pending")]
+
+    first = pend_ids()
+    second = pend_ids()
+    assert first == second
+    assert first == ["pending:%s:codex:500.0" % tid,
+                     "pending:%s:zcode:500.0" % tid], \
+        "alphabetical provider order, independent of insert order"
+
+    db = store.db_path
+    store.close()
+    s = Store(db)
+    try:
+        reopened = [e["id"] for e in
+                    timeline.build_thread_timeline(s, tid)["events"]
+                    if e["id"].startswith("pending")]
+        assert reopened == first, "order survives a reconnect"
+    finally:
+        s.close()
+
+
+def test_checkpoint_same_timestamp_order_is_stable_across_reconnects(store):
+    """Two checkpoints written in the same second keep one fixed order —
+    the ORDER BY created_at, id makes the SQL itself deterministic — and
+    the order survives a close/reopen."""
+    tid = store.thread_create(repo_root="E:/proj/demo", title="tiec")
+    checkpoint_create(store, tid, goal="first", phase="alpha")
+    checkpoint_create(store, tid, goal="second", phase="beta")
+    store.con.execute("UPDATE checkpoints SET created_at=900.0"
+                      " WHERE thread_id=?", (tid,))
+    store.con.commit()                           # force the tie (durably)
+
+    def chk_ids():
+        return [e["id"] for e in
+                timeline.build_thread_timeline(store, tid)["events"]
+                if e["id"].startswith("chk:")]
+
+    first = chk_ids()
+    assert len(first) == 2
+    assert first == sorted(first), "stable id order, not insertion luck"
+    assert chk_ids() == first
+
+    db = store.db_path
+    store.close()
+    s = Store(db)
+    try:
+        assert [e["id"] for e in
+                timeline.build_thread_timeline(s, tid)["events"]
+                if e["id"].startswith("chk:")] == first
+    finally:
+        s.close()
