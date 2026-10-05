@@ -297,12 +297,12 @@ def test_unknown_thread_is_an_error_not_a_crash(store):
 def test_large_thread_timeline_is_bounded(store, tmp_path):
     """O3.9: the timeline must not scan the events table.
 
-    A thread with 60 sessions and 6,000 events still produces a timeline whose
+    A thread with 100 sessions and 10,000 events still produces a timeline whose
     cost is its own lifecycle rows — so the query count stays flat instead of
     growing with transcript size.
     """
     tid = store.thread_create(repo_root="E:/proj/demo", title="big")
-    for i in range(60):
+    for i in range(100):
         src = _src(tmp_path, "s%d.jsonl" % i)
         sid = "codex:big%02d" % i
         store.replace_session(
@@ -312,7 +312,7 @@ def test_large_thread_timeline_is_bounded(store, tmp_path):
             "codex", src)
         store.thread_attach(tid, sid)
 
-    assert store.q("SELECT COUNT(*) n FROM events")[0]["n"] == 6000
+    assert store.q("SELECT COUNT(*) n FROM events")[0]["n"] == 10000
 
     counted = {"n": 0}
     real_q = store.q
@@ -327,7 +327,7 @@ def test_large_thread_timeline_is_bounded(store, tmp_path):
     finally:
         store.q = real_q
 
-    assert len(tl["events"]) == 61, "60 attachments + the thread itself"
+    assert len(tl["events"]) == 101, "100 attachments + the thread itself"
     # a fixed handful of thread-scoped queries, not one per event/session
     assert counted["n"] <= 10, "query count must not scale with transcript size"
 
@@ -439,3 +439,318 @@ def test_cli_timeline_text_and_json(store, story_thread, capsys):
 
     assert main(["--db", str(db), "thread", "timeline", "thr_missing"]) == 1
     assert "no such WorkThread" in capsys.readouterr().err
+
+
+# --- O3 final: ordering, provenance, episodes, read-only -------------------
+
+def test_same_timestamp_order_is_deterministic_and_numeric(store):
+    """Test 1: many events sharing one timestamp still come out in a fixed,
+    sane order on every call — persisted rows in insertion order (numeric,
+    not the lexical log:9 < log:12 trap)."""
+    tid = store.thread_create(repo_root="E:/proj/demo", title="tie")
+    for _ in range(12):
+        store.thread_event_record(tid, "THREAD_STATUS", ts=500.0,
+                                  detail={"note": "same second"})
+    first = timeline.build_thread_timeline(store, tid)
+    second = timeline.build_thread_timeline(store, tid)
+    ids1 = [e["id"] for e in first["events"] if e["timestamp"] == 500.0]
+    ids2 = [e["id"] for e in second["events"] if e["timestamp"] == 500.0]
+    assert ids1 == ids2, "same DB + same query must give the same order"
+    assert ids1 == ["log:%d" % i for i in range(1, 13)], \
+        "same-ts persisted rows sort by physical row id, not lexically"
+
+
+def test_thread_created_derived_exactly_once(store):
+    """Test 2: THREAD_CREATED derives from threads.created_at and is never
+    double-written, no matter how often the timeline is queried."""
+    tid = store.thread_create(repo_root="E:/proj/demo", title="once")
+    for _ in range(3):
+        tl = timeline.build_thread_timeline(store, tid)
+        created = [e for e in tl["events"]
+                   if e["event_type"] == timeline.THREAD_CREATED]
+        assert len(created) == 1
+        assert created[0]["source"] == "threads"
+    assert store.q("SELECT COUNT(*) n FROM thread_events"
+                   " WHERE kind='THREAD_CREATED'")[0]["n"] == 0, \
+        "a derivable fact must not be persisted"
+
+
+def test_session_attach_derived_once_and_writes_nothing(store):
+    """Test 3: SESSION_ATTACHED derives from thread_sessions.attached_at;
+    repeated timeline queries add no database rows."""
+    tid = store.thread_create(repo_root="E:/proj/demo", title="att")
+    src = store.db_path.parent / "att.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    store.replace_session(_session("codex:a1", "codex", "att"),
+                          _events("codex:a1", "att"), "codex", src)
+    store.thread_attach(tid, "codex:a1")
+
+    before = store.q("SELECT COUNT(*) n FROM thread_events")[0]["n"]
+    rows1 = [e for e in timeline.build_thread_timeline(store, tid)["events"]
+             if e["event_type"] == timeline.SESSION_ATTACHED]
+    rows2 = [e for e in timeline.build_thread_timeline(store, tid)["events"]
+             if e["event_type"] == timeline.SESSION_ATTACHED]
+    assert len(rows1) == len(rows2) == 1
+    assert rows1[0]["source"] == "thread_sessions"
+    assert store.q("SELECT COUNT(*) n FROM thread_events")[0]["n"] == before, \
+        "deriving the timeline must not write"
+
+
+def test_repeated_prune_keeps_one_missing_episode(store, tmp_path):
+    """Test 4: repeated scans over a missing source do not stack up
+    SOURCE_MISSING events."""
+    src = _src(tmp_path, "rp.jsonl")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="rp")
+    store.replace_session(_session("codex:rp", "codex", "rp"), _events("codex:rp", "rp"),
+                          "codex", src)
+    store.thread_attach(tid, "codex:rp")
+    src.unlink()
+    for _ in range(3):
+        store.prune_missing_sessions("codex", set())
+        n = [e for e in timeline.build_thread_timeline(store, tid)["events"]
+             if e["event_type"] == timeline.SOURCE_MISSING]
+        assert len(n) == 1
+
+
+def test_missing_return_missing_episodes_all_present(store, tmp_path):
+    """Tests 5+6: ACTIVE→MISSING→ACTIVE→MISSING keeps all three transitions;
+    nothing is compressed into the current state."""
+    src = _src(tmp_path, "ep.jsonl")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="ep")
+    store.replace_session(_session("codex:ep", "codex", "ep"), _events("codex:ep", "ep"),
+                          "codex", src)
+    store.thread_attach(tid, "codex:ep")
+
+    src.unlink()
+    store.prune_missing_sessions("codex", set())          # missing #1
+    src.write_text("{}", encoding="utf-8")
+    store.replace_session(_session("codex:ep", "codex", "ep"),
+                          _events("codex:ep", "ep"), "codex", src)
+    store.prune_missing_sessions("codex", {str(src)})     # returned
+    src.unlink()
+    store.prune_missing_sessions("codex", set())          # missing #2
+
+    kinds = [e["event_type"] for e in
+             timeline.build_thread_timeline(store, tid)["events"]]
+    tail = [k for k in kinds if k in (timeline.SOURCE_MISSING,
+                                      timeline.SOURCE_RETURNED)]
+    assert tail == [timeline.SOURCE_MISSING, timeline.SOURCE_RETURNED,
+                    timeline.SOURCE_MISSING]
+
+
+def test_archive_transition_recorded_once(store, tmp_path):
+    """Test 7: an explicit archive writes SOURCE_ARCHIVED with the state it
+    came from; archiving again records nothing."""
+    src = _src(tmp_path, "ar.jsonl")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="ar")
+    store.replace_session(_session("codex:ar", "codex", "ar"), _events("codex:ar", "ar"),
+                          "codex", src)
+    store.thread_attach(tid, "codex:ar")
+
+    assert store.mark_canonical_archived("codex:ar") is True
+    assert store.mark_canonical_archived("codex:ar") is False, \
+        "a repeat archive changes nothing"
+    evs = [e for e in timeline.build_thread_timeline(store, tid)["events"]
+           if e["event_type"] == timeline.SOURCE_ARCHIVED]
+    assert len(evs) == 1
+    assert evs[0]["metadata"]["from"] == "ACTIVE_SOURCE"
+    assert evs[0]["source_state"] == "ARCHIVED_CANONICAL"
+
+    # a retained session archived later reports its true previous state
+    src2 = _src(tmp_path, "ar2.jsonl")
+    store.replace_session(_session("codex:ar2", "codex", "ar2"),
+                          _events("codex:ar2", "ar2"), "codex", src2)
+    store.thread_attach(tid, "codex:ar2")
+    src2.unlink()
+    store.prune_missing_sessions("codex", set())
+    store.mark_canonical_archived("codex:ar2")
+    evs = [e for e in timeline.build_thread_timeline(store, tid)["events"]
+           if e["event_type"] == timeline.SOURCE_ARCHIVED]
+    assert len(evs) == 2
+    assert {e["metadata"]["from"] for e in evs} == {
+        "ACTIVE_SOURCE", "SOURCE_MISSING"}
+
+
+def test_logged_and_derived_missing_never_double_count(store, tmp_path):
+    """Test 8: a SOURCE_MISSING that is both logged and visible in the
+    current state appears exactly once."""
+    src = _src(tmp_path, "dc.jsonl")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="dc")
+    store.replace_session(_session("codex:dc", "codex", "dc"), _events("codex:dc", "dc"),
+                          "codex", src)
+    store.thread_attach(tid, "codex:dc")
+    src.unlink()
+    store.prune_missing_sessions("codex", set())   # logs AND leaves the mark
+
+    evs = [e for e in timeline.build_thread_timeline(store, tid)["events"]
+           if e["event_type"] == timeline.SOURCE_MISSING]
+    assert len(evs) == 1
+    assert store.q("SELECT COUNT(*) n FROM thread_events"
+                   " WHERE kind='SOURCE_MISSING'")[0]["n"] == 1
+
+
+def test_timeline_query_is_read_only(store, story_thread):
+    """Test 9: building a timeline leaves the database byte-identical."""
+    import hashlib
+    tid, _ = story_thread
+
+    def digest():
+        h = hashlib.sha256()
+        for suffix in ("", "-wal"):
+            p = Path(str(store.db_path) + suffix)
+            if p.exists():
+                h.update(p.read_bytes())
+        return h.hexdigest()
+
+    before = digest()
+    for _ in range(3):
+        timeline.build_thread_timeline(store, tid)
+        timeline.build_thread_timeline(store, tid, state="retained")
+    assert digest() == before
+
+
+def test_current_state_marker_is_current_not_event_time(store, tmp_path):
+    """Test 10: a retained session's non-retention events carry the CURRENT
+    source_state without their own timestamps being touched."""
+    src = _src(tmp_path, "cm.jsonl")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="cm")
+    store.replace_session(_session("codex:cm", "codex", "cm"), _events("codex:cm", "cm"),
+                          "codex", src)
+    store.thread_attach(tid, "codex:cm")
+    attached_at = store.q("SELECT attached_at a FROM thread_sessions"
+                          " WHERE session_id='codex:cm'")[0]["a"]
+    src.unlink()
+    store.prune_missing_sessions("codex", set())
+
+    att = [e for e in timeline.build_thread_timeline(store, tid)["events"]
+           if e["event_type"] == timeline.SESSION_ATTACHED][0]
+    assert att["source_state"] == "SOURCE_MISSING", \
+        "the current retention state is visible on the item"
+    assert att["timestamp"] == attached_at, \
+        "the current state must not rewrite the event's own time"
+
+
+def test_archived_visible_in_timeline_excluded_from_continuity(store, tmp_path):
+    """Test 11: ARCHIVED_CANONICAL shows historically but never feeds live
+    continuity — the O2 invariant survives the timeline work."""
+    from voyager.auto import get_continuation_context
+
+    live_src = _src(tmp_path, "av-live.jsonl")
+    arch_src = _src(tmp_path, "av-arch.jsonl")
+    tid = store.thread_create(repo_root="E:/proj/demo", title="av")
+    store.replace_session(_session("codex:avl", "codex", "avl live"),
+                          _events("codex:avl", "avl live"), "codex", live_src)
+    store.replace_session(_session("codex:ava", "codex", "avl gone"),
+                          _events("codex:ava", "avl gone"), "codex", arch_src)
+    store.thread_attach(tid, "codex:avl")
+    store.thread_attach(tid, "codex:ava")
+    store.mark_canonical_archived("codex:ava")
+
+    tl = timeline.build_thread_timeline(store, tid)
+    kinds = [e["event_type"] for e in tl["events"]]
+    assert timeline.SOURCE_ARCHIVED in kinds, "archived stays visible"
+    archived_items = [e for e in tl["events"]
+                      if e["session_id"] == "codex:ava"]
+    assert archived_items, "the archived session's history remains"
+    assert all(e["source_state"] == "ARCHIVED_CANONICAL"
+               for e in archived_items)
+
+    res = get_continuation_context(store=store, thread_id=tid)
+    ctx = res.get("context") or ""
+    assert "avl live" in ctx
+    assert "avl gone" not in ctx, "archived must not feed continuity"
+
+
+def test_cli_and_api_share_the_canonical_semantics(store, story_thread, capsys):
+    """Test 12: the CLI's --json events and the API op agree on kinds and
+    order for the same thread (wording may differ, semantics may not)."""
+    import json as _json
+    from voyager import api
+    from voyager.cli import main
+
+    tid, _ = story_thread
+    db = store.db_path
+    store.close()
+
+    assert main(["--db", str(db), "thread", "timeline", tid, "--json"]) == 0
+    cli_tl = _json.loads(capsys.readouterr().out)
+    api_tl = api.thread_timeline(db=db, thread_id=tid)
+    cli_pairs = [(e["event_type"], e["id"]) for e in cli_tl["events"]]
+    api_pairs = [(e["event_type"], e["id"]) for e in api_tl["events"]]
+    assert cli_pairs == api_pairs, "one model, two surfaces"
+
+
+def test_dashboard_consumes_the_canonical_builder():
+    """Test 13: the dashboard imports and calls the canonical builder; it
+    aggregates nothing of its own."""
+    src = (Path(__file__).parent.parent / "voyager" / "dashboard.py").read_text(
+        encoding="utf-8")
+    assert "from .timeline import build_thread_timeline" in src
+    assert "build_thread_timeline(store" in src, "actually called"
+
+
+def test_timeline_on_a_database_without_checkpoints(tmp_path):
+    """Test 14: a pre-checkpoint database (core schema only) opens and reads
+    a timeline without crashing."""
+    s = Store(tmp_path / "old.db")     # init_checkpoint_schema NOT called
+    try:
+        tid = s.thread_create(repo_root="E:/proj/demo", title="old")
+        tl = timeline.build_thread_timeline(s, tid)
+        assert "error" not in tl
+        assert [e["event_type"] for e in tl["events"]] == \
+            [timeline.THREAD_CREATED]
+    finally:
+        s.close()
+
+
+def test_status_noop_restatements_record_nothing(store):
+    """O3 §12: active→active is a restatement, not a transition; and the
+    transition detail carries from → to."""
+    tid = store.thread_create(repo_root="E:/proj/demo", title="noop")
+    store.thread_set_status(tid, "active")            # already active
+    store.thread_set_status(tid, "closed")
+    store.thread_set_status(tid, "closed")            # repeat: no event
+    evs = timeline.build_thread_timeline(store, tid)["events"]
+    status_evs = [e for e in evs if e["event_type"] in
+                  (timeline.THREAD_CLOSED, timeline.THREAD_REOPENED,
+                   timeline.THREAD_ARCHIVED, "THREAD_STATUS")]
+    assert len(status_evs) == 1
+    assert status_evs[0]["metadata"] == {"from": "active", "to": "closed"}
+
+
+def test_provenance_names_the_canonical_table(store, story_thread):
+    """O3 §18: every event names where its fact lives."""
+    tid, _ = story_thread
+    tl = timeline.build_thread_timeline(store, tid)
+    known = {"threads", "thread_sessions", "thread_pending", "checkpoints",
+             "thread_events", "sessions:source_state"}
+    for e in tl["events"]:
+        assert e["source"] in known, e["id"]
+    by_kind = {e["event_type"]: e["source"] for e in tl["events"]}
+    assert by_kind[timeline.THREAD_CREATED] == "threads"
+    assert by_kind[timeline.SESSION_ATTACHED] == "thread_sessions"
+    assert by_kind[timeline.CHECKPOINT_CREATED] == "checkpoints"
+    assert by_kind[timeline.SOURCE_MISSING] in (
+        "thread_events", "sessions:source_state")
+    assert by_kind[timeline.SOURCE_RETURNED] == "thread_events"
+
+
+def test_pending_resolution_is_derived_from_resolved_at(store):
+    """O3 §15: a resolved pending row yields PENDING_ATTACH_RESOLVED at the
+    real resolution time, with the outcome in the detail."""
+    tid = store.thread_create(repo_root="E:/proj/demo", title="pend")
+    store.pending_record(tid, "codex", source_provider="claude",
+                         source_session="claude:c1", note="switch")
+    rid = store.q("SELECT rowid rid FROM thread_pending"
+                  " WHERE thread_id=?", (tid,))[0]["rid"]
+    store.pending_mark(rid, "resolved", "codex:x1")
+
+    tl = timeline.build_thread_timeline(store, tid)
+    evs = [e for e in tl["events"]
+           if e["event_type"] == timeline.PENDING_ATTACH_RESOLVED]
+    assert len(evs) == 1
+    assert evs[0]["session_id"] == "codex:x1"
+    assert evs[0]["metadata"]["status"] == "resolved"
+    assert evs[0]["timestamp"] == store.q(
+        "SELECT resolved_at a FROM thread_pending WHERE rowid=?", (rid,)
+    )[0]["a"]

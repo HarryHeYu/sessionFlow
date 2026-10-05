@@ -33,12 +33,14 @@ THREAD_CREATED = "THREAD_CREATED"
 SESSION_ATTACHED = "SESSION_ATTACHED"
 HANDOFF = "HANDOFF"
 PROVIDER_SWITCHED = "PROVIDER_SWITCHED"
+PENDING_ATTACH_RESOLVED = "PENDING_ATTACH_RESOLVED"
 CHECKPOINT_CREATED = "CHECKPOINT_CREATED"
 THREAD_CLOSED = "THREAD_CLOSED"
 THREAD_REOPENED = "THREAD_REOPENED"
 THREAD_ARCHIVED = "THREAD_ARCHIVED"
 SOURCE_MISSING = "SOURCE_MISSING"
 SOURCE_RETURNED = "SOURCE_RETURNED"
+SOURCE_ARCHIVED = "SOURCE_ARCHIVED"
 COMMIT_OBSERVED = "COMMIT_OBSERVED"
 TEST_GATE = "TEST_GATE"
 BLOCKER_ADDED = "BLOCKER_ADDED"
@@ -46,10 +48,31 @@ BLOCKER_RESOLVED = "BLOCKER_RESOLVED"
 
 ALL_TYPES = (
     THREAD_CREATED, SESSION_ATTACHED, HANDOFF, PROVIDER_SWITCHED,
-    CHECKPOINT_CREATED, THREAD_CLOSED, THREAD_REOPENED, THREAD_ARCHIVED,
-    SOURCE_MISSING, SOURCE_RETURNED, COMMIT_OBSERVED, TEST_GATE,
-    BLOCKER_ADDED, BLOCKER_RESOLVED,
+    PENDING_ATTACH_RESOLVED, CHECKPOINT_CREATED, THREAD_CLOSED,
+    THREAD_REOPENED, THREAD_ARCHIVED,
+    SOURCE_MISSING, SOURCE_RETURNED, SOURCE_ARCHIVED,
+    COMMIT_OBSERVED, TEST_GATE, BLOCKER_ADDED, BLOCKER_RESOLVED,
 )
+
+#: Provenance table per derivation — every event names where its fact lives,
+#: so a caller never has to reverse-engineer an eid prefix to trace it.
+SOURCE_THREADS = "threads"
+SOURCE_THREAD_SESSIONS = "thread_sessions"
+SOURCE_THREAD_PENDING = "thread_pending"
+SOURCE_CHECKPOINTS = "checkpoints"
+SOURCE_THREAD_EVENTS = "thread_events"
+#: the retention backfill derives from the session's *current* state column
+SOURCE_SESSION_STATE = "sessions:source_state"
+
+#: stable cross-source tie-break at identical timestamps (lower first)
+_SOURCE_PRIORITY = {
+    SOURCE_THREADS: 0,
+    SOURCE_THREAD_SESSIONS: 1,
+    SOURCE_THREAD_PENDING: 2,
+    SOURCE_CHECKPOINTS: 3,
+    SOURCE_THREAD_EVENTS: 4,
+    SOURCE_SESSION_STATE: 5,
+}
 
 #: Types that only make sense for a session that is still live.
 _LIVE_ONLY = (SESSION_ATTACHED,)
@@ -60,25 +83,51 @@ _LIVE_ONLY = (SESSION_ATTACHED,)
 #: "deleted".
 SOURCE_MISSING_SUMMARY = "Provider source disappeared — history retained locally"
 SOURCE_RETURNED_SUMMARY = "Provider source restored — session reconciled"
+SOURCE_ARCHIVED_SUMMARY = "Session archived as the canonical copy (explicit)"
 
 
 def _ev(kind: str, ts: Optional[float], *, eid: str, thread_id: str,
         provider: Optional[str] = None, session_id: Optional[str] = None,
         title: Optional[str] = None, summary: Optional[str] = None,
         source_state: Optional[str] = None,
+        source: str = SOURCE_THREAD_EVENTS,
+        rowid: int = 0,
         metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """One canonical timeline event.
+
+    `source` is the provenance: the canonical table the fact comes from
+    (``thread_events`` = persisted log row; anything else = derived from a
+    timestamped canonical column).  `rowid` is the physical row number where
+    one exists — it is the numeric part of the deterministic tie-break and
+    never leaks into the public event id.
+    """
     return {
         "id": eid,
-        "timestamp": ts,
-        "event_type": kind,
+        "ts": ts,
+        "timestamp": ts,          # pre-O3 alias, consumers depend on it
+        "kind": kind,             # O3 contract name
+        "event_type": kind,       # pre-O3 alias
         "thread_id": thread_id,
         "provider": provider,
         "session_id": session_id,
         "title": title,
         "summary": summary,
         "source_state": source_state,
-        "metadata": metadata or {},
+        "source": source,
+        "_rowid": rowid,
+        "detail": metadata or {},  # O3 contract name
+        "metadata": metadata or {},  # pre-O3 alias
     }
+
+
+def _sort_key(e: Dict[str, Any]):
+    """Deterministic order: time, then source priority, then physical row,
+    then the stable id.  A bare timestamp sort lets two same-second events
+    swap places between runs; a lexical id sort would put ``log:9`` after
+    ``log:12``.  Same DB + same query → same timeline, across runs."""
+    prio = _SOURCE_PRIORITY.get(e.get("source"), 99)
+    return ((e["timestamp"] if e["timestamp"] is not None else 0.0),
+            prio, e.get("_rowid", 0), e["id"])
 
 
 def _json_list(raw) -> List[Any]:
@@ -108,6 +157,7 @@ def _text(item: Any) -> str:
 def _thread_created(thread) -> List[Dict[str, Any]]:
     return [_ev(THREAD_CREATED, thread["created_at"],
                 eid="created:%s" % thread["id"], thread_id=thread["id"],
+                source=SOURCE_THREADS,
                 title=thread["title"],
                 summary="WorkThread created"
                         + (" — %s" % thread["title"] if thread["title"] else ""),
@@ -132,6 +182,7 @@ def _attachments(store, thread_id: str) -> List[Dict[str, Any]]:
             eid="attached:%s:%s" % (thread_id, r["id"]),
             thread_id=thread_id, provider=r["provider"], session_id=r["id"],
             title=r["title"], source_state=state,
+            source=SOURCE_THREAD_SESSIONS, rowid=r["ord"],
             summary="%s attached" % r["provider"],
             metadata={"ord": r["ord"], "native_id": r["native_id"],
                       "message_count": r["message_count"],
@@ -142,11 +193,19 @@ def _attachments(store, thread_id: str) -> List[Dict[str, Any]]:
 def _handoffs(store, thread_id: str) -> List[Dict[str, Any]]:
     """A pending-attach record IS the handoff: it carries the source provider,
     the source session and the time.  `source_provider != provider` is a
-    provider switch; the same provider is a plain handoff (a forced bundle)."""
+    provider switch; the same provider is a plain handoff (a forced bundle).
+
+    A row with `resolved_at` also yields a derived PENDING_ATTACH_RESOLVED
+    event — the resolution time is a real transition timestamp the row
+    already carries, so deriving it costs no extra storage.  (The row's
+    PRIMARY KEY is (thread_id, provider), so a re-created pending overwrites
+    the previous one: only the latest episode is derivable, which is the
+    schema's honest limit — no synthetic history is invented for older ones.)
+    """
     out = []
-    for r in store.q(
+    for i, r in enumerate(store.q(
             "SELECT * FROM thread_pending WHERE thread_id=? ORDER BY created_at",
-            (thread_id,)):
+            (thread_id,))):
         src, dst = r["source_provider"], r["provider"]
         switched = bool(src) and bool(dst) and src != dst
         kind = PROVIDER_SWITCHED if switched else HANDOFF
@@ -154,11 +213,22 @@ def _handoffs(store, thread_id: str) -> List[Dict[str, Any]]:
             kind, r["created_at"],
             eid="pending:%s:%s:%s" % (thread_id, r["provider"], r["created_at"]),
             thread_id=thread_id, provider=dst, session_id=r["source_session"],
+            source=SOURCE_THREAD_PENDING, rowid=i,
             summary=("%s → %s" % (src, dst) if switched
                      else "handoff to %s" % dst),
             metadata={"from": src, "to": dst, "goal": r["goal"],
                       "note": r["note"], "status": r["status"],
                       "resolved_sid": r["resolved_sid"]}))
+        if r["resolved_at"] is not None:
+            out.append(_ev(
+                PENDING_ATTACH_RESOLVED, r["resolved_at"],
+                eid="pending-resolved:%s:%s" % (thread_id, r["provider"]),
+                thread_id=thread_id, provider=dst,
+                session_id=r["resolved_sid"] or r["source_session"],
+                source=SOURCE_THREAD_PENDING, rowid=i,
+                summary="pending attach %s (%s)" % (r["status"], dst),
+                metadata={"status": r["status"], "resolved_sid":
+                          r["resolved_sid"], "from": src, "to": dst}))
     return out
 
 
@@ -177,13 +247,14 @@ def _checkpoints(store, thread_id: str) -> List[Dict[str, Any]]:
     if not _has_table(store, "checkpoints"):
         return []
     out = []
-    for r in store.q(
+    for ci, r in enumerate(store.q(
             "SELECT * FROM checkpoints WHERE thread_id=? ORDER BY created_at",
-            (thread_id,)):
+            (thread_id,))):
         cid = r["id"]
         out.append(_ev(
             CHECKPOINT_CREATED, r["created_at"],
             eid="chk:%s" % cid, thread_id=thread_id,
+            source=SOURCE_CHECKPOINTS, rowid=ci,
             summary="checkpoint: %s%s" % (r["phase"] or "?",
                                           " — %s" % r["goal"] if r["goal"] else ""),
             metadata={"checkpoint_id": cid, "phase": r["phase"],
@@ -197,6 +268,7 @@ def _checkpoints(store, thread_id: str) -> List[Dict[str, Any]]:
             out.append(_ev(
                 BLOCKER_ADDED, r["created_at"],
                 eid="chk-blocker:%s:%d" % (cid, i), thread_id=thread_id,
+                source=SOURCE_CHECKPOINTS, rowid=ci,
                 summary="blocker: %s" % _text(b),
                 metadata={"checkpoint_id": cid, "blocker": _text(b)}))
 
@@ -210,6 +282,7 @@ def _checkpoints(store, thread_id: str) -> List[Dict[str, Any]]:
                 out.append(_ev(
                     BLOCKER_RESOLVED, r["created_at"],
                     eid="chk-blocker-done:%s:%d" % (cid, i), thread_id=thread_id,
+                    source=SOURCE_CHECKPOINTS, rowid=ci,
                     summary="blocker resolved: %s" % _text(b),
                     metadata={"checkpoint_id": cid, "blocker": _text(b)}))
 
@@ -218,6 +291,7 @@ def _checkpoints(store, thread_id: str) -> List[Dict[str, Any]]:
             out.append(_ev(
                 TEST_GATE, r["created_at"],
                 eid="chk-tests:%s" % cid, thread_id=thread_id,
+                source=SOURCE_CHECKPOINTS, rowid=ci,
                 summary="tests recorded: %s" % ", ".join(_text(t) for t in tests[:4]),
                 metadata={"checkpoint_id": cid, "tests": [_text(t) for t in tests]}))
 
@@ -225,6 +299,7 @@ def _checkpoints(store, thread_id: str) -> List[Dict[str, Any]]:
             out.append(_ev(
                 COMMIT_OBSERVED, r["created_at"],
                 eid="chk-commit:%s" % cid, thread_id=thread_id,
+                source=SOURCE_CHECKPOINTS, rowid=ci,
                 summary="commit %s" % str(r["head_commit"])[:12],
                 metadata={"checkpoint_id": cid, "head_commit": r["head_commit"],
                           "branches": _json_list(r["branches_json"])}))
@@ -258,6 +333,7 @@ def _source_missing(store, thread_id: str) -> List[Dict[str, Any]]:
             eid="missing:%s:%s" % (thread_id, r["id"]),
             thread_id=thread_id, provider=r["provider"], session_id=r["id"],
             title=r["title"], source_state="SOURCE_MISSING",
+            source=SOURCE_SESSION_STATE, rowid=0,
             summary=SOURCE_MISSING_SUMMARY,
             metadata={"native_id": r["native_id"],
                       "derived": "current state (no transition log row)"}))
@@ -276,11 +352,13 @@ def _logged(store, thread_id: str) -> List[Dict[str, Any]]:
             THREAD_ARCHIVED: "WorkThread archived",
             SOURCE_MISSING: SOURCE_MISSING_SUMMARY,
             SOURCE_RETURNED: SOURCE_RETURNED_SUMMARY,
+            SOURCE_ARCHIVED: SOURCE_ARCHIVED_SUMMARY,
         }.get(kind, kind.replace("_", " ").title())
         # The state the event leaves the session in -- the same vocabulary the
         # derived events use, so a filter on 'retained' catches both.
         state = {SOURCE_MISSING: "SOURCE_MISSING",
-                 SOURCE_RETURNED: "ACTIVE_SOURCE"}.get(kind)
+                 SOURCE_RETURNED: "ACTIVE_SOURCE",
+                 SOURCE_ARCHIVED: "ARCHIVED_CANONICAL"}.get(kind)
         detail = {}
         if r["detail_json"]:
             try:
@@ -290,7 +368,8 @@ def _logged(store, thread_id: str) -> List[Dict[str, Any]]:
         out.append(_ev(kind, r["ts"], eid="log:%d" % r["id"],
                        thread_id=thread_id, provider=r["provider"],
                        session_id=r["session_id"], summary=summary,
-                       source_state=state, metadata=detail))
+                       source_state=state, source=SOURCE_THREAD_EVENTS,
+                       rowid=r["id"], metadata=detail))
     return out
 
 
@@ -331,14 +410,19 @@ def build_thread_timeline(store, thread_id: str, *, limit: Optional[int] = None,
         events = [e for e in events
                   if (e["provider"] or "").lower() == provider.lower()]
     if state:
-        want_retained = state.lower() in ("retained", "source_missing")
-        events = [e for e in events
-                  if (e["source_state"] == "SOURCE_MISSING") == want_retained]
+        want = state.lower()
+        if want in ("retained", "source_missing"):
+            events = [e for e in events
+                      if e["source_state"] == "SOURCE_MISSING"]
+        elif want in ("archived", "archived_canonical"):
+            events = [e for e in events
+                      if e["source_state"] == "ARCHIVED_CANONICAL"]
+        else:
+            # 'live' keeps its O3.4 meaning: everything that is not retained
+            events = [e for e in events
+                      if e["source_state"] != "SOURCE_MISSING"]
 
-    # deterministic order: time first, then id — never a bare timestamp sort,
-    # which would let two same-second events swap places between runs.
-    events.sort(key=lambda e: (e["timestamp"] if e["timestamp"] is not None else 0.0,
-                               e["id"]))
+    events.sort(key=_sort_key)
     shown = events
     if limit is not None and limit >= 0 and len(events) > limit:
         shown = events[-limit:] if limit else []
@@ -377,8 +461,13 @@ def render_text(timeline: Dict[str, Any], *, show_ids: bool = False) -> str:
             bits.append("[%s]" % e["provider"])
         bits.append(e["summary"] or "")
         line = " ".join(b for b in bits if b)
+        # source_state is the session's CURRENT property, not the state at
+        # event time -- the wording must never suggest the attachment itself
+        # happened while retained/archived.
         if e["source_state"] == "SOURCE_MISSING":
-            line += "  (retained: source unavailable)"
+            line += "  (session now retained: source unavailable)"
+        elif e["source_state"] == "ARCHIVED_CANONICAL":
+            line += "  (session now archived)"
         lines.append(line)
         if show_ids and e["session_id"]:
             lines.append("      session: %s" % e["session_id"])

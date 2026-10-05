@@ -687,6 +687,14 @@ class Store:
 
     def thread_set_status(self, tid: str, status: str) -> None:
         import time as _time
+        prev = self.con.execute(
+            "SELECT status FROM threads WHERE id=?", (tid,)).fetchone()
+        if prev is None:
+            return
+        if (prev["status"] or "active") == status:
+            # active → active is not a transition: the timeline records
+            # changes, not restatements
+            return
         now = _time.time()
         self.con.execute("UPDATE threads SET status=?, updated_at=? WHERE id=?",
                          (status, now, tid))
@@ -694,8 +702,9 @@ class Store:
         # O3: when a status changed has nowhere else to live -- `status` is a
         # single value and `updated_at` is also written by thread_touch, so it
         # cannot stand in for a transition time.
-        self.thread_event_record(tid, _STATUS_EVENT.get(status, "THREAD_STATUS"),
-                                 ts=now)
+        self.thread_event_record(
+            tid, _STATUS_EVENT.get(status, "THREAD_STATUS"), ts=now,
+            detail={"from": prev["status"], "to": status})
 
     def thread_event_record(self, tid: str, kind: str, *, provider=None,
                             session_id=None, detail=None,
@@ -817,10 +826,31 @@ class Store:
         Only an explicit archive action may set this state: it declares that
         Voyager holds the canonical archival copy of the session's history.
         It is never set automatically (a missing source is SOURCE_MISSING,
-        not an archive).  Returns True when the row was updated."""
+        not an archive).  Returns True when the state actually changed.
+
+        O3: the transition is logged to thread_events.  `source_state` keeps
+        only the current value, so ACTIVE_SOURCE→ARCHIVED and
+        SOURCE_MISSING→ARCHIVED would be unrecoverable otherwise.  A repeat
+        archive (ARCHIVED→ARCHIVED) changes nothing and records nothing.
+        """
+        prev = self.con.execute(
+            "SELECT provider, source_state FROM sessions WHERE id=?",
+            (sid,)).fetchone()
+        if prev is None:
+            return False
+        prev_state = prev["source_state"] or "ACTIVE_SOURCE"
+        if prev_state == "ARCHIVED_CANONICAL":
+            return False
         cur = self.con.execute(
             "UPDATE sessions SET source_state='ARCHIVED_CANONICAL',"
             " source_missing_since=NULL WHERE id=?", (sid,))
+        if cur.rowcount:
+            for t in self.q("SELECT thread_id FROM thread_sessions"
+                            " WHERE session_id=?", (sid,)):
+                self.thread_event_record(
+                    t["thread_id"], "SOURCE_ARCHIVED",
+                    provider=prev["provider"], session_id=sid,
+                    detail={"from": prev_state}, commit=False)
         self.con.commit()
         return cur.rowcount > 0
 
