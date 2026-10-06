@@ -1,0 +1,65 @@
+name: release
+
+# Create the GitHub Release automatically when a v* tag lands. Notes come
+# from the tag annotation; release-note files under docs/releases/ (if the
+# tag matches one) are preferred. PyPI publishing is deliberately NOT done
+# here — that stays a manual, credential-held step.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the tag tree passes the suite
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+          python -m pytest tests/ -q
+
+      - name: Collect release notes
+        id: notes
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # a matching docs/releases/<tag>.md wins; else the tag annotation
+          if [ -f "docs/releases/${TAG}.md" ]; then
+            echo "source=docs/releases/${TAG}.md" >> "$GITHUB_OUTPUT"
+            {
+              echo "body<<EOF_EOF"
+              cat "docs/releases/${TAG}.md"
+              echo "EOF_EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "source=tag annotation" >> "$GITHUB_OUTPUT"
+            {
+              echo "body<<EOF_EOF"
+              git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG"
+              echo "EOF_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARGS=(--title "sessionFlow ${TAG}" --notes "${{ steps.notes.outputs.body }}")
+          case "$TAG" in
+            *rc*|*a*|*b*) ARGS+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${ARGS[@]}"
