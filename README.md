@@ -61,6 +61,9 @@ a1b2c3d4-...                          zcode  2026-09-13 01:13   162  206  重构
 5e4d3c2b-...                          claude 2026-07-17 12:46    89   70  分析数据集结构并设计评测脚本
 ```
 
+Use cases live in [docs/use-cases.md](docs/use-cases.md) — lost context,
+agent switching, engineering memory.
+
 ## Why
 
 Every agent keeps its own history in its own format: Codex writes rollout
