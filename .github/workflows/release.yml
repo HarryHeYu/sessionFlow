@@ -34,22 +34,17 @@ jobs:
         id: notes
         shell: bash
         run: |
+          # the body goes through a FILE, never through shell interpolation:
+          # a multi-line --notes value is word-split before gh sees it
           TAG="${GITHUB_REF_NAME}"
-          # a matching docs/releases/<tag>.md wins; else the tag annotation
+          OUT="${RUNNER_TEMP}/release-notes.md"
           if [ -f "docs/releases/${TAG}.md" ]; then
+            cp "docs/releases/${TAG}.md" "$OUT"
             echo "source=docs/releases/${TAG}.md" >> "$GITHUB_OUTPUT"
-            {
-              echo "body<<EOF_EOF"
-              cat "docs/releases/${TAG}.md"
-              echo "EOF_EOF"
-            } >> "$GITHUB_OUTPUT"
           else
             echo "source=tag annotation" >> "$GITHUB_OUTPUT"
-            {
-              echo "body<<EOF_EOF"
-              git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG"
-              echo "EOF_EOF"
-            } >> "$GITHUB_OUTPUT"
+            git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG" \
+              > "$OUT"
           fi
 
       - name: Create the GitHub Release
@@ -58,7 +53,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          ARGS=(--title "sessionFlow ${TAG}" --notes "${{ steps.notes.outputs.body }}")
+          ARGS=(--title "sessionFlow ${TAG}"
+                --notes-file "${RUNNER_TEMP}/release-notes.md")
           case "$TAG" in
             *rc*|*a*|*b*) ARGS+=(--prerelease) ;;
           esac
