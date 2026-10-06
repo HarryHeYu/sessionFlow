@@ -103,7 +103,7 @@ pip install -e ".[dsh]"
 
 **Search doesn't find a word I know is in a session**
 
-The FTS body is capped (600 bytes per event, see `docs/ARCHITECTURE.md`)
+The FTS body is capped (600 bytes per event, see `docs/architecture.md`)
 to keep the index small, and trigram search needs ≥3-character queries.
 The full text is still in `voyager show` / `export`; only *search
 recall* is limited to the head of each event.

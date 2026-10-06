@@ -509,7 +509,7 @@ back to the source. Everything lands in a local SQLite index with FTS5
 tracked by `(mtime, size)` and re-parsed only when they change; sessions
 whose source files vanish are pruned.
 
-Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+Details in [docs/architecture.md](docs/architecture.md),
 [docs/DECISIONS.md](docs/DECISIONS.md), [docs/API.md](docs/API.md) and
 [docs/FAQ.md](docs/FAQ.md) and everyday recipes in
 [docs/WORKFLOWS.md](docs/WORKFLOWS.md).

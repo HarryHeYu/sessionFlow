@@ -1,4 +1,48 @@
-# Voyager 架构
+# sessionFlow Architecture
+
+## The big picture (for a new user)
+
+```
+AI Agents
+(Codex / Claude Code / DSH / ZCode / Grok / Cursor / Kiro / Antigravity)
+        |
+        |  (each agent writes its own session files, in its own format --
+        |   sessionFlow only ever READS them)
+        v
+sessionFlow Core  (voyager, a local Python CLI)
+        |
+        +-- Adapters      one per agent format -> normalized sessions/events
+        +-- Index         one local SQLite + FTS5 database (~/.voyager)
+        +-- Timeline      per-WorkThread lifecycle, one canonical builder
+        +-- Continuity    continue / switch / handoff / merge across agents
+        +-- Verification  machine-local evidence for what actually ran
+        +-- Doctor        read-only diagnostics + audited safe repairs
+        |
+        v
+Bridge API   (stdio JSON bridge, MCP server, CLI --json)
+        |
+        v
+dsh-sessionflow plugin   (six thin tools inside a DSH agent session)
+```
+
+Four things worth knowing:
+
+1. **Read, never write.** sessionFlow only reads the session files your
+   agents already produce; provider files are never modified.
+2. **One index, idempotent.** Re-scans skip unchanged sources; a provider
+   rotating its storage retains the normalized history (searchable), it
+   never deletes it.
+3. **One model, many surfaces.** CLI, `--json`, the stdio/MCP bridge and
+   the dashboard all read the same canonical database — presentation
+   differs, semantics do not.
+4. **Thin clients.** The dsh-sessionflow plugin is tool input -> bridge
+   call -> result formatting; ranking, thread selection, timeline
+   building, continuation and merging all live in the core. The bridge is
+   versioned (`BRIDGE_SCHEMA_VERSION`, currently 1).
+
+---
+
+# Voyager 架构（内部数据流）
 
 ![架构图](screenshots/architecture.png)
 

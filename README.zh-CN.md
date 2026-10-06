@@ -310,7 +310,7 @@ Provider 的文件只读不改。Adapter 把各平台事件翻译成统一的 `S
 本地 SQLite + FTS5（trigram 分词，中文子串可搜）。扫描幂等：source 按
 `(mtime, size)` 跟踪，变了才重解析；源文件消失的会话自动清理。
 
-细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和
+细节见 [docs/architecture.md](docs/architecture.md) 和
 [docs/DECISIONS.md](docs/DECISIONS.md)。
 
 ## 下一步
