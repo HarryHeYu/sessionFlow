@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -345,6 +346,9 @@ def test_hook_command_shape_is_the_live_verified_one():
     assert "\\" not in cmd and '"' not in cmd
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="the relay drives Windows PowerShell; CI windows "
+                           "legs run it, linux legs cannot")
 def test_relay_delivers_protocol_json_and_cleans_temp(
         tmp_path, request, monkeypatch):
     """One relay run: protocol JSON out (seeded WorkThread visible through
@@ -375,6 +379,9 @@ def test_relay_delivers_protocol_json_and_cleans_temp(
             for r in rows] == [("codex", "relay-sess-1", "open")]
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="the relay drives Windows PowerShell; CI windows "
+                           "legs run it, linux legs cannot")
 def test_relay_concurrent_runs_do_not_collide(
         tmp_path, request, monkeypatch):
     """Two simultaneous SessionStarts get unique temp names (ms stamp + PID):
