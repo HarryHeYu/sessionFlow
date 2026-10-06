@@ -20,6 +20,8 @@ no accounts, no cloud, no telemetry.
 
 **Search. Understand. Continue. Switch agents without losing context.**
 
+![sessionFlow demo: search, timeline, continue, doctor repair](docs/assets/demo.gif)
+
 Cross-agent continuity is built in: merge context across sessions and
 continue in any agent (`voyager merge` / `switch` / `continue`) — see
 [docs/ROADMAP.md](docs/ROADMAP.md) for the shipped scope and
