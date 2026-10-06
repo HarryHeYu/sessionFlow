@@ -1,20 +1,49 @@
-# Voyager 🧭
+# sessionFlow 🧭
 
 [![tests](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**One index across every AI coding agent on your machine.**
+**One searchable memory layer for every AI coding agent.**
+(the CLI command is `voyager`; the GitHub project is sessionFlow)
 
-Cross-agent continuity is built in: merge context across sessions and continue in any agent (`voyager merge` / `switch` / `continue`) — see [docs/ROADMAP.md](docs/ROADMAP.md) for the shipped scope and [docs/POST-1.0.md](docs/POST-1.0.md) for what's next.
+Your AI coding history is fragmented:
+
+- Codex sessions (rollout JSONL)
+- Claude Code conversations (project JSONL)
+- DSH runs (zstd JSONL)
+- ZCode / Cursor / Kiro / Grok / Antigravity (SQLite, VSCDB, JSON...)
+
+sessionFlow creates **one local index** out of all of them — pure local,
+no accounts, no cloud, no telemetry.
+
+**Search. Understand. Continue. Switch agents without losing context.**
+
+Cross-agent continuity is built in: merge context across sessions and
+continue in any agent (`voyager merge` / `switch` / `continue`) — see
+[docs/ROADMAP.md](docs/ROADMAP.md) for the shipped scope and
+[docs/POST-1.0.md](docs/POST-1.0.md) for what's next.
 
 [中文说明](README.zh-CN.md)
 
-Voyager reads the local session data your agents already write — Codex,
-Claude Code, ZCode, DSH (DeepSeek Harness), and more — and turns it into a
-single searchable, exportable, resumable index. Pure local, no accounts,
-no cloud, no telemetry.
+## A day with sessionFlow
+
+```
+Morning    Codex implements the SQLite migration
+Afternoon  Claude Code reviews the code
+Evening    DSH keeps debugging the edge case
+
+sessionFlow:
+  find the previous reasoning   -> voyager search "sqlite migration"
+  restore the full context      -> voyager continue <thread>
+  switch agents mid-work        -> voyager handoff claude --from codex
+```
+
+Nothing is uploaded anywhere: sessionFlow reads the session files your
+agents already wrote, normalizes them into one SQLite index you can search,
+resume from, hand off to another agent, or query straight from inside an
+agent over MCP / the DSH plugin.
 
 ![Voyager architecture: 8 agents, 8 storage formats, one index](docs/screenshots/architecture.png)
 

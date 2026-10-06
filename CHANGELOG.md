@@ -3,6 +3,36 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [1.0.0-rc1] — 2026-10-06
+
+Release candidate. Scope: performance evidence, retention, canonical
+timeline, doctor safety, verification truth, packaging.
+
+### Added
+- O1: benchmark harness over the real store and synthetic 10k/100k-session
+  corpora; git-probe and scan-path subprocess merges; documented, kept debts
+- O2: a vanished provider source no longer deletes history —
+  ACTIVE_SOURCE / SOURCE_MISSING / ARCHIVED_CANONICAL lifecycle, retention
+  keeps events/files/FTS searchable, explicit archive, E-drive scratch
+  policy (opt-in via VOYAGER_SCRATCH_ROOT)
+- O3: one canonical WorkThread timeline (derived vs persisted facts,
+  provenance per event, deterministic same-second ordering, SOURCE_ARCHIVED,
+  pending-attach resolution), consumed by CLI/API/dashboard/webview
+- O4: canonical doctor Issue model (severity x repair_kind), read-only
+  guarantees, explicit SAFE_FIXERS allowlist, transactional + idempotent
+  repairs with dry-run, FTS/archive/ambiguity diagnostics
+- O5: evidence-only verification (HOOK/PREPARED/EMITTED split, transport
+  truth for stdout providers and grok's rules-file transport, fail-closed
+  correlation chains), cross-surface state convergence
+- O6.5: dsh-sessionflow consumer closure (thin-adapter audit, bridge
+  schema v1 unchanged)
+
+### Fixed
+- prune per-source updates clear the SQLite variable limit at six-figure
+  source counts
+- retention exclusion honored on every continuity path; live-state filters
+  no longer treat archived sessions as live
+
 ## [Unreleased]
 
 > Headline: the "Claude Code has no automatic session-start trigger" conclusion
