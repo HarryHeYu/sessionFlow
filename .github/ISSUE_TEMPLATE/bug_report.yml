@@ -1,0 +1,49 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please never paste real session content
+        (message bodies, file contents from your agents) — redact or
+        replace with synthetic text.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Run `voyager status` and paste the output, redacting paths you consider private.
+      placeholder: |
+        - OS: (e.g. Windows 11, macOS 14, Ubuntu 24.04)
+        - Python version: (e.g. 3.12.1)
+        - sessionFlow version / commit: (e.g. v1.0.0-rc1 or git rev-parse HEAD)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, in order. Synthetic data only.
+      placeholder: |
+        1. voyager demo
+        2. voyager search ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the error output / traceback, redacted.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "~/.voyager/logs/*.log tail if relevant — redact anything that is not ids/timestamps."
