@@ -67,11 +67,61 @@ and CLI only know the normalized model (`model.py`). Every event keeps its
   tool events — say so in the README table instead of inventing data.
 - No network calls. No telemetry. No new runtime dependencies in core.
 
+## Architecture rules
+
+These are the invariants the O1–O6 phases established. A PR that breaks
+one needs an issue-level discussion first, not a drive-by refactor.
+
+- **Single source of truth.** One canonical implementation per semantic:
+  the store owns retention state (`ACTIVE_SOURCE` / `SOURCE_MISSING` /
+  `ARCHIVED_CANONICAL` — via `is_live` / `live_thread_members`, never
+  ad-hoc `!= "SOURCE_MISSING"` checks); `voyager/timeline.py` is the only
+  timeline builder; `verification_events` is the only promotion evidence;
+  `doctor`'s Issue model is the only severity/repair classification.
+- **No duplicate semantics.** Derived facts are derived once; persisted
+  facts (state transitions) are logged once; if you find the same
+  decision implemented twice, converge before extending.
+- **Evidence honesty.** Capability claims are capped at what the evidence
+  table proves: `declared` (implementation ceiling) ≥ `observed` (this
+  machine's evidence) → `effective` is the weaker. Never promote a
+  provider past its evidence — not in README, not in doctor, not in code.
+- **Safe repair boundary.** `doctor --fix` executes only the audited
+  `SAFE_FIXERS` allowlist (derived-state repairs, transactional,
+  idempotent). New repair kinds need the same proof: derived-only,
+  all-or-nothing, idempotent, and unable to touch canonical history.
+- **Adapters stay thin.** Provider logic lives in `voyager/adapters/`;
+  the store, CLI and bridges only know the normalized model.
+- **The bridge is versioned.** `BRIDGE_SCHEMA_VERSION` changes only when
+  an op's shape changes, and never without a compat note in CHANGELOG.md.
+
+## Commit style
+
+Short, imperative, prefixed (`feat:` / `fix:` / `docs:` / `test:` /
+`ci:` / `perf:` / `refactor:`), one logical change per commit —
+`git log` is the changelog's first draft. Example:
+
+```
+fix(O3): state=live excludes archived, and same-second ordering uses stable row identities
+```
+
+## PR rules
+
+Do not:
+
+- change `BRIDGE_SCHEMA_VERSION` or a bridge op's shape without prior
+  discussion in an issue (additive fields are fine);
+- add a second ranking / thread-selection / timeline-building /
+  continuation-compiling implementation — extend the canonical one;
+- add or raise a provider capability claim without evidence (see
+  **Evidence honesty** above);
+- include real session content in tests, fixtures, screenshots or docs —
+  synthetic data only.
+
 ## Testing
 
 ```sh
 pip install -e ".[all,dev]"
-python -m pytest tests/ -q            # the whole suite (163 tests)
+python -m pytest tests/ -q            # the whole suite (~975 tests)
 python -m pytest tests/test_zcode.py  # one adapter
 python scripts/run_tests_core_only.py # simulate `pip install voyager` (no extras)
 ```
@@ -88,7 +138,7 @@ plus `tests/test_<p>.py`, using the `adapter_of` and `patch_paths` fixtures.
 The test must assert the normalized session fields *and* the event kinds, so
 a storage-format change upstream fails loudly instead of silently indexing
 garbage. CI (`.github/workflows/test.yml`) runs the suite on Python 3.10–3.13
-(Linux) and 3.10/3.13 (Windows).
+(Linux) and 3.10–3.13 (Windows).
 
 ## Docs
 
