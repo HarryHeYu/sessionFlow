@@ -120,13 +120,22 @@ data, nothing to install beyond sessionFlow itself:
 
 ```sh
 voyager demo
-voyager search --db ~/.voyager/demo.db "authentication"   # hits 3 agents
+voyager search --db ~/.voyager/demo.db "authentication"   # hits 2 agents
 voyager search --db ~/.voyager/demo.db "JWT refresh token"
 voyager show --db ~/.voyager/demo.db codex:demo-auth-01   # compiled session
 ```
 
 The demo index (`~/.voyager/demo.db`) is separate from your real one —
-delete it whenever you like.
+delete it whenever you like. What that looks like:
+
+![Search every AI coding conversation locally](docs/assets/search.png)
+
+![Understand how your coding decisions evolved](docs/assets/timeline.png)
+
+![Move context across agents](docs/assets/continue.png)
+
+All screenshots are generated from the synthetic demo
+(`scripts/make_screenshots.py`) — no real user data in this README.
 
 ### Real Usage — your own agents (5 minutes)
 
