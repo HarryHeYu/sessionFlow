@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/HarryHeYu/sessionFlow/blob/main/LICENSE)
 ![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
 **One searchable memory layer for every AI coding agent.**
@@ -20,14 +20,14 @@ no accounts, no cloud, no telemetry.
 
 **Search. Understand. Continue. Switch agents without losing context.**
 
-![sessionFlow demo: search, timeline, continue, doctor repair](docs/assets/demo.gif)
+](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/demo.gif)
 
 Cross-agent continuity is built in: merge context across sessions and
 continue in any agent (`voyager merge` / `switch` / `continue`) — see
-[docs/ROADMAP.md](docs/ROADMAP.md) for the shipped scope and
-[docs/POST-1.0.md](docs/POST-1.0.md) for what's next.
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the shipped scope and
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md) for what's next.
 
-[中文说明](README.zh-CN.md)
+[中文说明](https://github.com/HarryHeYu/sessionFlow/blob/main/README.zh-CN.md)
 
 ## A day with sessionFlow
 
@@ -47,13 +47,13 @@ agents already wrote, normalizes them into one SQLite index you can search,
 resume from, hand off to another agent, or query straight from inside an
 agent over MCP / the DSH plugin.
 
-![Voyager architecture: 8 agents, 8 storage formats, one index](docs/screenshots/architecture.png)
+](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/architecture.png)
 
 Eight agents keep eight different formats; Voyager normalizes them into one
 SQLite index you can search, resume from, hand off to another agent, or query
 straight from inside an agent over MCP.
 
-![Voyager in action](docs/screenshots/usage.png)
+](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/usage.png)
 
 ```
 $ voyager list
@@ -63,7 +63,7 @@ a1b2c3d4-...                          zcode  2026-09-13 01:13   162  206  重构
 5e4d3c2b-...                          claude 2026-07-17 12:46    89   70  分析数据集结构并设计评测脚本
 ```
 
-Use cases live in [docs/use-cases.md](docs/use-cases.md) — lost context,
+Use cases live in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/use-cases.md) — lost context,
 agent switching, engineering memory.
 
 ## Why
@@ -133,11 +133,11 @@ voyager show --db ~/.voyager/demo.db codex:demo-auth-01   # compiled session
 The demo index (`~/.voyager/demo.db`) is separate from your real one —
 delete it whenever you like. What that looks like:
 
-![Search every AI coding conversation locally](docs/assets/search.png)
+](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/search.png)
 
-![Understand how your coding decisions evolved](docs/assets/timeline.png)
+](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/timeline.png)
 
-![Move context across agents](docs/assets/continue.png)
+](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/continue.png)
 
 All screenshots are generated from the synthetic demo
 (`scripts/make_screenshots.py`) — no real user data in this README.
@@ -192,11 +192,11 @@ automatic handoff package for the rest. `voyager continue --repo myproj
 --launch` goes straight back into a specific project; multi-session
 synthesis (`voyager merge A B C`) groups the work into a **WorkThread**
 and cross-agent switch is one command (`voyager switch codex` — lease
-aware, see [docs/ROADMAP.md](docs/ROADMAP.md)).
+aware, see ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md)).
 
 `switch`, `continue`, `handoff` and `merge` are four spellings of **one
 engine** (`continuity.handoff_thread` — see
-[docs/DECISIONS.md](docs/DECISIONS.md) D14), so they cannot drift apart. When
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DECISIONS.md) D14), so they cannot drift apart. When
 the work sits in a WorkThread, all four take the single-writer lease, prefer
 the native resume, record the pending attach that lets the next `scan` adopt
 the target agent's new session, and warn — never stash — on a dirty tree.
@@ -220,7 +220,7 @@ provider runtime state never move.
 **Everyday flow** — `brief` to see what's moving, `export` to read one
 session in full (a 2,915-message DSH session → a 20 MB Markdown file),
 `continue` or `handoff` to pick it back up. Full recipes in
-[docs/WORKFLOWS.md](docs/WORKFLOWS.md).
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/WORKFLOWS.md).
 
 Session ids are matched by prefix; if a prefix is ambiguous Voyager lists
 the candidates and exits. `resume` runs the native agent's own command
@@ -401,7 +401,7 @@ For Codex, `voyager integrate install codex` registers an absolute `SessionStart
 claude --debug hooks --init-only     # expect: Found 1 hook matchers in settings
 ```
 
-That line was observed on 2026-09-24, and the real `session_id` it carried then completed the whole chain: transcript discovered → indexed → pending row resolved → session attached to WorkThread `thr_0854d50b88`, with no Voyager command. What is **still** unproven is that the model actually *read and used* the injected context, and no provider prints `Y` — the CLI letter comes from static configuration, not from this observation. See [docs/DOGFOOD.md](docs/DOGFOOD.md#live-verification-2026-09-24--done) for the evidence table.
+That line was observed on 2026-09-24, and the real `session_id` it carried then completed the whole chain: transcript discovered → indexed → pending row resolved → session attached to WorkThread `thr_0854d50b88`, with no Voyager command. What is **still** unproven is that the model actually *read and used* the injected context, and no provider prints `Y` — the CLI letter comes from static configuration, not from this observation. See ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md#live-verification-2026-09-24--done) for the evidence table.
 
 ### What works right now ✅
 
@@ -430,7 +430,7 @@ voyager integrate status           # per-provider truth, including whether the h
 voyager integrate remove claude    # removes only Voyager's entries, leaves your hooks alone
 ```
 
-See [docs/DOGFOOD.md](docs/DOGFOOD.md) for the detailed verification procedure.
+See ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) for the detailed verification procedure.
 
 ## Integration — teach agents about Voyager
 
@@ -453,7 +453,7 @@ voyager integrate remove <provider>  # undo every step (skill + mcp + bootstrap 
 
 These commands now **auto-create** config files if they don't exist - no manual setup needed for first-time installation. Re-running is idempotent, and `install` merges rather than overwrites: your own hooks and settings are preserved, and the file is backed up before it is rewritten.
 
-For verification of actual zero-touch startup behavior, see [docs/DOGFOOD.md](docs/DOGFOOD.md) and [claude_continuity_verdict.md](claude_continuity_verdict.md).
+For verification of actual zero-touch startup behavior, see ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) and [claude_continuity_verdict.md](https://github.com/HarryHeYu/sessionFlow/blob/main/claude_continuity_verdict.md).
 
 ## Supported platforms
 
@@ -471,7 +471,7 @@ For verification of actual zero-touch startup behavior, see [docs/DOGFOOD.md](do
 Cursor and Antigravity adapters are marked experimental: Cursor reads its
 key-value store read-only and Antigravity decodes protobuf blobs
 heuristically (no public schema). Full per-field availability matrix and
-data-source paths for every tool are in [docs/RECON.md](docs/RECON.md).
+data-source paths for every tool are in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/RECON.md).
 
 ## DeepSeek Harness integration
 
@@ -523,7 +523,7 @@ at all (`:103`). The core-only run adds 16 **dependency-gated** skips — `mcp`,
 `zstandard` and `PIL` are absent, so `test_continuity_tools.py`, `test_mcp.py`,
 `test_diagram.py` and `test_dsh.py` skip. Neither class is a platform gate.
 
-CI ([.github/workflows/test.yml](.github/workflows/test.yml)) runs the suite
+CI ([.github/workflows/test.yml](https://github.com/HarryHeYu/sessionFlow/blob/main/.github/workflows/test.yml)) runs the suite
 on Python 3.10–3.13 (Linux) and 3.10/3.13 (Windows — the adapters deal with
 `%APPDATA%`, drive letters and backslashes), plus a core-only job proving the
 CLI works with zero optional dependencies. The store tests cover the
@@ -540,22 +540,22 @@ back to the source. Everything lands in a local SQLite index with FTS5
 tracked by `(mtime, size)` and re-parsed only when they change; sessions
 whose source files vanish are pruned.
 
-Details in [docs/architecture.md](docs/architecture.md),
-[docs/DECISIONS.md](docs/DECISIONS.md), [docs/API.md](docs/API.md) and
-[docs/FAQ.md](docs/FAQ.md) and everyday recipes in
-[docs/WORKFLOWS.md](docs/WORKFLOWS.md).
+Details in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/architecture.md),
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DECISIONS.md), ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/API.md) and
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/FAQ.md) and everyday recipes in
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/WORKFLOWS.md).
 
 ## What's next
 
 The Continuity Engine core is complete (see
-[docs/ROADMAP.md](docs/ROADMAP.md) for the full close-out). The
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the full close-out). The
 post-1.0 backlog — VS Code Context Composer UI, auto-clustering
 research, Claude/DSH transcript gates, scoped scan, fs-event watcher,
-PyPI/packaging polish — lives in [docs/POST-1.0.md](docs/POST-1.0.md).
+PyPI/packaging polish — lives in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md).
 
 Phased plan, CLI sketches, and the issue list:
-[docs/ROADMAP.md](docs/ROADMAP.md) · [中文](docs/ROADMAP.zh-CN.md).
+](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) · ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.zh-CN.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see ](https://github.com/HarryHeYu/sessionFlow/blob/main/LICENSE).

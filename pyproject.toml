@@ -9,6 +9,7 @@ description = "Unified local session manager for AI coding agents (Codex, Claude
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [{ name = "HarryHeYu" }]
 keywords = [
     "ai", "ai-agent", "coding-agent", "claude-code", "codex", "cursor",
     "cli", "mcp", "sqlite", "local-first", "session-search", "developer-tools",
@@ -46,10 +47,10 @@ voyager = "voyager.cli:main"
 voyager-mcp = "voyager.mcp_server:main"
 
 [tool.setuptools]
-packages = ["voyager", "voyager.adapters"]
+packages = ["voyager", "voyager.adapters", "voyager.integrations"]
 
 [tool.setuptools.package-data]
-voyager = ["SKILL.md"]
+voyager = ["SKILL.md", "integrations/*.ps1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

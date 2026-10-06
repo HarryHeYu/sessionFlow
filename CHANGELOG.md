@@ -61,6 +61,16 @@ timeline and doctor models untouched.
   embedded (no real user data), feature list covering doctor /
   verification / DSH integration
 
+### Packaging
+- Verified PyPI build metadata: authors field, `voyager.integrations`
+  subpackage + relay `.ps1` in the wheel (the session-start hooks were
+  missing from a wheel install), README references converted to absolute
+  URLs so the PyPI page renders
+- Wheel/sdist validated: `twine check` PASSED, clean-venv install smoke
+  (`voyager demo` works from the wheel), no tests/user data in artifacts
+- TestPyPI dry-run checklist at docs/pypi-checklist.md (token held by the
+  maintainer; nothing uploaded)
+
 ### Fixed
 - README Quick Start no longer suggests a non-existent `--preview` flag
 - stale dev test counts
