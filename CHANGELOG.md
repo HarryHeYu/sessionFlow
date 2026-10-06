@@ -33,6 +33,31 @@ timeline, doctor safety, verification truth, packaging.
 - retention exclusion honored on every continuity path; live-state filters
   no longer treat archived sessions as live
 
+## [1.0.0-rc2] — 2026-10-06
+
+Release candidate focused on first-time-user experience and open-source
+plumbing. No core-semantics changes: bridge schema stays v1; verification,
+timeline and doctor models untouched.
+
+### Added
+- `voyager demo`: a synthetic 4-agent / 1-WorkThread index at
+  `~/.voyager/demo.db` (separate from the real index) so the product can
+  be explored with zero agents installed; every command the verb suggests
+  is regression-tested
+- README: dual-path Quick Start (Fast Demo / Real Usage), product
+  screenshots and a typed-terminal demo GIF — all generated from the
+  synthetic demo (`scripts/make_screenshots.py`, `scripts/make_demo_gif.py`)
+- docs: use cases, public architecture page
+- CI: windows matrix widened to Python 3.10-3.13; release workflow creates
+  a GitHub Release from `v*` tags (notes from docs/releases/<tag>.md,
+  test-gated, rc tags marked pre-release)
+- community: issue templates, PR template, contributing guide with the
+  O1-O6 architecture rules, security policy, code of conduct
+
+### Fixed
+- README Quick Start no longer suggests a non-existent `--preview` flag
+- stale dev test counts
+
 ## [Unreleased]
 
 > Headline: the "Claude Code has no automatic session-start trigger" conclusion

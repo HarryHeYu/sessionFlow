@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voyager"
-version = "1.0.0rc1"
+version = "1.0.0rc2"
 description = "Unified local session manager for AI coding agents (Codex, Claude Code, ZCode, DSH, Grok, ...)"
 readme = "README.md"
 requires-python = ">=3.10"
