@@ -54,6 +54,13 @@ timeline and doctor models untouched.
 - community: issue templates, PR template, contributing guide with the
   O1-O6 architecture rules, security policy, code of conduct
 
+### Documentation
+- Chinese README synchronized with the RC1 product workflow: 10-second
+  positioning, dual-path Quick Start (Fast Demo / Real Usage, commands
+  identical to the English README), synthetic screenshots + demo GIF
+  embedded (no real user data), feature list covering doctor /
+  verification / DSH integration
+
 ### Fixed
 - README Quick Start no longer suggests a non-existent `--preview` flag
 - stale dev test counts

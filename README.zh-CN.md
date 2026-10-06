@@ -1,34 +1,59 @@
-# Voyager 🧭
+# sessionFlow 🧭
 
 [![tests](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**把你机器上所有 AI 编码 Agent 的会话历史，变成一份可查询的索引。**
+**多个 AI Coding Agent 的会话，统一索引、统一检索、统一续接。**
+（CLI 命令是 `voyager`；GitHub 仓库叫 sessionFlow）
 
-跨 Agent 接续层已内置：跨会话合并上下文，在任意 Agent 里接着干（`voyager merge` / `switch` / `continue`）——已交付范围见 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)，后续计划见 [docs/POST-1.0.md](docs/POST-1.0.md)。
+你的 AI 编码历史是碎片化的：
+
+- Codex 会话（rollout JSONL）
+- Claude Code 对话（project JSONL）
+- DSH 运行记录（zstd JSONL）
+- ZCode / Cursor / Kiro / Grok / Antigravity（SQLite、VSCDB、JSON……）
+
+sessionFlow 把它们归并成**一份本地索引**——纯本地运行，无账号、无云端、
+无遥测。
+
+**检索。理解。续接。换 Agent 不丢上下文。**
+
+![sessionFlow 演示：跨 Agent 检索、时间线、续接、doctor 修复](docs/assets/demo.gif)
+
+跨 Agent 接续层已内置：跨会话合并上下文，在任意 Agent 里接着干
+（`voyager merge` / `switch` / `continue`）——已交付范围见
+[docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md)，后续计划见
+[docs/POST-1.0.md](docs/POST-1.0.md)。
 
 [English](README.md)
 
-Voyager 读取各 Agent 已经写在本机的会话数据——Codex、Claude Code、ZCode、
-DSH（DeepSeek Harness）等——整合成一份统一的历史库：可浏览、可搜索、可导出、
-可一键恢复原 Agent 继续对话。纯本地运行，无账号、无云端、无遥测。
-
-![Voyager 架构图：8 家 Agent、8 种存储格式、一份索引](docs/screenshots/architecture.png)
-
-8 家 Agent 各写各的格式，Voyager 把它们归一化成一份 SQLite 索引：可以搜、
-可以续、可以交接给另一个 Agent，也可以让 Agent 自己通过 MCP 直接查。
-
-![Voyager 使用截图](docs/screenshots/usage.png)
+## 和 sessionFlow 一起过一天
 
 ```
-$ voyager list
-ID                                    PROV   UPDATED            MSG TOOL  TITLE
-a1b2c3d4-...                          zcode  2026-09-13 01:13   162  206  重构存储引擎的写入路径
-9f8e7d6c-...                          codex  2026-07-06 22:52    76  168  修复多线程下载器的竞态条件
-5e4d3c2b-...                          claude 2026-07-17 12:46    89   70  分析数据集结构并设计评测脚本
+上午    Codex 实现 SQLite 迁移
+下午    Claude Code 审查代码
+晚上    DSH 继续调试边界情况
+
+sessionFlow:
+  找回当时的推理        -> voyager search "sqlite migration"
+  恢复完整上下文        -> voyager continue <thread>
+  切到另一个 Agent      -> voyager handoff claude --from codex
 ```
+
+不会向任何地方上传数据：sessionFlow 只读取各 Agent 已经写好的会话文件，
+归一化成一份 SQLite 索引——可搜索、可恢复、可交接，也可以在 Agent 里
+通过 MCP 或 DSH 插件直接查询。
+
+![跨 Agent 检索](docs/assets/search.png)
+
+![编码决策如何演化](docs/assets/timeline.png)
+
+![跨 Agent 移动上下文](docs/assets/continue.png)
+
+以上截图全部由合成演示数据生成（`scripts/make_screenshots.py`）——
+README 中没有任何真实用户数据。
 
 ## 为什么需要它
 
@@ -36,11 +61,18 @@ a1b2c3d4-...                          zcode  2026-09-13 01:13   162  206  重构
 project JSONL 外加一套文件版本链，ZCode 用 SQLite，DSH 用 zstd 压缩的
 JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成**一个**可以查询的东西。
 
-- **按 repo 汇总跨 Agent 时间线**——这个项目上所有 Agent 都干了什么、什么时候干的？
-- **全库全文搜索**——找到"那条命令是哪个会话跑的"、"那个文件被谁改过"
-  （中文子串搜索可用）。
-- **真正的导出**——人类可读的 Markdown，或同时包含归一化事件与原始事件的 JSON。
-- **一键恢复**——Voyager 知道每家平台的恢复命令，直接帮你调起来。
+- **多 Agent 统一索引**——8 家 Agent 各写各的格式，归一化成一份 SQLite
+  索引；重新扫描是增量的，来源消失时历史被保留（`SOURCE_MISSING`）而非删除。
+- **全库全文检索**——找到"那条命令是哪个会话跑的"、"那个文件被谁改过"
+  （中文子串搜索可用）；导出为人类可读的 Markdown 或无损 JSON。
+- **跨 Agent 时间线与续接**——`continue` / `switch` / `handoff` / `merge`
+  生成续接上下文给下一个 Agent；租约机制保证多 Agent 不会盲写同一线程。
+- **Doctor 诊断与安全修复**——只读诊断；`--fix` 只执行白名单内的派生数据
+  修复，事务性、幂等、支持 dry-run。
+- **兼容验证**——provider 能力声明与机器本地证据分离：`declared`（实现
+  上限）、`observed`（本机证据）、`effective`（两者取弱），没有证据不抬状态。
+- **DSH 集成**——版本化 JSON bridge + MCP server，配套
+  [dsh-sessionflow 插件](https://github.com/HarryHeYu/dsh-sessionflow)。
 
 ## 安装
 
@@ -74,19 +106,26 @@ python -m pytest tests/ -q     # full dev 环境：754 collected：736 passed / 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
 用 `python -m voyager.cli` 运行。
 
-## 使用
+## 快速上手
 
-第一次使用：`voyager scan` 会遍历所有支持的 Agent 的本地存储，在
-`~/.voyager/index.db` 建立索引。之后想收录新会话就再跑一次 `scan`——
-它是增量的，只重新读取有变化的部分。想让同步完全自动，可以常驻一个
-watcher（或挂到计划任务里）：
+### 快速演示——不需要装任何 Agent（2 分钟）
+
+`voyager demo` 会生成一份**合成**演示索引：四个 Agent 在一个工作日里
+接力完成"authentication flow"。不装 Agent、不用任何真实数据：
 
 ```sh
-voyager watch --interval 300    # 每 5 分钟自动重扫，常驻运行
+voyager demo
+voyager search --db ~/.voyager/demo.db "authentication"   # 命中 2 个 Agent
+voyager search --db ~/.voyager/demo.db "JWT refresh token"
+voyager show --db ~/.voyager/demo.db codex:demo-auth-01   # 编译好的会话上下文
 ```
 
-把这条命令放进系统自启（Windows 下可直接把 `~/.voyager/watch.vbs` 放进
-启动文件夹），索引就会零人工保持最新。
+演示索引（`~/.voyager/demo.db`）与真实索引相互独立，随时可删。效果见
+上面的截图与演示动图。
+
+### 真实使用——索引你自己的 Agent（5 分钟）
+
+只要本机至少有一个 Agent 留有会话历史：
 
 ```sh
 voyager scan                # 发现并索引所有支持的 Agent 会话
@@ -95,6 +134,20 @@ voyager list --repo myproj  # 某个 repo 的会话
 voyager show <id>           # 完整时间线：消息 / reasoning / 工具调用 / 退出码
 voyager search "tensorboard"
 voyager repo E:/code/myproj # 一个 repo 的跨 Agent 时间线
+```
+
+`voyager scan` 遍历所有支持的 Agent 的本地存储，在 `~/.voyager/index.db`
+建立索引；它是增量的，只重新读取有变化的部分。想让索引零人工保持最新，
+可以常驻一个 watcher（Windows 下可直接把 `~/.voyager/watch.vbs` 放进
+启动文件夹）：
+
+```sh
+voyager watch --interval 300    # 每 5 分钟自动重扫，常驻运行
+```
+
+更多命令：
+
+```sh
 voyager export <id> --format md   # 或 --format json（含原始事件）
 voyager resume <id>         # 调起原 Agent 恢复该会话
 voyager handoff <id> --to codex   # 生成给另一个 agent 的上下文包
