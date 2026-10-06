@@ -104,27 +104,33 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # full dev env: 754 collected, 736 passed, 18 skipped
+python -m pytest tests/ -q     # full dev env: ~970 passed
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
 run it as `python -m voyager.cli`.
 
-## Usage
+## Quick Start
 
-First run: `voyager scan` walks every supported agent's local storage and
-builds the index at `~/.voyager/index.db`. After that, re-run `scan`
-whenever you want to pick up new sessions — it is incremental and only
-re-reads what changed. To make syncing fully automatic, keep a watcher
-running (or put it in a scheduled task):
+### Fast Demo — no agents needed (2 minutes)
+
+`voyager demo` seeds a small **synthetic** index — four agents working one
+"authentication flow" thread across a working day. No real agent, no real
+data, nothing to install beyond sessionFlow itself:
 
 ```sh
-voyager watch --interval 300    # re-scan every 5 minutes, forever
+voyager demo
+voyager search --db ~/.voyager/demo.db "authentication"   # hits 3 agents
+voyager search --db ~/.voyager/demo.db "JWT refresh token"
+voyager show --db ~/.voyager/demo.db codex:demo-auth-01   # compiled session
 ```
 
-Put the command in your OS autostart (or the provided
-`~/.voyager/watch.vbs` in the Windows Startup folder) and the index stays
-current with zero manual steps.
+The demo index (`~/.voyager/demo.db`) is separate from your real one —
+delete it whenever you like.
+
+### Real Usage — your own agents (5 minutes)
+
+Once at least one of your agents has session history on this machine:
 
 ```sh
 voyager scan                # discover + index every supported agent
@@ -133,6 +139,17 @@ voyager list --repo myproj  # sessions for one repo
 voyager show <id>           # full message / tool-call timeline
 voyager search "tensorboard"
 voyager repo E:/code/myproj # cross-agent timeline for a repository
+```
+
+`voyager scan` walks every supported agent's local storage and builds the
+index at `~/.voyager/index.db`; it is incremental and only re-reads what
+changed. To keep the index current with zero manual steps, run a watcher
+in the background (OS autostart, or the provided `~/.voyager/watch.vbs`
+in the Windows Startup folder):
+
+```sh
+voyager watch --interval 300    # re-scan every 5 minutes, forever
+```
 voyager export <id> --format md   # or --format json (includes raw events)
 voyager resume <id>         # launches the native agent on that session
 voyager handoff <id> --to codex   # context package for another agent
