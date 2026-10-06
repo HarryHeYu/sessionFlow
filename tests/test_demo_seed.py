@@ -55,10 +55,11 @@ def test_printed_commands_are_real_invocations(tmp_path, monkeypatch, capsys):
     assert str(index) in out
     for line in out.splitlines():
         s = line.strip()
-        if s.startswith("voyager "):
+        if s.startswith("voyager ") and "&&" not in s:
             # shlex keeps quoted phrases ("JWT refresh token") as one token;
             # strip the display quotes around paths/queries, and run from the
-            # repo root (the conftest chdir'd us into an isolated dir)
+            # repo root (the conftest chdir'd us into an isolated dir).
+            # Compound `a && b` guidance lines are shell-level, skipped here.
             import shlex
             argv = [tok.strip('"') for tok in shlex.split(s, posix=False)]
             rc = subprocess.run(
