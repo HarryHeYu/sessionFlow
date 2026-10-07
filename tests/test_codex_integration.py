@@ -284,7 +284,8 @@ def _seed_relay_home(request, tmp_path):
     from voyager.store import Store
     db = Path.home() / ".voyager" / "index.db"
     store = Store(db)
-    repo = "E:/code/voyager"
+    # Cross-platform repo path using tmp_path instead of hardcoded E:\ drive
+    repo = str(tmp_path / "relay-test-repo")
     tid = store.thread_create(repo_root=repo, title="relay thread",
                               goal="continue across agents")
     src = tmp_path / "relay_seed.jsonl"
