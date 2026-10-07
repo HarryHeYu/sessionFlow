@@ -14,6 +14,7 @@ real scan's results.  Delete ``demo.db`` whenever you like.
 from __future__ import annotations
 
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -23,7 +24,9 @@ from .store import Store
 
 DEMO_DB_NAME = "demo.db"
 
-REPO_ROOT = "E:/demo-project"
+# Cross-platform temporary directory for demo synthetic data
+# Uses system temp dir instead of hardcoding E:\ drive
+REPO_ROOT = Path(tempfile.gettempdir()) / "sessionflow-demo-project"
 
 
 def _ts(hour: int, minute: int = 0) -> float:
@@ -53,13 +56,13 @@ def _story() -> List[Dict[str, Any]]:
         tool_name="shell_command", tool_call_id="c1",
         command="python -m pytest tests/test_auth.py",
         tool_input='{"command":"python -m pytest tests/test_auth.py"}',
-        file_path="E:/demo-project/auth.py")
+        file_path="sessionflow-demo-project/auth.py")
     add(sid, _ts(9, 25), 4, "tool_result", "tool", tool_call_id="c1",
         tool_output="7 passed in 1.2s", exit_code=0)
     add(sid, _ts(9, 30), 5, "assistant", "assistant",
         "Decision: use JWT refresh tokens. auth.py issues access tokens; "
         "token.py owns rotation and revocation.", 
-        file_path="E:/demo-project/token.py")
+        file_path="sessionflow-demo-project/token.py")
 
     # Afternoon — Claude Code reviews it
     sid = "claude:demo-auth-02"
