@@ -642,7 +642,8 @@ def test_home_flag_expands_tilde_for_status(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     assert main(["integrate", "status", "--home", "~"]) == 0
-    assert seen["home"] == Path.home()
+    # os.path.expanduser returns str, but we compare against Path for consistency
+    assert Path(seen["home"]) == Path.home()
 
 
 def test_home_flag_expands_tilde_for_install(monkeypatch, tmp_path):
@@ -658,11 +659,75 @@ def test_home_flag_expands_tilde_for_install(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     assert main(["integrate", "install", "grok", "--home", "~"]) == 0
-    assert seen["home"] == Path.home()
+    # os.path.expanduser returns str, compare against Path for consistency
+    assert Path(seen["home"]) == Path.home()
+
+
+def test_integrate_status_valid_provider(monkeypatch):
+    """Verify that valid provider arguments are accepted."""
+    from voyager import skill
+    
+    results = []
+    
+    def spy(providers=None, home=None):
+        results.append({"providers": providers, "home": home})
+        return []
+    
+    monkeypatch.setattr(skill, "check_integration_status", spy)
+    
+    # Single valid provider
+    assert main(["integrate", "status", "codex"]) == 0
+    assert len(results) == 1
+    assert results[0]["providers"] == ["codex"]
+    
+    # Multiple valid providers
+    assert main(["integrate", "status", "codex", "grok"]) == 0
+    assert results[-1]["providers"] == ["codex", "grok"]
+
+
+def test_integrate_status_invalid_provider_rejected(monkeypatch):
+    """Verify that invalid provider arguments are rejected with exit code 2."""
+    # No need to mock - should fail at argument validation
+    assert main(["integrate", "status", "invalid_provider"]) != 0
+    assert main(["integrate", "status", "nonexistent"]) != 0
+
+
+def test_integrate_status_no_providers_omitted(monkeypatch):
+    """Verify that omitting providers shows all."""
+    from voyager import skill
+    
+    seen = {}
+    
+    def spy(providers=None, home=None):
+        seen["providers"] = providers
+        return []
+    
+    monkeypatch.setattr(skill, "check_integration_status", spy)
+    assert main(["integrate", "status"]) == 0
+    assert seen["providers"] is None
+
+
+def test_integrate_status_home_with_provider(monkeypatch):
+    """Verify --home works correctly with provider arguments."""
+    from voyager import skill
+    
+    seen = {}
+    
+    def spy(providers=None, home=None):
+        seen["home"] = home
+        seen["providers"] = providers
+        return []
+    
+    monkeypatch.setattr(skill, "check_integration_status", spy)
+    
+    assert main(["integrate", "status", "--home", "~", "codex"]) == 0
+    assert Path(seen["home"]) == Path.home()
+    assert seen["providers"] == ["codex"]
 
 
 def test_db_flag_expands_tilde(monkeypatch):
     from voyager import api
+
 
     seen = {}
 

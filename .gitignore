@@ -13,3 +13,6 @@ exports/
 handoff-*.md
 # agent-local working memory (session notes, environment lessons) — not product code
 .workbuddy-ai/
+# separate repo - plugin for DSH
+dsh-sessionflow/
+

@@ -772,6 +772,17 @@ def cmd_integrate_status(args) -> int:
     """Check integration status for providers."""
     from .skill import check_integration_status
 
+    VALID_PROVIDERS = ["codex", "claude", "grok", "zcode", "cursor",
+                       "kiro", "antigravity", "dsh"]
+    
+    # Validate provider arguments if any were provided
+    if args.providers:
+        for p in args.providers:
+            if p not in VALID_PROVIDERS:
+                print(f"voyager integrate status: error: argument providers: "
+                      f"invalid choice: {p!r} (choose from {', '.join(repr(x) for x in VALID_PROVIDERS)})")
+                return 2
+    
     providers = args.providers if args.providers else None
     results = check_integration_status(providers=providers,
                                         home=Path(args.home) if args.home else None)
@@ -2320,8 +2331,6 @@ def main(argv=None) -> int:
     # voyager integrate status
     istp = isp.add_parser("status", help="check integration status for providers")
     istp.add_argument("providers", nargs="*", default=None,
-                      choices=["codex", "claude", "grok", "zcode", "cursor",
-                               "kiro", "antigravity", "dsh"],
                       help="providers to check; omit for all")
     istp.add_argument("--home", help="override HOME for paths (testing)")
     istp.add_argument("--json", action="store_true")

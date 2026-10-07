@@ -32,9 +32,9 @@ dependencies = []
 
 [project.optional-dependencies]
 dsh = ["zstandard>=0.22"]
-mcp = ["mcp>=1.2"]
-all = ["zstandard>=0.22", "mcp>=1.2"]
-dev = ["pytest>=8", "zstandard>=0.22", "mcp>=1.2", "pillow>=10"]
+mcp = ["mcp>=1.2", "pydantic>=2.5,<3"]
+all = ["zstandard>=0.22", "mcp>=1.2", "pydantic>=2.5,<3"]
+dev = ["pytest>=8", "zstandard>=0.22", "mcp>=1.2", "pillow>=10", "pydantic>=2.5,<3"]
 
 [project.urls]
 Homepage = "https://github.com/HarryHeYu/sessionFlow"
