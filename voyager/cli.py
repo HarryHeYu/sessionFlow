@@ -113,38 +113,40 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
                 print(f"  {ad.provider}: no sources found")
             continue
 
-        # Optimize N+1 fingerprint checks via batching
-        if not force:
+        for src in sources:
             try:
-                # Batch all source change checks in one query
-                batch_paths = list(sources)
-                batch_fps = [store.source_fingerprint(p) for p in batch_paths]
-                changed_map = store._batch_check_sources(ad.provider, batch_paths, batch_fps)
-                
-                changed_count = sum(1 for p in batch_paths if changed_map[str(p)])
-                changed += changed_count
-                rescan = any(changed_map[str(p)] for p in batch_paths)
-            except Exception:
-                # Fallback to individual checks on error
-                for src in sources:
-                    try:
-                        if store.source_changed(ad.provider, src):
-                            changed += 1
-                            rescan = True
-                    except OSError:
-                        continue
-        else:
-            # Force mode: re-read everything, just count it as all changed
-            changed = len(sources)
-            rescan = True
-        
+                if store.source_changed(ad.provider, src):
+                    changed += 1
+                    rescan = True
+            except OSError:
+                continue
+
+        # Sessions whose sources are still on disk survive pruning even when
+        # they were skipped (unchanged) or failed to parse this round; only
+        # sources that vanished from disk release their sessions.
         disk_paths = {str(p) for p in sources}
-        
+
         if not rescan:
             skip = len(sources)
         elif multi:
-            bundles = ad.scan((lambda p, f: True) if force
-                              else store.source_changed)
+            # one artifact (SQLite DB) -> many sessions; scan() returns ALL
+            # bundles exactly once — never call it inside a per-source loop.
+            # If the artifact is temporarily unreadable (locked DB) treat the
+            # round as skipped instead of pruning everything it owns.
+            try:
+                # `--force` means "re-read everything", and an adapter's own
+                # per-file fingerprint check is exactly what force is meant to
+                # bypass.  Without this, force only made the pipeline *call*
+                # scan(); the adapter still skipped every unchanged file, so a
+                # session whose source was recorded but never indexed could never
+                # come back.
+                bundles = ad.scan((lambda p, f: True) if force
+                                  else store.source_changed)
+            except Exception as e:
+                print(f"  ! {ad.provider}: scan failed ({e}); keeping existing index",
+                      file=sys.stderr)
+                bundles = None
+                skip = len(sources)
             if bundles is not None:
                 anchor = sources[0]
                 for bundle in bundles:
@@ -156,26 +158,29 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
                     new += 1
                     evt += len(bundle["events"])
         else:
-            for i, src in enumerate(sources):
-                if force or changed_map[str(src)]:
-                    try:
-                        result = ad.parse(src)
-                    except Exception as e:
-                        print(f"  ! {src.name}: {e}", file=sys.stderr)
+            for src in sources:
+                try:
+                    if not force and not store.source_changed(ad.provider, src):
+                        skip += 1
                         continue
-                    if not result:
-                        continue
-                    if "__error__" in result:
-                        print(f"  ! {src.name}: {result['__error__']}", file=sys.stderr)
-                        continue
-                    store.replace_session(
-                        result["session"], result["events"], ad.provider,
-                        src, result.get("extra_sources"),
-                    )
-                    new += 1
-                    evt += len(result["events"])
-                else:
-                    skip += 1
+                except OSError:
+                    continue
+                try:
+                    result = ad.parse(src)
+                except Exception as e:
+                    print(f"  ! {src.name}: {e}", file=sys.stderr)
+                    continue
+                if not result:
+                    continue
+                if "__error__" in result:
+                    print(f"  ! {src.name}: {result['__error__']}", file=sys.stderr)
+                    continue
+                store.replace_session(
+                    result["session"], result["events"], ad.provider,
+                    src, result.get("extra_sources"),
+                )
+                new += 1
+                evt += len(result["events"])
 
         gone = store.prune_missing_sessions(ad.provider, disk_paths)
         if gone and not quiet:

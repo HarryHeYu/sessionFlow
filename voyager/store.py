@@ -401,7 +401,7 @@ class Store:
 
     def source_changed(self, provider: str, path: Path) -> bool:
         """A path is unchanged if ANY row for it carries the current fingerprint.
-        
+
         Multi-session artifacts have one row per (path, sid); single-session
         artifacts have exactly one.
         """
@@ -411,47 +411,6 @@ class Store:
             (provider, str(path), mtime, size),
         ).fetchone()
         return row is None
-
-    # Batch optimization helper
-    def _batch_check_sources(
-        self, 
-        provider: str, 
-        paths: List[Path], 
-        fingerprints: List[Tuple[float, int]]
-    ) -> Dict[str, bool]:
-        """Batch check multiple paths using IN() clause.
-        
-        Returns dict mapping path -> True if changed, False if unchanged.
-        Uses SQLite IN() clause with configurable batch size to avoid
-        parameter limits while reducing N+1 query pattern.
-        """
-        if not paths:
-            return {}
-        
-        BATCH_SIZE = 900  # Conservative limit for SQL variable constraints
-        results = {}
-        
-        for i in range(0, len(paths), BATCH_SIZE):
-            batch_paths = paths[i:i + BATCH_SIZE]
-            batch_fps = fingerprints[i:i + BATCH_SIZE]
-            
-            placeholders = ",".join(["(?, ?, ?)"] * len(batch_paths))
-            query = f"""
-                SELECT path FROM sources 
-                WHERE provider=? AND (path, mtime, size) IN ({placeholders})
-            """.strip()
-            
-            params = [provider]
-            for p, (mtime, size) in zip(batch_paths, batch_fps):
-                params.extend([str(p), mtime, size])
-            
-            existing_rows = self.con.execute(query, tuple(params)).fetchall()
-            existing_paths = {row["path"] for row in existing_rows}
-            
-            for p in batch_paths:
-                results[str(p)] = str(p) not in existing_paths
-        
-        return results
 
     # -- writing -----------------------------------------------------------
 
