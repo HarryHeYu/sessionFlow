@@ -327,33 +327,21 @@ _STATUS_EVENT = {
 }
 
 
-# SQLite connection with query counting for performance monitoring
-class TrackedConnection(sqlite3.Connection):
-    """SQLite connection that tracks query execution count."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._query_count = 0
-        
-    def execute(self, sql, *parameters):
-        self._query_count += 1
-        return super().execute(sql, *parameters)
-    
-    @property
-    def query_count(self) -> int:
-        return self._query_count
-
-
 class Store:
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path) if db_path else default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Create tracked connection with query instrumentation
-        conn = TrackedConnection(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        self.con = conn
-        
-        # Migration logic...
+        self.con = sqlite3.connect(str(self.db_path))
+        self.con.row_factory = sqlite3.Row
+        # WAL + relaxed sync: bulk re-indexing does hundreds of MB in
+        # many small transactions; the delete-journal default turns each
+        # commit into a double-fsync on a growing file.
+        self.con.execute("PRAGMA journal_mode=WAL")
+        self.con.execute("PRAGMA synchronous=NORMAL")
+        self.con.execute("PRAGMA cache_size=-64000")   # 64MB page cache
+        # migration: pre-0.1.1 sources had PK (provider, path) only, which
+        # collapsed multi-session artifacts (one SQLite DB -> N sessions)
+        # into a single row and let prune wipe sessions on unchanged scans.
         pk_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sources)") if r[5]]
         if pk_cols and "sid" not in pk_cols:
             self.con.execute("DROP TABLE sources")
@@ -411,43 +399,18 @@ class Store:
         st = os.stat(path)
         return st.st_mtime, st.st_size
 
-    # Batch optimization for multiple source checks
-    def _batch_check_sources(self, 
-                             provider: str, 
-                             paths: List[Path],
-                             fingerprints: List[Tuple[float, int]]) -> Dict[str, bool]:
-        """Batch check if multiple paths have changed.
-        
-        Replaces N individual queries with a single batch query using IN clause.
-        Returns dict mapping path -> True if changed, False if unchanged.
+    def source_changed(self, provider: str, path: Path) -> bool:
+        """A path is unchanged if ANY row for it carries the current fingerprint.
+
+        Multi-session artifacts have one row per (path, sid); single-session
+        artifacts have exactly one.
         """
-        if not paths:
-            return {}
-        
-        BATCH_SIZE = 900
-        results = {}
-        
-        for i in range(0, len(paths), BATCH_SIZE):
-            batch_paths = paths[i:i + BATCH_SIZE]
-            batch_fps = fingerprints[i:i + BATCH_SIZE]
-            
-            placeholders = ",".join(["(?, ?, ?)"] * len(batch_paths))
-            query = f"""
-                SELECT path FROM sources 
-                WHERE provider=? AND (path, mtime, size) IN ({placeholders})
-            """.strip()
-            
-            params = [provider]
-            for p, (mtime, size) in zip(batch_paths, batch_fps):
-                params.extend([str(p), mtime, size])
-            
-            existing_rows = self.con.execute(query, tuple(params)).fetchall()
-            existing_paths = {row["path"] for row in existing_rows}
-            
-            for p in batch_paths:
-                results[str(p)] = str(p) not in existing_paths
-        
-        return results
+        mtime, size = self.source_fingerprint(path)
+        row = self.con.execute(
+            "SELECT 1 FROM sources WHERE provider=? AND path=? AND mtime=? AND size=? LIMIT 1",
+            (provider, str(path), mtime, size),
+        ).fetchone()
+        return row is None
 
     # -- writing -----------------------------------------------------------
 
