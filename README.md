@@ -20,12 +20,12 @@ no accounts, no cloud, no telemetry.
 
 **Search. Understand. Continue. Switch agents without losing context.**
 
-](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/demo.gif)
+![sessionFlow demo: search, timeline, continue, doctor repair](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/demo.gif)
 
 Cross-agent continuity is built in: merge context across sessions and
 continue in any agent (`voyager merge` / `switch` / `continue`) — see
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the shipped scope and
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md) for what's next.
+[docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the shipped scope and
+[docs/POST-1.0.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md) for what's next.
 
 [中文说明](https://github.com/HarryHeYu/sessionFlow/blob/main/README.zh-CN.md)
 
@@ -47,13 +47,13 @@ agents already wrote, normalizes them into one SQLite index you can search,
 resume from, hand off to another agent, or query straight from inside an
 agent over MCP / the DSH plugin.
 
-](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/architecture.png)
+![Voyager architecture: 8 agents, 8 storage formats, one index](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/architecture.png)
 
 Eight agents keep eight different formats; Voyager normalizes them into one
 SQLite index you can search, resume from, hand off to another agent, or query
 straight from inside an agent over MCP.
 
-](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/usage.png)
+![Voyager in action](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/usage.png)
 
 ```
 $ voyager list
@@ -133,11 +133,11 @@ voyager show --db ~/.voyager/demo.db codex:demo-auth-01   # compiled session
 The demo index (`~/.voyager/demo.db`) is separate from your real one —
 delete it whenever you like. What that looks like:
 
-](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/search.png)
+![Search every AI coding conversation locally](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/search.png)
 
-](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/timeline.png)
+![Understand how your coding decisions evolved](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/timeline.png)
 
-](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/continue.png)
+![Move context across agents](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/continue.png)
 
 All screenshots are generated from the synthetic demo
 (`scripts/make_screenshots.py`) — no real user data in this README.
@@ -196,7 +196,7 @@ aware, see ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md)
 
 `switch`, `continue`, `handoff` and `merge` are four spellings of **one
 engine** (`continuity.handoff_thread` — see
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DECISIONS.md) D14), so they cannot drift apart. When
+[docs/DECISIONS.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DECISIONS.md) D14), so they cannot drift apart. When
 the work sits in a WorkThread, all four take the single-writer lease, prefer
 the native resume, record the pending attach that lets the next `scan` adopt
 the target agent's new session, and warn — never stash — on a dirty tree.
@@ -220,7 +220,7 @@ provider runtime state never move.
 **Everyday flow** — `brief` to see what's moving, `export` to read one
 session in full (a 2,915-message DSH session → a 20 MB Markdown file),
 `continue` or `handoff` to pick it back up. Full recipes in
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/WORKFLOWS.md).
+[docs/WORKFLOWS.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/WORKFLOWS.md).
 
 Session ids are matched by prefix; if a prefix is ambiguous Voyager lists
 the candidates and exits. `resume` runs the native agent's own command
@@ -541,20 +541,20 @@ tracked by `(mtime, size)` and re-parsed only when they change; sessions
 whose source files vanish are pruned.
 
 Details in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/architecture.md),
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DECISIONS.md), ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/API.md) and
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/FAQ.md) and everyday recipes in
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/WORKFLOWS.md).
+[docs/DECISIONS.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DECISIONS.md), [docs/API.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/API.md) and
+[docs/FAQ.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/FAQ.md) and everyday recipes in
+[docs/WORKFLOWS.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/WORKFLOWS.md).
 
 ## What's next
 
 The Continuity Engine core is complete (see
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the full close-out). The
+[docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the full close-out). The
 post-1.0 backlog — VS Code Context Composer UI, auto-clustering
 research, Claude/DSH transcript gates, scoped scan, fs-event watcher,
 PyPI/packaging polish — lives in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md).
 
 Phased plan, CLI sketches, and the issue list:
-](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) · ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.zh-CN.md).
+[docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) · [中文](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.zh-CN.md).
 
 ## License
 
