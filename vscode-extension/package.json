@@ -1,7 +1,7 @@
 {
   "name": "voyager-sidebar",
   "displayName": "Voyager — Cross-Agent Continuity",
-  "description": "Browse WorkThreads and agent sessions indexed by voyager, preview continuation bundles with token estimates, and launch a target agent. Scaffold client for the voyager local API.",
+  "description": "Browse WorkThreads and agent sessions indexed by voyager, compose and preview continuation bundles with token estimates, view a WorkThread's timeline across every agent that touched it, and switch a thread to another agent.",
   "version": "0.1.0",
   "publisher": "HarryHeYu",
   "license": "MIT",

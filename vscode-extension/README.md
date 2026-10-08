@@ -1,8 +1,12 @@
-# Voyager VS Code extension — SCAFFOLD
+# Voyager VS Code extension
 
-This directory is the **Phase 7 client** for the voyager local API
-(`voyager api serve`, stdio JSON-lines). It is a thin client: all logic
-(indexing, ranking, budget packing, lease handling) lives in voyager core.
+The **Phase 7 client** for the voyager local API (`voyager api serve`, stdio
+JSON-lines). It is a thin client: all logic (indexing, ranking, budget packing,
+lease handling) lives in voyager core.
+
+Shipped: the WorkThreads tree view, Overview, bundle preview, the Context
+Composer, the WorkThread timeline, and one-click switch. Not shipped:
+marketplace listing and a published VSIX — see *What is still pending*.
 
 ## What works today
 
@@ -31,14 +35,18 @@ This directory is the **Phase 7 client** for the voyager local API
     `voyager merge <ids> …`, ready to paste
   - `Copy bundle` — the rendered Markdown
 
-## What is scaffold / pending
+## What is still pending
 
-- One-click Switch: the Composer deliberately hands you a command instead of
-  launching. `bundle_preview` writes nothing, and the lease flow (D13) is what
-  decides who may write a WorkThread — starting an agent from a webview would
-  route around the one safety property the core actually guarantees.
-- timeline view mixing agent events with git history
 - packaging: marketplace listing, published VSIX
+- timeline view mixing agent events with git history
+
+## One-click Switch — shipped, and how it stays safe
+
+`Voyager: Switch WorkThread to another agent` (the inline action on a thread in
+the WorkThreads view) is shipped. It does **not** launch the agent from the
+webview: it runs `voyager switch <agent>` in a terminal. The lease flow (D13)
+is what decides who may write a WorkThread, and starting an agent directly from
+a webview would route around the one safety property the core guarantees.
 
 ## Timeline: what it will and will not do
 
