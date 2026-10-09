@@ -32,7 +32,7 @@ from voyager.store import Store
 
 def test_synthesis_chronological_overlay_and_superseding(synthetic_trio):
     """Test the core overlay rule: newest session's 'where we stopped' is current state;
-    older conclusions appear under 'Prior assistant conclusions (may be superseded)'
+    older conclusions appear under 'Other sessions' conclusions'
     and are not confused with open/active options.
     """
     store, rows = synthetic_trio
@@ -45,20 +45,20 @@ def test_synthesis_chronological_overlay_and_superseding(synthetic_trio):
     assert "We need a structured data format for config." in bundle
     assert "Implement Approach Y (JSON format)." in bundle
 
-    # 2. Current verified state
-    assert "## Current verified state" in bundle
+    # 2. Latest assistant conclusion
+    assert "## Latest assistant conclusion" in bundle
     assert "active session: `grok` `sess-3`" in bundle
     assert "Approach Y implemented: JSON parser complete" in bundle
 
     # 3. Prior conclusions section: must record superseded older proposals with source ids
-    assert "## Prior assistant conclusions (may be superseded)" in bundle
+    assert "## Other sessions' conclusions" in bundle
     assert "`[codex:sess-1]`" in bundle
     assert "I propose Approach X" in bundle
     assert "`[claude:sess-2]`" in bundle
     assert "Rejected Approach X" in bundle
 
-    # Concat-regression test: Approach X must NOT appear in Current verified state
-    state_section = bundle.split("## Current verified state")[1].split("##")[0]
+    # Concat-regression test: Approach X must NOT appear in Latest assistant conclusion
+    state_section = bundle.split("## Latest assistant conclusion")[1].split("##")[0]
     assert "Approach Y" in state_section
     assert "Approach X" not in state_section
 
@@ -452,7 +452,7 @@ class TestTieredBundle:
             "\n"
             "Ship the tiered bundle skeleton.\n"
             "\n"
-            "## Current verified state\n"
+            "## Latest assistant conclusion\n"
             "\n"
             "(no assistant conclusion captured in the active session)\n"
             "\n"
@@ -481,7 +481,7 @@ class TestTieredBundle:
         flat = build_continuation_bundle(store, rows, live_git=False)
         out = build_tiered_bundle(store, thread, members, rows)
         for flat_marker in ("# Continuation Bundle",
-                            "## Current verified state",
+                            "## Latest assistant conclusion",
                             "## Evidence & Provenance"):
             assert flat_marker in flat       # the flat path still carries them
             assert flat_marker not in out    # ...and the tiered path inlines none of it

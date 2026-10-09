@@ -34,9 +34,11 @@ def _sample_bundle() -> str:
         "",
         "**Primary user goal:** fix CI on main",
         "",
-        "## Current verified state",
+        "## Latest assistant conclusion",
         "",
-        "**Where work stopped (active session: `codex` `ci-1`):**",
+        "**Where work stopped (active session: `codex` `ci-1`) -- that "
+        "session's latest conclusion, read as what it said rather than as "
+        "verified fact:**",
         "",
         "pytest run is red; workflow yml edited but unpushed.",
         "",
@@ -52,7 +54,7 @@ def _sample_bundle() -> str:
         "- [codex:ci#2] (tool_call, score 4.1) python -m pytest -q",
         "- [codex:ci#3] (tool_result, score 3.9) FAILED tests/test_ci.py",
         "",
-        "## Prior assistant conclusions (may be superseded)",
+        "## Other sessions' conclusions",
         "",
         "- `claude:readme` (2026-09-13): README polished",
         "",
@@ -163,7 +165,7 @@ def test_tight_budget_keeps_priority_sections():
     b = _sample_bundle()
     packed, info = apply_budget(b, 900)
     assert "## Goal" in packed
-    assert "## Current verified state" in packed
+    assert "## Latest assistant conclusion" in packed
     assert "## Evidence & Provenance" in packed, "provenance header must survive"
     assert "## Budget notes" in packed
     assert ("Dropped section(s):" in packed

@@ -282,7 +282,7 @@ def test_continuation_context_no_goal_compatible(store):
                                    sync=False)
     ctx = res["context"]
     assert "## Goal-ranked evidence" not in ctx   # no goal → no ranked section
-    assert "## Current verified state" in ctx      # core sections still there
+    assert "## Latest assistant conclusion" in ctx  # core sections still there
 
 
 def test_continuation_context_auto_attaches_own_session(store):

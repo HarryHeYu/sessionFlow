@@ -602,8 +602,14 @@ def build_continuation_bundle(
                 f.provenance, f.kind, score, head))
         L.append("")
 
-    # ---- 2. Current verified state (newest session wins) ----------------
-    L.append("## Current verified state")
+    # ---- 2. Latest assistant conclusion (newest session first) -----------
+    # NOT "verified state".  What follows is the active session's last
+    # assistant message, which may be a proposal, an answer, or an opinion --
+    # nothing here has been checked against tool output or the repository.  The
+    # sections that do carry evidence (repository snapshot, files, commands,
+    # errors) are further down and are labelled as such.  Calling this
+    # "verified" invited an agent to repeat an unverified claim as fact.
+    L.append("## Latest assistant conclusion")
     L.append("")
     latest_asst = [
         ev for ev in sess_events[latest_row["id"]]
@@ -612,7 +618,8 @@ def build_continuation_bundle(
     if latest_asst:
         L.append(
             f"**Where work stopped (active session: `{latest_row['provider']}` "
-            f"`{latest_row['native_id'][:24]}`):**"
+            f"`{latest_row['native_id'][:24]}`) -- that session's latest "
+            f"conclusion, read as what it said rather than as verified fact:**"
         )
         L.append("")
         L.append(latest_asst[-1]["content"][:_ASST_MAX])
@@ -621,9 +628,12 @@ def build_continuation_bundle(
         L.append("(no assistant conclusion captured in the active session)")
         L.append("")
 
-    # ---- 3. Prior assistant conclusions (may be superseded) -------------
-    # Chronological overlay rule: older proposals / conclusions are marked
-    # superseded so they cannot be confused with open/active options.
+    # ---- 3. Other sessions' conclusions (same standing, not superseded) ---
+    # These used to be filed under "may be superseded", which silently
+    # demoted an older session's outstanding work the moment a newer session
+    # said anything at all.  A newer session is not evidence that an older one
+    # was wrong: both are assistant statements, and both are listed with their
+    # source so a conflict stays visible instead of being flattened.
     older_conclusions: List[str] = []
     for r in sorted_rows[:-1]:
         asst = [
@@ -638,11 +648,13 @@ def build_continuation_bundle(
             )
 
     if older_conclusions:
-        L.append("## Prior assistant conclusions (may be superseded)")
+        L.append("## Other sessions' conclusions")
         L.append("")
         L.append(
-            "> Note: These conclusions are from earlier sessions. If they conflict "
-            "with the active session above, the active session takes precedence."
+            "> Note: These are the other sessions' latest conclusions. A newer "
+            "session is not automatically more correct -- where they disagree "
+            "with the section above, keep both readings and check the repository "
+            "snapshot, files and commands below before deciding."
         )
         L.append("")
         for item in older_conclusions:

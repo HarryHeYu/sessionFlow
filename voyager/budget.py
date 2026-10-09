@@ -93,11 +93,11 @@ def resolve_auto_budget(target: Optional[str]) -> int:
 SECTION_PRIORITY = [
     "## Goal",
     "## User goal / instructions",
-    "## Current verified state",
+    "## Latest assistant conclusion",
     "## Where the work stopped",
     "## Current repository state (live snapshot)",
     "## Goal-ranked evidence",
-    "## Prior assistant conclusions",
+    "## Other sessions' conclusions",
     "## Decisions",
     "## Errors encountered",
     "## Files touched across sessions",
