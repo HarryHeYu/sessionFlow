@@ -47,6 +47,58 @@ _MAX_COMMANDS = 30
 _MAX_ERRORS = 15
 _MAX_FILES = 80
 
+#: Assistant messages that carry a proposal or an open item are kept in
+#: addition to the session's final message.  Without this a session whose last
+#: message is only a progress note loses the alternative it proposed earlier
+#: and the work it left unfinished -- issue #14.  Deterministic string
+#: matching, no model and no embeddings.
+_SIGNAL_PROPOSAL = ("propose", "proposing", "recommend", "suggest", "instead",
+                    "alternative", "option")
+_SIGNAL_OPEN = ("not implemented", "still missing", "still open", "still to",
+                "not done", "unfinished", "todo", "remaining", "yet to",
+                "not yet", "have not", "has not", "haven't", "hasn't")
+
+#: Extra assistant messages kept per session, beyond its final one.
+_EXTRA_ASST_PER_SESSION = 3
+
+
+def _signal_tag(text: str) -> str:
+    """Classify an assistant message for the bundle, without asserting truth."""
+    low = text.lower()
+    if any(s in low for s in _SIGNAL_OPEN):
+        return "open"
+    if any(s in low for s in _SIGNAL_PROPOSAL):
+        return "proposal"
+    return "earlier"
+
+
+def _select_assistant(events, extra: int = _EXTRA_ASST_PER_SESSION):
+    """Pick the assistant messages a reader needs, newest first.
+
+    Always the final message (that is where a session stopped), plus up to
+    `extra` earlier ones that carry a proposal or an open item.  Returns
+    [(event, tag)] with tag in {"latest", "proposal", "open", "earlier"}.
+
+    The tag describes what the message *is* -- a proposal, an open item -- not
+    whether it is true or settled.
+    """
+    asst = [ev for ev in events if ev["kind"] == "assistant" and ev["content"]]
+    if not asst:
+        return []
+    out = [(asst[-1], "latest")]
+    seen = {id(asst[-1])}
+    for ev in reversed(asst[:-1]):
+        if len(out) > extra:
+            break
+        low = ev["content"].lower()
+        if not any(s in low for s in _SIGNAL_PROPOSAL + _SIGNAL_OPEN):
+            continue
+        if id(ev) in seen:
+            continue
+        seen.add(id(ev))
+        out.append((ev, _signal_tag(ev["content"])))
+    return out
+
 
 def get_bundles_dir() -> Path:
     """Return ~/.voyager/bundles/ (created if missing)."""
@@ -611,18 +663,22 @@ def build_continuation_bundle(
     # "verified" invited an agent to repeat an unverified claim as fact.
     L.append("## Latest assistant conclusion")
     L.append("")
-    latest_asst = [
-        ev for ev in sess_events[latest_row["id"]]
-        if ev["kind"] == "assistant" and ev["content"]
-    ]
-    if latest_asst:
+    picked = _select_assistant(sess_events[latest_row["id"]])
+    if picked:
         L.append(
             f"**Where work stopped (active session: `{latest_row['provider']}` "
             f"`{latest_row['native_id'][:24]}`) -- that session's latest "
             f"conclusion, read as what it said rather than as verified fact:**"
         )
         L.append("")
-        L.append(latest_asst[-1]["content"][:_ASST_MAX])
+        if len(picked) == 1:
+            L.append(picked[0][0]["content"][:_ASST_MAX])
+        else:
+            # More than one message matters, so label each by what it is.
+            # "open" is an unfinished item, not a completed claim.
+            for ev, tag in picked:
+                snippet = ev["content"].strip().replace("\n", " ")[:_ASST_MAX]
+                L.append(f"- **{tag}:** {snippet}")
         L.append("")
     else:
         L.append("(no assistant conclusion captured in the active session)")
@@ -636,15 +692,13 @@ def build_continuation_bundle(
     # source so a conflict stays visible instead of being flattened.
     older_conclusions: List[str] = []
     for r in sorted_rows[:-1]:
-        asst = [
-            ev for ev in sess_events[r["id"]]
-            if ev["kind"] == "assistant" and ev["content"]
-        ]
-        if asst:
-            ts_str = fmt_ts(r["updated_at"] or asst[-1]["ts"])
-            snippet = asst[-1]["content"].strip().replace("\n", " ")[:250]
+        for ev, tag in _select_assistant(sess_events[r["id"]]):
+            ts_str = fmt_ts(ev["ts"] or r["updated_at"])
+            snippet = ev["content"].strip().replace("\n", " ")[:250]
+            marker = "" if tag == "latest" else f" [{tag}]"
             older_conclusions.append(
-                f"- `[{r['provider']}:{r['native_id'][:16]}]` ({ts_str}): {snippet}"
+                f"- `[{r['provider']}:{r['native_id'][:16]}]` ({ts_str})"
+                f"{marker}: {snippet}"
             )
 
     if older_conclusions:

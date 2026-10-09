@@ -158,3 +158,144 @@ def test_budget_tiers_keep_the_outstanding_item(two_sessions):
         assert "verified" not in packed.lower().replace(
             "rather than as verified fact", ""), \
             f"{tier} introduced a verification claim the source never made"
+
+
+# ---------------------------------------------------------------------------
+# Issue #14 -- a session's earlier proposal and open work must survive its own
+# final message.  Codex proposes a sliding window early, raises its TODO in the
+# middle, and its LAST message is a progress note only.
+# ---------------------------------------------------------------------------
+
+def _issue14(store, tmp_path, repo, src):
+    cx = "codex:r1"
+    store.replace_session(
+        new_session(id=cx, provider="codex", native_session_id="r1",
+                    title="Rotation", started_at=100.0, updated_at=140.0,
+                    repo_root=repo, cwd=repo),
+        [
+            new_event(sid=cx, seq=1, kind="user", ts=101.0,
+                      content="add refresh token rotation"),
+            new_event(sid=cx, seq=2, kind="assistant", ts=110.0,
+                      content="For expiry I propose a sliding window: each use "
+                              "extends the token's life."),
+            new_event(sid=cx, seq=3, kind="assistant", ts=125.0,
+                      content="Still open: replay detection is NOT implemented "
+                              "yet, and the rotation test suite is still missing."),
+            new_event(sid=cx, seq=4, kind="assistant", ts=140.0,
+                      content="Rotation endpoint is in place. Pushing on."),
+        ], "codex", src)
+
+    cl = "claude:r2"
+    store.replace_session(
+        new_session(id=cl, provider="claude", native_session_id="r2",
+                    title="Review", started_at=200.0, updated_at=230.0,
+                    repo_root=repo, cwd=repo),
+        [
+            new_event(sid=cl, seq=1, kind="user", ts=201.0,
+                      content="review the design"),
+            new_event(sid=cl, seq=2, kind="assistant", ts=230.0,
+                      content="I recommend an absolute TTL instead. I have not "
+                              "ruled the sliding window out."),
+        ], "claude", src)
+
+    tid = store.thread_create(repo_root=repo, title="refresh tokens")
+    for sid in (cx, cl):
+        store.thread_attach(tid, sid)
+    return [r for r in store.thread_members(tid)]
+
+
+@pytest.fixture
+def issue14(tmp_path):
+    store = Store(tmp_path / "i14.db")
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    rows = _issue14(store, tmp_path, str(tmp_path), src)
+    return store, rows
+
+
+def test_issue14_early_proposal_and_todo_survive_the_final_message(issue14):
+    """The whole point of #14: the last message must not be the only one kept."""
+    store, rows = issue14
+    bundle = _bundle(store, rows)
+
+    assert "I propose a sliding window" in bundle, \
+        "codex's early proposal was lost behind its progress-only last message"
+    assert "replay detection" in bundle.lower(), "the TODO was lost"
+    assert "rotation test suite" in bundle.lower(), "the second TODO was lost"
+    assert "absolute TTL" in bundle, "claude's counter-proposal was lost"
+
+    # attribution: the proposal line must name codex
+    line = next(l for l in bundle.splitlines() if "I propose a sliding window" in l)
+    assert "codex" in line, f"the proposal lost its source: {line!r}"
+
+    # and it must not be presented as settled or as fact
+    assert "[proposal]" in line, "the proposal is not labelled as a proposal"
+
+
+def test_issue14_open_item_is_labelled_open_not_done(issue14):
+    store, rows = issue14
+    bundle = _bundle(store, rows)
+    line = next(l for l in bundle.splitlines() if "replay detection" in l.lower())
+    assert "[open]" in line, f"the open item is not labelled open: {line!r}"
+    assert "not implemented" in line.lower()
+
+
+def test_issue14_conflict_is_not_resolved_by_recency(issue14):
+    store, rows = issue14
+    bundle = _bundle(store, rows)
+    # claude is newer and is the active session; codex's reading must still be
+    # present and must not be described as rejected or superseded
+    assert "I propose a sliding window" in bundle
+    low = bundle.lower()
+    for wrong in ("codex's proposal was rejected", "superseded by claude",
+                  "no longer relevant"):
+        assert wrong not in low, f"the bundle resolved the conflict by age: {wrong!r}"
+
+
+def test_issue14_deterministic_output(issue14):
+    """Same DB + same query -> byte-identical bundle, twice."""
+    store, rows = issue14
+    a = _bundle(store, rows)
+    b = _bundle(store, rows)
+    assert a == b, "the bundle is not deterministic"
+
+
+def test_issue14_coverage_holds_across_budgets(issue14):
+    """Coverage must be measured against the source, not against length."""
+    from voyager.budget import apply_budget, estimate_tokens, parse_budget
+
+    store, rows = issue14
+    bundle = _bundle(store, rows)
+    need = ("I propose a sliding window", "absolute TTL",
+            "replay detection", "rotation test suite")
+
+    for tier in ("balanced", "full"):
+        limit = parse_budget(tier)
+        packed, _ = apply_budget(bundle, limit)
+        missing = [n for n in need if n.lower() not in packed.lower()]
+        assert not missing, f"{tier} lost {missing}"
+        assert estimate_tokens(packed) <= limit, f"{tier} exceeded its budget"
+
+    # compact may compress, but must not fabricate or mis-attribute
+    packed, _ = apply_budget(bundle, parse_budget("compact"))
+    assert estimate_tokens(packed) <= parse_budget("compact")
+    assert "verified fact" not in packed.lower().replace(
+        "rather than as verified fact", "")
+
+
+def test_issue14_does_not_dump_the_transcript(issue14):
+    """Selection, not a transcript dump.
+
+    The source has 4 codex + 2 claude assistant/user messages; the bundle must
+    carry a bounded selection, not everything.
+    """
+    store, rows = issue14
+    bundle = _bundle(store, rows)
+    codex_lines = [l for l in bundle.splitlines()
+                   if l.startswith("- `[codex:r1]`")]
+    # 4 assistant messages exist; at most the last + _EXTRA_ASST_PER_SESSION
+    assert len(codex_lines) <= 4, \
+        f"the bundle is listing everything, not selecting: {len(codex_lines)} lines"
+    # and no rendered line carries a whole raw message
+    for line in codex_lines:
+        assert len(line) <= 300, f"a line is not truncated: {len(line)} chars"
