@@ -265,12 +265,16 @@ def test_canonical_skill_template_has_no_first_turn_startup_instructions():
 
 # --- hidden relay safety boundaries (G3-B popup fix) -------------------------
 
-def _seed_relay_home(request, tmp_path):
+def _seed_relay_home(request, tmp_path, repo_name="relay-test-repo"):
     """Seed the SAME isolated index the relay's handler will resolve to.
 
     conftest's autouse isolation redirects ``Store()`` to
     ``<isolated-root>/index.db`` and HOME to the same root, so seeding there
     is what makes the relayed handler find the WorkThread.
+
+    ``repo_name`` is a parameter so a test can seed a repo whose path is not
+    pure ASCII: the relay has to carry that path through its own stdin/stdout
+    without letting the console code page transcode it.
     """
     from voyager.model import new_event, new_session
     from voyager.store import Store
@@ -285,7 +289,7 @@ def _seed_relay_home(request, tmp_path):
     db = Path.home() / ".voyager" / "index.db"
     store = Store(db)
     # Cross-platform repo path using tmp_path instead of hardcoded E:\ drive
-    repo = str(tmp_path / "relay-test-repo")
+    repo = str(tmp_path / repo_name)
     tid = store.thread_create(repo_root=repo, title="relay thread",
                               goal="continue across agents")
     src = tmp_path / "relay_seed.jsonl"
@@ -426,3 +430,130 @@ def test_relay_concurrent_runs_do_not_collide(
     assert len(rows) <= 1
     assert all(r["provider"] == "codex" and r["native_session_id"]
                in ("relay-sess-a", "relay-sess-b") for r in rows)
+
+
+# The character classes the relay has to carry untouched.  `…` is the one that
+# started this: it is U+2026, and on a Windows console code page it is a single
+# byte (0x85 in cp1252), so any path through [Console]::In/[Console]::Out
+# corrupts it -- and it is common in real transcript text.
+NON_ASCII_REPO_NAMES = [
+    pytest.param("repo-ascii", id="ascii"),
+    pytest.param("repo-\u5237\u65b0\u4ee4\u724c", id="chinese"),          # 刷新令牌
+    pytest.param("repo-\U0001f680", id="emoji"),                          # 🚀
+    pytest.param("repo-JWT\u5237\u65b0token", id="mixed"),                # JWT刷新token
+    pytest.param("repo-ellipsis\u2026", id="cp1252-ellipsis"),            # …
+]
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="the relay drives Windows PowerShell; CI windows "
+                           "legs run it, linux legs cannot")
+@pytest.mark.parametrize("repo_name", NON_ASCII_REPO_NAMES)
+def test_relay_round_trips_non_ascii_repo_path(
+        tmp_path, request, monkeypatch, repo_name):
+    """A non-ASCII repo path survives the relay in both directions.
+
+    The relay reads the payload on its own stdin and writes the handler's
+    stdout back.  Both used the console code page, so a Chinese path (or an
+    emoji, or U+2026) was transcoded on the way through: the handler then
+    matched nothing, or Codex received mojibake.  Seeding the thread under a
+    non-ASCII path makes that observable -- the path has to come back out of
+    the protocol JSON intact for the seeded context to appear at all.
+    """
+    store, tid, repo = _seed_relay_home(request, tmp_path, repo_name=repo_name)
+    assert repo_name in repo          # the fixture honoured the name
+
+    payload = {"session_id": "relay-sess-utf8", "cwd": repo,
+               "hook_event_name": "SessionStart",
+               "model": "gpt-5.6-luna", "permission_mode": "default",
+               "source": "startup"}
+    out, err = _run_relay(payload, tmp_path)
+
+    # 1. the raw bytes on the wire are valid UTF-8 and carry no BOM
+    raw = (tmp_path / "relay_out.json").read_bytes()
+    assert raw, "relay produced no output at all"
+    assert not raw.startswith(b"\xef\xbb\xbf"), "UTF-8 BOM leaked into the protocol"
+    text = raw.decode("utf-8")            # raises if the bytes are not UTF-8
+
+    # 2. it parses as protocol JSON
+    d = json.loads(text)
+    assert d["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    ctx = d["hookSpecificOutput"]["additionalContext"]
+
+    # 3. the non-ASCII path round-trips.  The handler resolves the WorkThread
+    #    by the cwd it is given, so if the relay transcoded the payload the
+    #    handler would look for a different path -- and the failure is silent:
+    #    it still emits a context, just not this thread's.  Assert on the
+    #    seeded member, and on the path itself appearing in the evidence.
+    assert ctx.startswith("format: tiered-v1")
+    assert "implement the relay acceptance" in ctx, (
+        f"the handler did not resolve the seeded thread for repo {repo!r}")
+    assert repo in ctx, (
+        "the repo path did not survive the relay; the handler saw "
+        f"{repo!r} encoded through the console code page instead")
+
+    # 4. and nothing was replaced or lost
+    assert "\ufffd" not in ctx, "a replacement character reached the protocol"
+    assert err.strip() == ""
+
+
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="the relay drives Windows PowerShell; CI windows "
+                           "legs run it, linux legs cannot")
+@pytest.mark.parametrize("sample", [
+    pytest.param('{"title": "plain ascii"}', id="ascii"),
+    pytest.param('{"title": "\u5237\u65b0\u4ee4\u724c"}', id="chinese"),
+    pytest.param('{"title": "\U0001f680"}', id="emoji"),
+    pytest.param('{"title": "JWT\u5237\u65b0token"}', id="mixed"),
+    pytest.param('{"title": "wait\u2026"}', id="cp1252-ellipsis"),
+])
+def test_relay_is_byte_transparent(tmp_path, sample):
+    """The relay itself must not transcode anything.
+
+    This is the test that actually protects the encoding fix.  Going through
+    the real handler cannot: it writes its protocol JSON with
+    ``ensure_ascii=True`` (so its stdout is pure ASCII) and it resolves the
+    WorkThread without consulting the payload's path, so both the stdin and the
+    stdout transcoding bugs are invisible through it -- verified by reverting
+    each fix and watching the end-to-end test still pass.
+
+    So test the relay directly, with an echo handler: whatever UTF-8 bytes go in
+    on stdin have to come back out on stdout, unchanged.  The old relay failed
+    this because [Console]::In and [Console]::Out both use the console code page
+    (gb2312 here, cp1252 on a runner), which mangles anything non-ASCII.
+    """
+    from voyager.integrations.codex import CodexIntegration
+
+    relay_src = CodexIntegration().relay
+    shim = tmp_path / "relay"
+    shim.mkdir()
+    (shim / "codex_hidden_relay.ps1").write_text(
+        relay_src.read_text(encoding="utf-8"), encoding="utf-8")
+    # an echo handler next to the copied relay: the relay resolves its handler
+    # through $PSScriptRoot, so this is the one it will run
+    (shim / "codex_session_start.py").write_text(
+        "import sys\n"
+        "sys.stdout.buffer.write(sys.stdin.buffer.read())\n"
+        "sys.stdout.buffer.flush()\n",
+        encoding="utf-8")
+
+    raw = sample.encode("utf-8")
+    out_f = tmp_path / "echo_out.bin"
+    err_f = tmp_path / "echo_err.txt"
+    # PowerShell 5.1 builds its environment dictionary case-insensitively, so a
+    # machine that exports both HTTPS_PROXY and https_proxy makes the relay
+    # throw before it runs.  Give the child a clean environment.
+    env = {k: v for k, v in os.environ.items()
+           if k.upper() not in {"HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY"}}
+    with open(out_f, "wb") as fo, open(err_f, "wb") as fe:
+        subprocess.run(
+            ["powershell", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(shim / "codex_hidden_relay.ps1")],
+            input=raw, stdout=fo, stderr=fe, timeout=120, env=env)
+
+    got = out_f.read_bytes()
+    assert got == raw, (
+        f"relay transcoded the payload: in={raw!r} out={got!r}")
+    assert not got.startswith(b"\xef\xbb\xbf"), "a BOM was added"
+    # and the bytes really are the sample, decoded as UTF-8
+    assert json.loads(got.decode("utf-8"))["title"] == json.loads(sample)["title"]
