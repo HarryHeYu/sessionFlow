@@ -60,9 +60,25 @@ def store(tmp_path):
 
 
 @pytest.fixture
-def story_thread(store, tmp_path):
+def story_thread(store, tmp_path, monkeypatch):
     """Claude → checkpoint → handoff to Codex → work → source rotates →
-    retained → source returns.  Returns (thread_id, codex_src)."""
+    retained → source returns.  Returns (thread_id, codex_src).
+
+    The steps run through an explicit clock rather than the wall clock.  On a
+    fast machine they all land in the same tick, and a timeline can only order
+    same-tick events by an arbitrary source priority -- the rows carry no
+    causal order to recover.  That made the ordering assertion below a
+    machine-speed race (green on the Ubuntu legs, red on Windows).  Driving
+    the clock makes the fixture's sequence the timeline's sequence everywhere.
+    """
+    import voyager.checkpoint as checkpoint_mod
+
+    # `checkpoint_mod.time` is the shared `time` module object, and store.py
+    # resolves it through a function-local `import time as _time`, so patching
+    # the module's attribute once drives every clock in this fixture.
+    ticks = iter(range(1000, 1400))
+    monkeypatch.setattr(checkpoint_mod.time, "time", lambda: float(next(ticks)))
+
     claude_src = _src(tmp_path, "claude.jsonl")
     codex_src = _src(tmp_path, "codex.jsonl")
     tid = store.thread_create(repo_root="E:/proj/demo", title="story")
