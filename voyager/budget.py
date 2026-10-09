@@ -90,19 +90,32 @@ def resolve_auto_budget(target: Optional[str]) -> int:
 # Fixed section priority, prefix-matched against "## ..." headings.
 # Earlier = kept first under budget pressure. Evidence & Provenance is
 # special: it may shrink to its header but is never dropped entirely.
+#
+# The ordering rule is evidence before assertion.  A section backed by tool
+# output, a repository snapshot or a command log is worth more than an
+# assistant's own prose, because the prose is exactly what may be wrong: the
+# bundle labels it "read as what it said rather than as verified fact".  Under
+# a tight budget the old order kept the unverified paragraph and dropped the
+# repository snapshot, the ranked evidence and the errors -- the parts a reader
+# could actually check.
+#
+# This list is a *keep* order.  It does not decide the order sections are
+# printed in; that stays whatever the compiler wrote.
 SECTION_PRIORITY = [
     "## Goal",
     "## User goal / instructions",
-    "## Latest assistant conclusion",
-    "## Where the work stopped",
+    # --- backed by evidence ------------------------------------------------
     "## Current repository state (live snapshot)",
     "## Goal-ranked evidence",
-    "## Other sessions' conclusions",
-    "## Decisions",
     "## Errors encountered",
     "## Files touched across sessions",
     "## Files this session touched",
     "## Commands executed",
+    # --- assistant statements, including the [open] items -------------------
+    "## Latest assistant conclusion",
+    "## Where the work stopped",
+    "## Other sessions' conclusions",
+    "## Decisions",
     "## Conversation",
     "## Evidence & Provenance",
 ]
@@ -173,15 +186,31 @@ def split_sections(bundle: str) -> Tuple[str, List[Dict[str, Any]]]:
             header_lines.append(ln)
         else:
             cur["lines"].append(ln)
-    for sec in sections:
+    for i, sec in enumerate(sections):
         sec["priority"] = _priority_of(sec["title"])
+        # Where the section sat in the rendered bundle.  Packing decides what
+        # to keep by priority, but must emit what it keeps in the order the
+        # compiler wrote it: SECTION_PRIORITY is a keep-order, not a narrative
+        # order, and the two differ.
+        sec["order"] = i
         sec["text"] = "\n".join(sec["lines"]).rstrip() + "\n"
     return "\n".join(header_lines), sections
 
 
 def _priority_of(title: str) -> int:
+    # Prefix matching, but only at a word boundary.  A bare startswith() lets
+    # "## Goal" capture "## Goal-ranked evidence", which silently gave the
+    # evidence section the goal's own keep-priority -- so the section the
+    # bundle exists to make checkable outranked everything, for the wrong
+    # reason and with no entry in this table saying so.
+    def matches(p: str) -> bool:
+        if not title.startswith(p):
+            return False
+        rest = title[len(p):]
+        return rest == "" or rest[0] in " \t"
+
     for i, p in enumerate(SECTION_PRIORITY):
-        if title.startswith(p):
+        if matches(p):
             return i
     return len(SECTION_PRIORITY)      # unknown sections rank last
 
@@ -243,31 +272,36 @@ def apply_budget(bundle: str, budget_tokens: Optional[int],
 
     dropped: List[str] = []
     trimmed: List[str] = []
-    kept: List[Tuple[int, str]] = []
+    kept: List[Tuple[int, int, str]] = []
 
     for sec in sections:
         if sec["title"] == _EVIDENCE_TITLE:
             keep_lines = ev["lines"][:_EVIDENCE_KEEP_LINES] if ev else []
             ev_text = ("\n".join([sec["title"]] + keep_lines).rstrip() + "\n")
-            kept.append((sec["priority"], ev_text))
+            kept.append((sec["priority"], sec["order"], ev_text))
             remaining = max(0, remaining - estimate_tokens(ev_text))
             continue
         t = estimate_tokens(sec["text"])
         if t <= remaining:
-            kept.append((sec["priority"], sec["title"] + "\n" + sec["text"]))
+            kept.append((sec["priority"], sec["order"],
+                         sec["title"] + "\n" + sec["text"]))
             remaining -= t
             continue
         shrunk = _shrink_section(sec, remaining)
         st = estimate_tokens(shrunk)
         if st <= remaining and st > estimate_tokens(sec["title"] + "\n"):
-            kept.append((sec["priority"], shrunk))
+            kept.append((sec["priority"], sec["order"], shrunk))
             remaining -= st
             trimmed.append(sec["title"])
         else:
             dropped.append(sec["title"])
 
-    kept.sort(key=lambda p: p[0])
-    body = header.rstrip() + "\n\n" + "\n".join(t for _, t in kept)
+    # Emit in the order the compiler wrote the bundle, not in keep-priority
+    # order: the reader follows a narrative, and reordering it under budget
+    # pressure made the same thread read differently depending on how big it
+    # happened to be.
+    kept.sort(key=lambda k: k[1])
+    body = header.rstrip() + "\n\n" + "\n".join(t for _, _, t in kept)
 
     if dropped or trimmed:
         note = [_BUDGET_NOTE_TITLE, "",

@@ -414,11 +414,48 @@ def evidence_ceiling(ev: Evidence) -> str:
     return UNIT_VERIFIED
 
 
+def adapter_can_resume(provider: str) -> Optional[bool]:
+    """What the adapter itself says, or None when there is no adapter.
+
+    The adapter is the authority on native resume: it is the code that would
+    have to build the command.  When it sets ``can_resume = False`` the
+    provider cannot be resumed no matter what a hand-written table claims, and
+    reporting SUPPORTED tells the user to run a command that does not exist.
+    """
+    try:
+        from voyager.adapters import load_all
+        from voyager.adapters.base import get_adapter
+    except Exception:  # noqa: BLE001 - a broken import must not break the matrix
+        return None
+    try:
+        # Importing the adapter modules is what registers them; without this
+        # the registry is empty and every provider looks like "no adapter".
+        load_all()
+        adapter = get_adapter(provider)
+    except Exception:  # noqa: BLE001
+        return None
+    if adapter is None:
+        return None
+    return bool(getattr(adapter, "can_resume", False))
+
+
 def resolve_cell(provider: str, dimension: str, ev: Optional[Evidence] = None) -> Tuple[str, str]:
     """The actual state of one cell, with the reason it is not higher."""
     declared = DECLARED.get(provider, {}).get(dimension, (NOT_FOUND, "no entry"))
     state, note = declared
     ev = ev or collect_evidence(provider)
+
+    # Native resume is a claim about code, not about this machine: if the
+    # adapter says it cannot resume, no declaration may outrank that.  This is
+    # checked before the evidence ceiling because it is not an evidence
+    # question at all -- see the zcode entry, which declared SUPPORTED while
+    # its adapter sets can_resume=False.
+    if dimension == "native_resume":
+        can = adapter_can_resume(provider)
+        if can is False and STATE_ORDER.get(state, 0) > STATE_ORDER.get(NOT_FOUND, 0):
+            return (NOT_FOUND,
+                    "the %s adapter sets can_resume=False; declared %s (%s)"
+                    % (provider, state, note))
 
     # Dimensions that describe data on disk do not depend on a hook firing.
     machine_dependent = dimension in (
