@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -208,7 +209,12 @@ def checkpoint_create(
     Every field is optional: a checkpoint records what somebody actually knew.
     """
     now = time.time()
-    checkpoint_id = f"chk_{thread_id}:{now}"
+    # `time.time()` is not a unique key.  Its resolution is ~15.6 ms on
+    # Windows, so two checkpoints created in the same tick produced the same
+    # id and the second died on `UNIQUE constraint failed: checkpoints.id` --
+    # which is exactly what two back-to-back calls do (and what the CI legs
+    # hit).  Keep the readable prefix, add a random suffix.
+    checkpoint_id = f"chk_{thread_id}:{now}:{uuid.uuid4().hex[:8]}"
 
     check = Checkpoint(
         thread_id=thread_id,

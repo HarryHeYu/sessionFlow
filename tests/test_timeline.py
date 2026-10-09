@@ -871,3 +871,28 @@ def test_checkpoint_same_timestamp_order_is_stable_across_reconnects(store):
                 if e["id"].startswith("chk:")] == first
     finally:
         s.close()
+
+
+def test_checkpoints_created_in_the_same_tick_do_not_collide(store, monkeypatch):
+    """A checkpoint id must be unique even when the clock does not move.
+
+    `checkpoint_create` built its primary key from `time.time()`.  That is not
+    a unique key: on Windows its resolution is about 15.6 ms, so two
+    checkpoints created back to back landed on the same value and the second
+    died with `UNIQUE constraint failed: checkpoints.id` -- which is what the
+    Windows CI legs hit, twice per run.
+
+    Freezing the clock makes that deterministic instead of a race: the ids have
+    to differ even when the timestamp does not.
+    """
+    import voyager.checkpoint as checkpoint_mod
+
+    monkeypatch.setattr(checkpoint_mod.time, "time", lambda: 1700000000.0)
+
+    tid = store.thread_create(repo_root="E:/proj/demo", title="same-tick")
+    first = checkpoint_create(store, tid, goal="first", phase="alpha")
+    second = checkpoint_create(store, tid, goal="second", phase="beta")
+
+    assert first != second, "two checkpoints in the same tick share an id"
+    rows = store.q("SELECT id FROM checkpoints WHERE thread_id=?", (tid,))
+    assert len(rows) == 2, f"expected both checkpoints to persist, got {rows}"
