@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -52,22 +53,56 @@ _MAX_FILES = 80
 #: message is only a progress note loses the alternative it proposed earlier
 #: and the work it left unfinished -- issue #14.  Deterministic string
 #: matching, no model and no embeddings.
-_SIGNAL_PROPOSAL = ("propose", "proposing", "recommend", "suggest", "instead",
-                    "alternative", "option")
+#: Inflected forms are spelled out rather than matched as fragments: the
+#: matcher is word-based (see `_keyword_hit`), so a form that is missing here is
+#: a signal that never fires — and a missed signal is exactly the regression
+#: #14 fixed.  The lists stay short on purpose; every entry is a word that
+#: actually marks a proposal or an open item.
+_SIGNAL_PROPOSAL = ("propose", "proposes", "proposed", "proposing",
+                    "recommend", "recommends", "recommended", "recommending",
+                    "suggest", "suggests", "suggested", "suggesting",
+                    "instead", "alternative", "alternatives",
+                    "option", "options")
 _SIGNAL_OPEN = ("not implemented", "still missing", "still open", "still to",
-                "not done", "unfinished", "todo", "remaining", "yet to",
-                "not yet", "have not", "has not", "haven't", "hasn't")
+                "still need", "still needs", "not done", "unfinished",
+                "todo", "todos", "remaining", "yet to", "not yet",
+                "have not", "has not", "haven't", "hasn't")
 
 #: Extra assistant messages kept per session, beyond its final one.
 _EXTRA_ASST_PER_SESSION = 3
+
+#: ASCII word characters, used to draw signal-word boundaries.  Deliberately
+#: *not* Python's ``\b``: ``\b`` counts CJK as word characters, so ``\boption\b``
+#: would miss ``选项option`` — and these messages are routinely mixed
+#: CJK/English.  Drawing the boundary on ASCII only means a signal still fires
+#: next to Chinese text, a path separator or a command dash, while staying out
+#: of longer identifiers.
+_ASCII_WORD = r"A-Za-z0-9_"
+
+
+def _keyword_hit(text_low: str, keyword: str) -> bool:
+    """True when ``keyword`` appears in ``text_low`` as a word, not a fragment.
+
+    ``option`` must not fire on ``optional`` and ``have not`` must not fire on
+    ``have nothing``: a false positive here promotes an unrelated sentence into
+    the continuation bundle and crowds out the real open item.
+
+    A non-ASCII keyword falls back to a plain substring test — Chinese has no
+    word separators to anchor to, so a boundary rule would simply never match.
+    """
+    if not keyword.isascii():
+        return keyword in text_low
+    pattern = r"(?<![%s])%s(?![%s])" % (
+        _ASCII_WORD, re.escape(keyword), _ASCII_WORD)
+    return re.search(pattern, text_low) is not None
 
 
 def _signal_tag(text: str) -> str:
     """Classify an assistant message for the bundle, without asserting truth."""
     low = text.lower()
-    if any(s in low for s in _SIGNAL_OPEN):
+    if any(_keyword_hit(low, s) for s in _SIGNAL_OPEN):
         return "open"
-    if any(s in low for s in _SIGNAL_PROPOSAL):
+    if any(_keyword_hit(low, s) for s in _SIGNAL_PROPOSAL):
         return "proposal"
     return "earlier"
 
@@ -91,7 +126,8 @@ def _select_assistant(events, extra: int = _EXTRA_ASST_PER_SESSION):
         if len(out) > extra:
             break
         low = ev["content"].lower()
-        if not any(s in low for s in _SIGNAL_PROPOSAL + _SIGNAL_OPEN):
+        if not any(_keyword_hit(low, s)
+                   for s in _SIGNAL_PROPOSAL + _SIGNAL_OPEN):
             continue
         if id(ev) in seen:
             continue

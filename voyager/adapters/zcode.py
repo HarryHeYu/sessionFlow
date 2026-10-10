@@ -60,32 +60,116 @@ def _open_ro(path: Path) -> Optional[sqlite3.Connection]:
         return None
 
 
-def _validate_zcode_schema(con):
-    """Validate ZCode database schema."""
-    try:
-        tables = set(
-            row[0] for row in con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
+def _schema_matches(con) -> bool:
+    """True when the connection carries the ZCode tables.
+
+    Unlike :func:`_validate_zcode_schema` this lets ``sqlite3.Error`` escape:
+    a file that cannot be read at all (corrupt, not a database, locked) is a
+    different situation from a readable file that simply is not a ZCode store,
+    and discovery has to tell those apart.
+    """
+    tables = set(
+        row[0] for row in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    )
+
+    required_tables = set(EXPECTED_ZCODE_COLUMNS.keys())
+    if not required_tables.issubset(tables):
+        return False
+
+    for table, expected_cols in EXPECTED_ZCODE_COLUMNS.items():
+        cols = set(
+            row[1] for row in con.execute(
+                f"PRAGMA table_info({table})"
             ).fetchall()
         )
-        
-        required_tables = set(EXPECTED_ZCODE_COLUMNS.keys())
-        if not required_tables.issubset(tables):
+        if not expected_cols.issubset(cols):
             return False
-        
-        for table, expected_cols in EXPECTED_ZCODE_COLUMNS.items():
-            cols = set(
-                row[1] for row in con.execute(
-                    f"PRAGMA table_info({table})"
-                ).fetchall()
-            )
-            if not expected_cols.issubset(cols):
-                return False
-        
-        return True
-    
+
+    return True
+
+
+def _validate_zcode_schema(con) -> bool:
+    """Validate ZCode database schema — yes/no form, never raises."""
+    try:
+        return _schema_matches(con)
     except sqlite3.Error:
         return False
+
+
+# Discovery-time verdicts for one candidate path.  These are *not* persisted
+# session states: the store keeps its ACTIVE_SOURCE / SOURCE_MISSING /
+# ARCHIVED_CANONICAL vocabulary, and a verdict only decides whether this scan
+# round may release the sessions that came from this path.
+PROBE_ABSENT = "absent"          # not on disk at all
+PROBE_OK = "ok"                  # present, readable, is a ZCode database
+PROBE_UNREADABLE = "unreadable"  # present, but SQLite cannot read it
+PROBE_NOT_ZCODE = "not-zcode"    # readable, but not a ZCode database
+
+
+def probe_zcode_db(path: Path) -> str:
+    """Classify one candidate path without ever raising.
+
+    Opened read-only.  The distinction matters because a database that is
+    corrupt, permission-denied or locked is still *on disk*: treating it as
+    absent would mark every session it owns as SOURCE_MISSING and quietly
+    retire a history that has not gone anywhere.
+    """
+    if not path.is_file():
+        return PROBE_ABSENT
+    con = _open_ro(path)
+    if con is None:
+        return PROBE_UNREADABLE
+    try:
+        return PROBE_OK if _schema_matches(con) else PROBE_NOT_ZCODE
+    except sqlite3.Error:
+        return PROBE_UNREADABLE
+    finally:
+        try:
+            con.close()
+        except sqlite3.Error:
+            pass
+
+
+def _candidate_zcode_dbs(home: Optional[Path] = None) -> List[Path]:
+    """Every path discovery should consider, in priority order, deduplicated.
+
+    Shares one walk between "which databases are usable" and "which are present
+    but unusable", so the two answers can never disagree about which paths were
+    even looked at.
+    """
+    HOME = _resolve_home_path(home)
+
+    candidates: List[Path] = []
+
+    # An explicit override is considered first so a caller reasoning about why
+    # nothing was discovered sees the path the user asked for.
+    env_db = os.environ.get("VOYAGER_ZCODE_DB")
+    if env_db:
+        candidates.append(Path(env_db).expanduser())
+
+    # Platform-specific paths (using resolved HOME)
+    candidates.extend([
+        HOME / ".zcode" / "cli" / "db" / "db.sqlite",
+        HOME / "AppData" / "Roaming" / ".zcode" / "cli" / "db" / "db.sqlite",
+        HOME / ".local" / "share" / "zcode" / "cli" / "db" / "db.sqlite",
+    ])
+
+    # Bounded recursive search in HOME/.zcode (depth-limited)
+    zcode_dir = HOME / ".zcode"
+    if zcode_dir.exists() and zcode_dir.is_dir():
+        for db_file in zcode_dir.rglob("*.sqlite"):
+            if len(db_file.relative_to(zcode_dir).parts) <= 4:
+                candidates.append(db_file)
+
+    seen = set()
+    unique: List[Path] = []
+    for c in candidates:
+        if str(c) not in seen:
+            seen.add(str(c))
+            unique.append(c)
+    return unique
 
 
 def discover_zcode_db(home: Optional[Path] = None) -> List[Path]:
@@ -104,60 +188,37 @@ def discover_zcode_db(home: Optional[Path] = None) -> List[Path]:
         Policy on multiple candidates: return ALL valid found databases.
         scan() will process each independently.
     """
-    # Runtime resolve HOME - supports monkeypatching in tests
-    HOME = _resolve_home_path(home)
-    
-    # Priority 1: Environment variable override - exact match, stop searching
+    # Priority 1: Environment variable override - exact match, stop searching.
+    # An override that is usable wins outright; one that is present but
+    # unusable is reported by unusable_zcode_dbs() instead of being dropped
+    # without a trace.
     env_db = os.environ.get("VOYAGER_ZCODE_DB")
     if env_db:
         env_path = Path(env_db).expanduser()
-        con = _open_ro(env_path)
-        if con and _validate_zcode_schema(con):
-            con.close()
+        if probe_zcode_db(env_path) == PROBE_OK:
             return [env_path]
-        elif con:
-            # Valid file but wrong schema - don't silently fall back
-            con.close()
-    
-    # Collect all candidates from known locations + bounded search
-    candidates: List[Path] = []
-    
-    # Platform-specific paths (using resolved HOME)
-    candidates.extend([
-        HOME / ".zcode" / "cli" / "db" / "db.sqlite",
-        HOME / "AppData" / "Roaming" / ".zcode" / "cli" / "db" / "db.sqlite",
-        HOME / ".local" / "share" / "zcode" / "cli" / "db" / "db.sqlite",
-    ])
-    
-    # Add dynamic search in HOME/.zcode directory (depth-limited)
-    zcode_dir = HOME / ".zcode"
-    if zcode_dir.exists() and zcode_dir.is_dir():
-        # Recursively find all .sqlite files within .zcode/
-        for db_file in zcode_dir.rglob("*.sqlite"):
-            # Limit depth to prevent scanning too deep
-            if len(db_file.relative_to(zcode_dir).parts) <= 4:
-                candidates.append(db_file)
-    
-    # Deduplicate
-    seen = set()
-    unique_candidates = []
-    for c in candidates:
-        if str(c) not in seen:
-            seen.add(str(c))
-            unique_candidates.append(c)
-    candidates = unique_candidates
-    
-    # Validate each candidate
+
     valid_dbs: List[Path] = []
-    for db_path in candidates:
-        if db_path.exists():
-            con = _open_ro(db_path)
-            if con:
-                if _validate_zcode_schema(con):
-                    con.close()
-                    valid_dbs.append(db_path)
-    
+    for db_path in _candidate_zcode_dbs(home):
+        if probe_zcode_db(db_path) == PROBE_OK:
+            valid_dbs.append(db_path)
+
     return valid_dbs
+
+
+def unusable_zcode_dbs(home: Optional[Path] = None) -> List[Path]:
+    """Candidates that are on disk but that discovery cannot use.
+
+    A scan must not read this as "the source vanished".  A database that is
+    corrupt, locked or permission-denied still exists; marking its sessions
+    SOURCE_MISSING would retire a history that has not gone anywhere.  The
+    caller keeps the existing index and says why instead.
+    """
+    unusable: List[Path] = []
+    for db_path in _candidate_zcode_dbs(home):
+        if probe_zcode_db(db_path) in (PROBE_UNREADABLE, PROBE_NOT_ZCODE):
+            unusable.append(db_path)
+    return unusable
 
 
 def _json(s: Any) -> Any:
@@ -176,6 +237,15 @@ class ZCodeAdapter(Adapter):
 
     def discover(self) -> List[Path]:
         return discover_zcode_db()
+
+    def unusable_sources(self) -> List[Path]:
+        """Sources present on disk that this adapter could not read.
+
+        The scan subtracts these from the set of paths it treats as "gone", so
+        a database that is merely corrupt, locked or unreadable this round does
+        not release the sessions that came from it.
+        """
+        return unusable_zcode_dbs()
 
     def parse(self, source: Path) -> Optional[dict]:
         # One source file holds many sessions; the base scanner expects one

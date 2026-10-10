@@ -102,7 +102,28 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
         rescan = force
 
         sources = ad.discover()
+
+        # A source that is present but unreadable (corrupt SQLite, locked
+        # database, permission denied) is NOT a vanished source.  Marking its
+        # sessions SOURCE_MISSING would retire a history that is still on disk,
+        # so this round keeps the index and reports what it could not read.
+        # Adapters opt in by exposing unusable_sources(); the rest are
+        # unaffected.
+        unusable_paths: set = set()
+        probe_unusable = getattr(ad, "unusable_sources", None)
+        if callable(probe_unusable):
+            try:
+                unusable_paths = {str(p) for p in probe_unusable()}
+            except Exception as e:      # a probe must never break the scan
+                print(f"  ! {ad.provider}: could not probe sources ({e})",
+                      file=sys.stderr)
+
         if not sources:
+            if unusable_paths:
+                if not quiet:
+                    print(f"  {ad.provider}: {len(unusable_paths)} source(s) "
+                          f"present but unreadable; keeping the existing index")
+                continue
             # nothing on disk anymore: the provider's history is RETAINED, not
             # dropped (O2 — a vanished source is not a request to delete)
             gone = store.prune_missing_sessions(ad.provider, set())
@@ -123,8 +144,9 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
 
         # Sessions whose sources are still on disk survive pruning even when
         # they were skipped (unchanged) or failed to parse this round; only
-        # sources that vanished from disk release their sessions.
-        disk_paths = {str(p) for p in sources}
+        # sources that vanished from disk release their sessions.  A file that
+        # is present but unreadable still counts as on disk.
+        disk_paths = {str(p) for p in sources} | unusable_paths
 
         if not rescan:
             skip = len(sources)
