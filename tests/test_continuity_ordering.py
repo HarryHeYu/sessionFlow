@@ -242,6 +242,72 @@ def test_conflicting_conclusions_keep_both_sources(crossed):
     assert "superseded" not in bundle.lower()
 
 
+def test_a_later_session_referring_back_does_not_replace_the_original(tmp_path):
+    """A paraphrase is not the source.
+
+    The failure this guards against: codex proposes something, then later just
+    reports progress; claude then says "re: codex's proposal, I recommend X
+    instead".  Two ways to lose codex: keep only each session's *last* message
+    (the #14 rule), or keep claude's paraphrase as if it were codex's.  Both
+    statements must be present, each attributed to the session that said it.
+    """
+    db = tmp_path / "refback.db"
+    store = Store(db)
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+
+    specs = {
+        "codex:1": ("codex", 1000.0, [
+            "For expiry I propose a sliding window: renew on use, 30-day idle cap.",
+            "Rotation endpoint is wired up. Pushing on with the rest.",
+        ]),
+        "claude:2": ("claude", 2000.0, [
+            "Re: codex's sliding-window proposal -- I recommend an absolute TTL "
+            "instead, because a sliding window can be extended indefinitely.",
+        ]),
+    }
+    for sid, (provider, ts, messages) in specs.items():
+        events = [new_event(sid=sid, seq=0, kind="user", ts=ts - 100,
+                            content="continue the auth work")]
+        for i, content in enumerate(messages, start=1):
+            events.append(new_event(sid=sid, seq=i, kind="assistant",
+                                    ts=ts + i, content=content))
+        store.replace_session(
+            new_session(id=sid, provider=provider,
+                        native_session_id=sid.split(":")[-1], title=sid,
+                        started_at=ts - 100, updated_at=ts + len(messages),
+                        repo_root=REPO, cwd=REPO, can_resume=True),
+            events, provider, src)
+
+    tid = store.thread_create(repo_root=REPO, title="auth work", goal=GOAL)
+    for sid in ("codex:1", "claude:2"):
+        store.thread_attach(tid, sid)
+
+    bundle = flat(store, tid)
+
+    # The proposal must be in the per-session conclusions, not merely quoted
+    # somewhere: that section is what carries a session's own statements, and
+    # it is where keeping only the last message used to lose them.
+    section = bundle.split("## Other sessions' conclusions", 1)[1].split("\n## ", 1)[0]
+    assert "sliding window" in section, (
+        "codex's earlier proposal did not survive into the conclusions "
+        f"section:\n{section}")
+    assert "[proposal]" in section, "the proposal is not labelled as one"
+    assert "[codex:1]" in section, "the proposal lost its provenance"
+
+    # ...and the two readings are kept side by side rather than merged
+    codex_line = next(l for l in section.splitlines() if "sliding window" in l)
+    claude_line = next(l for l in bundle.splitlines() if "absolute TTL" in l)
+    assert "codex" in codex_line
+    assert "claude" in claude_line
+
+    # the reference is not presented as a resolution, and the bundle does not
+    # award the win to the newer session
+    low = bundle.lower()
+    assert "superseded" not in low
+    assert "takes precedence" not in low
+
+
 def test_evidence_survives_every_budget(crossed):
     from voyager.budget import apply_budget, estimate_tokens, parse_budget
 
@@ -256,6 +322,16 @@ def test_evidence_survives_every_budget(crossed):
         packed, _ = apply_budget(bundle, parse_budget(tier))
         assert "Still need to evaluate" in packed, f"{tier} dropped the open question"
         assert "Approach Y is risky" in packed, f"{tier} dropped the conflict"
+
+    # Tight budget: the conflict may not fit, but losing it must be *stated*.
+    # A silent single-sided summary is the failure mode this guards against --
+    # the reader would see one proposal and no sign the other ever existed.
+    packed, info = apply_budget(bundle, parse_budget("compact"))
+    if "Approach Y is risky" not in packed:
+        assert info["dropped"] or info["trimmed"], (
+            "compact dropped the conflicting proposal without reporting it as "
+            f"dropped or trimmed (dropped={info['dropped']}, "
+            f"trimmed={info['trimmed']})")
 
 
 def test_an_older_session_keeps_its_verifiable_evidence(tmp_path):
