@@ -657,7 +657,20 @@ def check_verification(db_path: Optional[Path] = None) -> Dict[str, Any]:
             # "gap" means declared > observed; this is informational, not a fault
             "has_gap": _SO.get(observed_ceiling, 0) < _SO.get(declared, 0),
             # Why the effective state is not higher (O5.7)
+            # Why the effective state is not higher (O5.7).  Scoped to the
+            # startup-continuity chain -- see `capability_reasons` below for
+            # every other capability.
             "blocked_reason": _blocked_reason(p, declared, observed, ev),
+            # Per-dimension state and reason, taken from the canonical resolver.
+            # `voyager verify --matrix` and the dashboard read the same
+            # function, so doctor cannot explain a capability differently from
+            # the surface that reports it -- and a user asking "why can this
+            # provider not resume / be discovered / be searched?" gets the
+            # matrix's own answer instead of a second hand-written rule that
+            # drifts from it.
+            "capability_reasons": {
+                d: _capability_reason(p, d, ev) for d in DIMENSIONS
+            },
         }
     return out
 
@@ -681,6 +694,26 @@ def _blocked_reason(provider: str, declared: str,
         return None  # at the ceiling, nothing blocking
     except Exception:
         return None
+
+
+def _capability_reason(provider: str, dimension: str,
+                       ev: Evidence) -> Dict[str, str]:
+    """The canonical state and reason for one capability.  Never raises.
+
+    Both fields come from :func:`capability_matrix.resolve_cell` — the same
+    resolver ``voyager verify --matrix`` and the dashboard use — so doctor
+    cannot contradict the surface that reports the same capability.
+
+    The reason is deliberately the resolver's own sentence rather than a second
+    explanation written here: two explanations of one fact is how the ZCode
+    `native_resume` claim drifted from its adapter in the first place.
+    """
+    try:
+        state, reason = resolve_cell(provider, dimension, ev)
+        return {"state": state, "reason": reason}
+    except Exception:
+        return {"state": NOT_FOUND,
+                "reason": "capability state unavailable on this machine"}
 
 
 # --- O4 canonical issue collection ------------------------------------------
