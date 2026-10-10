@@ -54,8 +54,13 @@ _ZCODE_DDL = (
 
 
 def _make_db(path: Path, sid: str, title: str) -> Path:
-    """A real, valid ZCode database."""
+    """A real, valid ZCode database.
+
+    Truncates first, so it can also repair a path that currently holds a
+    corrupt file — which is what the recovery test does.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
     con = sqlite3.connect(str(path))
     for ddl in _ZCODE_DDL:
         con.execute(ddl)

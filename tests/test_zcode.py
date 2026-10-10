@@ -69,8 +69,12 @@ def test_zcode_db_env_override_expands_tilde(monkeypatch, tmp_path):
 
     monkeypatch.setattr(zcode, "_open_ro", lambda p: _Con())
     # `probe_zcode_db` asks `_schema_matches` directly, because it needs to tell
-    # a readable-but-wrong file from an unreadable one.  The point of this test
-    # is tilde expansion, so stub the check it actually calls.
+    # a readable-but-wrong file from an unreadable one.  It also stats the path
+    # first, to tell "absent" from "unreadable" — so the file has to exist even
+    # though `_open_ro` is stubbed.  The point of this test is tilde expansion.
+    target = tmp_path / "z" / "db.sqlite"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("", encoding="utf-8")
     monkeypatch.setattr(zcode, "_schema_matches", lambda con: True)
 
     assert zcode.discover_zcode_db() == [tmp_path / "z/db.sqlite"]
