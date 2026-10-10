@@ -1638,8 +1638,18 @@ def _thread_from_merge(store: Store, rows: list, args) -> str:
         tid = store.thread_create(repo_root=repo_root, title=title,
                                   goal=getattr(args, "goal", None))
         action = "created"
-    for sid in sids:
-        store.thread_attach(tid, sid)
+    # Attach in the order the caller listed the sessions, deduplicated.  `sids`
+    # is a set, and iterating it here would hand `thread_sessions.ord` whatever
+    # order the set happened to have -- which varies between processes, and now
+    # that the bundle follows `ord` (D20) that would make the merged order and
+    # its headline nondeterministic run to run.  An existing thread keeps the
+    # ords it already has; attaching again is a no-op.
+    seen: set = set()
+    for r in rows:
+        if r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        store.thread_attach(tid, r["id"])
     if not getattr(args, "json", False):
         print("Thread {0} {1}".format(tid, action))
         print("repo: " + (repo_root or "?"))

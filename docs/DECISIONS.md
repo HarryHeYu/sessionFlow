@@ -527,3 +527,65 @@ scoping 只能**减少**被遍历的 provider，**不可能**漏掉本该刷新�
 `_same_repo`/`_fmt_ts` 不再定义于任何地方、共享名只定义在 `util.py`、
 且每个原拷贝点都改为 import。`tests/test_scan_scope.py`（7）钉住 scoping 契约
 与回退到全扫的各种情形。
+
+---
+
+## D20 — 会话顺序只有一个来源：WorkThread 的 handoff 顺序；"最近活动"只是证据
+
+**状态**: implemented（Issue #15）
+
+**问题**: 同一个 WorkThread，两条编译路径给出**不同的会话顺序**：
+
+- flat bundle（`build_continuation_bundle`）按 `updated_at` 排；
+- tiered bundle（`build_tiered_bundle`）按 `thread_sessions.ord` 排。
+
+而两条路径**都用 `updated_at` 选"最新会话"**（`sorted_rows[-1]` /
+`_l0_latest_member`）。于是一个被重新扫描过的旧会话可以顶掉标题，
+而且 flat 与 tiered 对"工作停在哪"给出不同答案 —— 调用点就在 `auto.py`
+的同一个 `if context_format == ...` 里，两条分支相邻。
+
+**三个概念必须分开**（这是本条的核心）：
+
+| 概念 | 来源 | 用途 |
+|---|---|---|
+| **Thread order** | `thread_sessions.ord` | 唯一的会话顺序；表达工作交接 |
+| **Latest activity** | `updated_at` | 只作为**证据**呈现，不参与选择 |
+| **Relevant conclusion** | goal + evidence（`Goal-ranked evidence`）| 相关性判断，独立机制 |
+
+**决定**:
+
+1. **会话顺序**：`canonical_session_order(store, rows, thread)` 是唯一来源。
+   给了 thread 且行是它的成员 ⇒ 按 `ord`；非成员按调用者给的顺序排在后面
+   （tiered 原有契约，现在共享）。没有 thread（例如裸 `merge`）⇒ 按
+   `(started_at, updated_at, id)` 的**全序**，因为两个时间戳相同的会话
+   也必须每次排出同样的结果。
+2. **标题**（"Where work stopped"）= canonical order 的**最后一行**，即
+   交接链的末端。**不再看时钟**：被重新扫描过的旧会话不能顶掉它。
+3. **时钟照常报告，但要说明**：当"最近活动"的会话与标题不是同一个时，
+   bundle 追加一条 note 点名它，并写明"活动时间不是它更正确的证据"。
+   分歧被**说出来**，而不是被静默地二选一。
+4. **`build_thread_state` 保持纯函数**：它没有 store，所以不接受它去查
+   `ord`。改为接受可选 `order` 入参；tiered 调用方（有 store）传入
+   `store.thread_member_ids(tid)`，于是 `latest_session_*` 与 flat 的标题
+   指向同一个会话。不传 `order` 时回退到时间戳全序 —— 契约不变。
+5. **所有入口共用**：`auto.get_continuation_context`（flat 与 tiered 两分支）、
+   `handoff_thread`、`launcher`、`api.bundle_preview` 都传入 thread。
+   `bundle_preview` 用 `thread_find_containing` 找包含全部 ref 的 active thread，
+   找不到就用活动顺序（用户显式点名、且不属于任何 thread 时，不擅自编造顺序）。
+
+**Reason**: 把 `updated_at` 当作"哪条结论更可信"的代理是错的 ——
+它只说明提供者最后一次**写文件**的时间。`ord` 才是用户/工具**交接工作**的
+持久化记录，而且重新扫描不会改变它。两者被混为一谈时，flat 与 tiered
+对同一份数据讲出两个故事，而调用点相邻、差异不可见。
+
+**明确不做**: 没有引入第三套排序；没有让渲染器各自决定"哪条结论最可信"；
+`Goal-ranked evidence`（按 goal 的相关性排序）保持独立，未被合并进会话顺序。
+
+**Guard**: `tests/test_continuity_ordering.py`（15）钉住 —— 交叉顺序下
+flat/tiered 一致、标题是交接末端而非最新文件、bundle 说明选择依据、
+分歧被点名、重新扫描不改顺序、时间戳相同时排序稳定、闲聊会话不能顶标题、
+冲突双方与 provenance 保留、三档预算下证据不丢、两个 thread 不串味、
+两种 `context_format` 与 `api.bundle_preview` 同语义。反事实验证：
+把 flat 的排序改回时钟、或让 `_l0_latest_member` 忽略 `order`，
+对应测试立即失败（见 P8 报告）。
+

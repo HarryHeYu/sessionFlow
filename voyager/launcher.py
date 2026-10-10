@@ -56,6 +56,7 @@ def prelaunch(
                     session_rows=members[:3],  # Compact: top 3 sessions
                     goal=None,
                     live_git=True,
+                    thread=thread_id,
                 )
                 
                 result["thread"] = thread_id

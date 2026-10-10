@@ -365,7 +365,11 @@ def get_continuation_context(store: Optional[Store] = None,
             raw_bundle = build_tiered_bundle(store, thread, members, live,
                                              **tiered_kwargs)
         else:
-            raw_bundle = build_continuation_bundle(store, members, goal=goal)
+            # Same canonical order as the tiered branch above: the thread's
+            # handoff order.  Without this the two formats disagreed about
+            # which session the work stopped in (issue #15).
+            raw_bundle = build_continuation_bundle(store, members, goal=goal,
+                                                   thread=thread)
         packed, info = apply_budget(raw_bundle, tokens, target=target)
         store._continuity_log("context-compiled", thread=tid,
                               provider=provider, budget=info["budget"])

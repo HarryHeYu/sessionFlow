@@ -243,8 +243,23 @@ def _l0_field(value: Any, max_chars: int) -> str:
     return text
 
 
-def _l0_latest_member(members: List[Any]) -> Optional[Any]:
-    """Newest member by a total order, so the pick never depends on input order."""
+def _l0_latest_member(members: List[Any],
+                      order: Optional[List[str]] = None) -> Optional[Any]:
+    """The thread's latest session.
+
+    With ``order`` — the canonical handoff order, ids earliest-first — that is
+    the last member present in it, which is the same session the continuation
+    bundle puts in its headline.  Without it the newest by timestamp, which is
+    a total order over the rows alone: ``build_thread_state`` is pure and has
+    no store, so a caller that knows the handoff order passes it in rather than
+    letting this function guess from the clock.
+    """
+    if order:
+        rank = {sid: i for i, sid in enumerate(order)}
+        present = [m for m in members if str(_l0_get(m, "id") or "") in rank]
+        if present:
+            return max(present, key=lambda m: rank[str(_l0_get(m, "id"))])
+
     latest = None
     latest_key: Optional[Tuple[Any, Any, str]] = None
     for member in members:
@@ -263,6 +278,7 @@ def build_thread_state(
     members: Any = (),
     *,
     max_field_chars: int = L0_FIELD_MAX_CHARS,
+    order: Optional[List[str]] = None,
 ) -> str:
     """Project a WorkThread's canonical state into a bounded L0 block.
 
@@ -278,9 +294,15 @@ def build_thread_state(
     ``members`` / ``latest_session_*`` are mechanical counts and lookups over
     the attached sessions.  A missing value reads ``unknown`` rather than being
     inferred from whatever prose happens to be nearby.
+
+    ``order`` is the canonical handoff order (ids, earliest first).  Given it,
+    ``latest_session_*`` names the session the thread handed the work to last —
+    the same one the continuation bundle headlines.  Without it the newest by
+    timestamp is used, which is a total order over the rows alone; a caller
+    that has a store should pass ``order`` so the two renderers agree.
     """
     member_list = list(members)
-    latest = _l0_latest_member(member_list)
+    latest = _l0_latest_member(member_list, order=order)
 
     lines = [
         "[WorkThread]",
@@ -608,22 +630,97 @@ def build_l1_banded(store: Store, rows: Any, *, hard_max: int) -> str:
     return header + "\n\n".join(parts)
 
 
+#: How the canonical session order was established.  Reported next to the
+#: headline so a reader can tell *why* that session leads, rather than being
+#: handed a conclusion with no account of how it was chosen.
+ORDER_THREAD = "workthread-handoff-order"
+ORDER_ACTIVITY = "activity-order"
+
+
+def canonical_session_order(store: Store, rows: Any,
+                            thread: Any = None) -> Tuple[List[Any], str]:
+    """The one session order every renderer uses.  Returns (rows, basis).
+
+    Three things that used to be conflated are kept apart:
+
+    * **thread order** — ``thread_sessions.ord``, the persisted handoff
+      sequence.  It is what this function returns when the rows are a
+      WorkThread's members, and it is the only ordering that survives a
+      re-scan: an old session whose provider file is touched again must not
+      jump to the front of the work.
+    * **latest activity** — ``updated_at``.  Reported as provenance, never
+      used to *select* here.
+    * **relevant conclusion** — a goal-conditioned judgement made further down
+      (``Goal-ranked evidence``), on evidence, not on recency.
+
+    Rows that belong to no thread — a bare ``merge`` of sessions, say — fall
+    back to a *total* order over ``(started_at, updated_at, id)``.  Total
+    matters: two sessions sharing a timestamp must still order the same way on
+    every run.
+    """
+    row_list = list(rows)
+    if not row_list:
+        return [], ORDER_ACTIVITY
+
+    tid = None
+    if thread is not None:
+        # Accept either a thread row or its id: callers usually have the id
+        # already, and re-reading the row just to learn it would be noise.
+        tid = thread if isinstance(thread, str) else _l0_get(thread, "id")
+    if tid:
+        rank = {sid: i for i, sid in enumerate(store.thread_member_ids(tid))}
+        members = [r for r in row_list if r["id"] in rank]
+        others = [r for r in row_list if r["id"] not in rank]
+        if members:
+            # Members in handoff order; anything that is not a member keeps the
+            # caller's order after them (the tiered renderer's existing
+            # contract, now shared).
+            return (sorted(members, key=lambda r: rank[r["id"]]) + others,
+                    ORDER_THREAD)
+
+    return (
+        sorted(row_list,
+               key=lambda r: (r["started_at"] or 0, r["updated_at"] or 0,
+                              str(r["id"]))),
+        ORDER_ACTIVITY,
+    )
+
+
+def _most_recently_active(rows: List[Any]) -> Optional[Any]:
+    """The row whose provider file changed last.  Provenance, not a verdict."""
+    best = None
+    best_key: Optional[Tuple[Any, Any, str]] = None
+    for r in rows:
+        key = (r["updated_at"] or 0, r["started_at"] or 0, str(r["id"]))
+        if best_key is None or key > best_key:
+            best, best_key = r, key
+    return best
+
+
 def build_continuation_bundle(
     store: Store,
     session_rows: List[Any],
     goal: Optional[str] = None,
     live_git: bool = True,
+    thread: Any = None,
 ) -> str:
-    """Synthesize N session rows into a structured Continuation Bundle (Markdown)."""
+    """Synthesize N session rows into a structured Continuation Bundle (Markdown).
+
+    ``thread`` is optional but decides the session order: given it, the bundle
+    follows the WorkThread's persisted handoff order, which is the same order
+    the tiered renderer uses.  Without it the rows are ordered by activity.
+    Either way the order is stated in the output, so the two renderers cannot
+    quietly tell a different story about the same thread.
+    """
     if not session_rows:
         return "# Continuation Bundle\n\n(no sessions provided)\n"
 
-    # Sort sessions chronologically: earliest first, newest last
-    sorted_rows = sorted(
-        session_rows,
-        key=lambda r: (r["updated_at"] or 0, r["started_at"] or 0),
-    )
+    sorted_rows, order_basis = canonical_session_order(store, session_rows, thread)
+    # The headline follows the canonical order, not the clock.  A session that
+    # merely got re-scanned more recently must not be able to take the headline
+    # away from the session the work was actually handed to.
     latest_row = sorted_rows[-1]
+    most_recent = _most_recently_active(sorted_rows)
 
     # Gather events per session
     sess_events: Dict[str, List[Any]] = {}
@@ -641,12 +738,16 @@ def build_continuation_bundle(
         L.append(f"**Primary user goal:** {goal}")
         L.append("")
     else:
-        # Collect user messages across sessions in chronological order
+        # Collect user messages across sessions, then order them by *event*
+        # time rather than by session order: with the session order now coming
+        # from the thread, relying on it here would have made "Initial request"
+        # mean "first session in the thread" instead of "first thing asked".
         all_user_msgs: List[Tuple[Any, Any]] = []
         for r in sorted_rows:
             for ev in sess_events[r["id"]]:
                 if ev["kind"] == "user" and ev["content"]:
                     all_user_msgs.append((r, ev))
+        all_user_msgs.sort(key=lambda pair: (pair[1]["ts"] or 0, str(pair[0]["id"])))
 
         if all_user_msgs:
             first_row, first_ev = all_user_msgs[0]
@@ -701,9 +802,16 @@ def build_continuation_bundle(
     L.append("")
     picked = _select_assistant(sess_events[latest_row["id"]])
     if picked:
+        # Say which rule put this session in the headline.  "active session"
+        # alone was ambiguous: it could mean the most recently touched file or
+        # the end of the handoff chain, and those are different sessions.
+        if order_basis == ORDER_THREAD:
+            why = "last in this WorkThread's handoff order"
+        else:
+            why = "newest by activity (these sessions belong to no WorkThread)"
         L.append(
             f"**Where work stopped (active session: `{latest_row['provider']}` "
-            f"`{latest_row['native_id'][:24]}`) -- that session's latest "
+            f"`{latest_row['native_id'][:24]}`, {why}) -- that session's latest "
             f"conclusion, read as what it said rather than as verified fact:**"
         )
         L.append("")
@@ -716,6 +824,20 @@ def build_continuation_bundle(
                 snippet = ev["content"].strip().replace("\n", " ")[:_ASST_MAX]
                 L.append(f"- **{tag}:** {snippet}")
         L.append("")
+        # When the clock and the handoff order disagree, say so instead of
+        # silently picking one.  Being touched more recently is not evidence
+        # that a conclusion is more correct, but the reader is entitled to know
+        # which session it was.
+        if (most_recent is not None
+                and most_recent["id"] != latest_row["id"]):
+            L.append(
+                f"> Note: the most recently *active* session is "
+                f"`[{most_recent['provider']}:{most_recent['native_id'][:16]}]` "
+                f"({fmt_ts(most_recent['updated_at'])}) -- later in time, earlier "
+                f"in the handoff order. Its conclusion is listed below with the "
+                f"others; activity time is not evidence that it is more correct."
+            )
+            L.append("")
     else:
         L.append("(no assistant conclusion captured in the active session)")
         L.append("")
@@ -917,18 +1039,21 @@ def build_tiered_bundle(
     ``l1_hard_max`` bytes.  A failed or missing git probe reads ``unknown``
     and the document still compiles.
     """
-    rows = list(session_rows or ())
-    rank = {sid: i
-            for i, sid in enumerate(store.thread_member_ids(thread["id"]))}
-    rows.sort(key=lambda r: rank.get(r["id"], len(rank)))
+    rows, _order_basis = canonical_session_order(store, session_rows or (), thread)
 
     # O2: the L0 "latest session" and the L1 window draw from LIVE members
     # only -- a retained (SOURCE_MISSING/ARCHIVED_CANONICAL) session is
     # history, not the thing to continue from.  The full member list still
     # feeds the L0: the thread owns every one of its sessions.
     live_members = [m for m in members if is_live(m)]
-    l0 = build_thread_state(thread, members, max_field_chars=max_field_chars)
-    latest = _l0_latest_member(live_members)
+    # The canonical handoff order, established once and used for both the L0
+    # "latest session" and the L1 window -- and, via the same helper, by the
+    # flat bundle.  `latest_session_*` therefore names the session the work was
+    # handed to last, not the session whose provider file was touched last.
+    handoff = store.thread_member_ids(thread["id"])
+    l0 = build_thread_state(thread, members, max_field_chars=max_field_chars,
+                            order=handoff)
+    latest = _l0_latest_member(live_members, order=handoff)
     repo_hint = (_l0_get(thread, "repo_root")
                  or (_l0_get(latest, "repo_root") or _l0_get(latest, "cwd")
                      if latest is not None else None))
@@ -1295,7 +1420,7 @@ def handoff_thread(
         default_out = Path(default_package_name(members[0]))
         res["style"] = "package"
     else:
-        text = build_continuation_bundle(store, members, goal=goal)
+        text = build_continuation_bundle(store, members, goal=goal, thread=tid)
         default_out = get_bundles_dir() / default_bundle_name(members)
         res["style"] = "continuation"
 

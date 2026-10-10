@@ -154,7 +154,12 @@ def bundle_preview(db: Optional[Path] = None,
     except ValueError as e:
         store.close()
         return {"error": str(e)}
-    bundle = build_continuation_bundle(store, rows, goal=goal)
+    # Same canonical order as every other renderer: if the caller named
+    # sessions that all belong to one active WorkThread, the bundle follows
+    # that thread's handoff order rather than the clock.  When they belong to
+    # no thread, the activity order stands (issue #15).
+    tid = store.thread_find_containing({r["id"] for r in rows}) if rows else None
+    bundle = build_continuation_bundle(store, rows, goal=goal, thread=tid)
     packed, info = apply_budget(bundle, tokens, target=target)
     store.close()
     return {"bundle": packed, "estimated_tokens": info["estimated_tokens"],
