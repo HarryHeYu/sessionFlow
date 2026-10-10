@@ -38,7 +38,7 @@ PKG = Path(__file__).resolve().parent.parent / "voyager"
 USER_FACING_MODULES = (
     "cli.py", "doctor.py", "dashboard.py", "auto.py", "continuity.py",
     "store.py", "api.py", "timeline.py", "budget.py", "verification_harness.py",
-    "startup.py",
+    "startup.py", "launcher.py",
 )
 
 #: The parallel detector, and the names that would give it away.
