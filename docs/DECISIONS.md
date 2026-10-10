@@ -581,7 +581,7 @@ scoping 只能**减少**被遍历的 provider，**不可能**漏掉本该刷新�
 **明确不做**: 没有引入第三套排序；没有让渲染器各自决定"哪条结论最可信"；
 `Goal-ranked evidence`（按 goal 的相关性排序）保持独立，未被合并进会话顺序。
 
-**Guard**: `tests/test_continuity_ordering.py`（15）钉住 —— 交叉顺序下
+**Guard**: `tests/test_continuity_ordering.py`（17）钉住 —— 交叉顺序下
 flat/tiered 一致、标题是交接末端而非最新文件、bundle 说明选择依据、
 分歧被点名、重新扫描不改顺序、时间戳相同时排序稳定、闲聊会话不能顶标题、
 冲突双方与 provenance 保留、三档预算下证据不丢、两个 thread 不串味、
