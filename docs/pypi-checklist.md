@@ -29,7 +29,7 @@ Then verify at https://test.pypi.org/project/voyager/ :
 
 - [ ] README renders (images resolve — they are absolute raw.githubusercontent URLs)
 - [ ] project description, license, authors, keywords correct
-- [ ] `voyager-1.0.0rc2` version string matches the tag
+- [ ] `voyager-<version>` version string matches the tag
 - [ ] extras listed: dsh / mcp / all / dev
 - [ ] entry points present (`voyager`, `voyager-mcp`)
 
@@ -40,7 +40,7 @@ python -m venv E:\sessionflow-scratch\tmp\pypitest-venv
 E:\sessionflow-scratch\tmp\pypitest-venv\Scripts\pip install `
   --index-url https://test.pypi.org/simple/ `
   --extra-index-url https://pypi.org/simple `
-  voyager==1.0.0rc2
+  voyager==<version>
 E:\sessionflow-scratch\tmp\pypitest-venv\Scripts\voyager demo
 ```
 

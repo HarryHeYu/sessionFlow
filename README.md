@@ -90,10 +90,12 @@ pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
 
 # or with pip (user-level)
 pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
-
-# once the release is on PyPI (tracked in CHANGELOG.md)
-pipx install voyager
 ```
+
+**Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
+nearest-neighbour search library, so a bare `pip install voyager` installs the
+wrong project — always use the `@ git+…` form above. Publishing under a final
+name is tracked in `CHANGELOG.md`.
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
@@ -109,7 +111,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # full dev env: ~970 passed
+python -m pytest tests/ -q     # 1092 collected, 1072 passed, 20 skipped
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,

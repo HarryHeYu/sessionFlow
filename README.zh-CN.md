@@ -82,10 +82,11 @@ pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
 
 # 或者用 pip 装到用户目录
 pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
-
-# 等 PyPI 发布后可简化为（进度见 CHANGELOG.md）
-pipx install voyager
 ```
+
+**Voyager 没有发布到 PyPI。** PyPI 上的 `voyager` 是一个毫不相干的最近邻搜索库，
+所以裸跑 `pip install voyager` 会装错项目 —— 请一律使用上面的 `@ git+…` 形式。
+改用正式包名的进度见 `CHANGELOG.md`。
 
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
@@ -100,7 +101,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"   
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # full dev 环境：754 collected：736 passed / 18 skipped
+python -m pytest tests/ -q     # 本 checkout（未装可选 extras）：1092 collected / 1072 passed / 20 skipped
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -355,16 +356,16 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # full dev 环境：754 collected：736 passed / 18 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
-python scripts/run_tests_core_only.py     # 模拟 core-only：屏蔽 mcp/zstandard/PIL 后重跑（收集数同 full dev，被屏蔽的用例转为 skipped）
+python -m pytest tests/ -q                # 本 checkout（未装可选 extras）：1092 collected / 1072 passed / 20 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
+python scripts/run_tests_core_only.py     # 模拟 core-only：把可选依赖变成不可导入后重跑，被门禁的用例转为 skipped
 ```
 
-两套环境的 skip 原因不同，两个数字不能互换。装了 full dev extras 时仅有的 2 个
-skip 是**数据依赖**：`tests/test_unicode_preservation.py` 读的是**默认本地索引**，
-库里没有「标题含中文」的会话（`:33`）或一个会话都没有（`:103`）时才跳过。
-core-only 会额外多出 16 个**依赖门禁** skip——缺 `mcp` / `zstandard` / `PIL`，
-于是 `test_continuity_tools.py`、`test_mcp.py`、`test_diagram.py`、`test_dsh.py`
-跳过。两类都不是平台门禁。
+上面的数字来自**本 checkout、未安装任何可选 extras**。收集数与 extras 无关；
+passed / skipped 的分配与它有关。装上 `mcp`、`zstandard`、`Pillow` 与 `dsh` extra 后，
+依赖门禁的 skip 会消失，剩下的是**数据依赖**那一类：
+`tests/test_unicode_preservation.py` 读的是**默认本地索引**，库里没有「标题含中文」的
+会话（`:33`）或一个会话都没有（`:103`）时才跳过。Windows 上还会多一个 ——
+`test_zcode_unreadable.py:162`，因为那里 `chmod` 并不能拒绝读取。两类都不是平台门禁。
 
 CI（[.github/workflows/test.yml](.github/workflows/test.yml)）在 Python 3.10–3.13
 （Linux）与 3.10/3.13（Windows，适配器要处理 `%APPDATA%`、盘符和反斜杠）上跑全量

@@ -77,9 +77,98 @@ timeline and doctor models untouched.
 
 ## [Unreleased]
 
-> Headline: the "Claude Code has no automatic session-start trigger" conclusion
-> recorded under 0.3.0 was **wrong**, and the cause was in Voyager, not in the
-> provider. Full analysis in `claude_continuity_verdict.md`.
+## [1.1.0] — 2026-10-11
+
+> Headline: **the continuation bundle no longer lets a clock decide what the
+> work was.** Three things that had been conflated are now separate — the
+> thread's handoff order, the most recent activity, and the goal-conditioned
+> conclusion — and a repository with more than one active WorkThread is reported
+> as ambiguous instead of silently resolved. The other theme is that several
+> surfaces stopped *saying things that were not true*: a capability matrix
+> promising a resume the adapter denies, a status line reporting "no thread"
+> where there were two, and a README whose install commands installed the wrong
+> project.
+
+### Added
+- **One canonical session order (D20, #15).** `continuity.canonical_session_order()`
+  is the single source of the order every renderer uses: members of a WorkThread
+  follow `thread_sessions.ord` (the persisted handoff sequence, which a re-scan
+  cannot change), rows outside a thread fall back to a total order over
+  `(started_at, updated_at, id)` so equal timestamps still sort the same way on
+  every run. The headline is the last row in that order, and it says which rule
+  chose it. When the clock and the handoff order disagree the bundle **states**
+  the disagreement, naming the most recently active session and saying that
+  activity time is not evidence of correctness.
+- **One resolver for "which WorkThread is this repo's work?" (#17).**
+  `auto.resolve_work_thread()` now backs the session-start hook, the MCP surface,
+  `api.current_work`, `api.continue_context` and the CLI. More than one active
+  thread yields `status: "ambiguous"` plus every candidate (newest first by
+  `(updated_at, id)`, capped at 20 with an explicit truncation flag); the newest
+  is still returned, as a **default**, and every caller labels it as one.
+  Naming a `thread_id` is honoured — including one from another repo, flagged
+  `thread_out_of_scope` — and a `thread_id` that does not exist is reported
+  rather than quietly replaced. `voyager continue` / `voyager switch` refuse with
+  exit 2 and print the candidates. Additive: bridge schema stays v1.
+- **`voyager doctor` explains every capability, not just startup continuity.**
+  Each provider now carries `capability_reasons`, one entry per dimension, taken
+  verbatim from the same resolver `voyager verify --matrix` reads, so the two
+  cannot disagree. ZCode's `native_resume` reads: *"the zcode adapter sets
+  can_resume=False; declared SUPPORTED (desktop resume is documented)"*.
+- **ZCode source probing distinguishes absent from unreadable.**
+  `probe_zcode_db()` classifies a path as absent / ok / unreadable / not-a-zcode
+  database, and the scan treats "present but unusable" as still-on-disk.
+- **Signal words are matched on boundaries.** The per-session assistant
+  selection no longer treats `optional` as `option` or `have nothing` as
+  `have not`; the boundary is ASCII word characters only, so CJK text adjacent
+  to a keyword still matches (a `\b` regex would miss `选项option`).
+- Tests: `tests/test_continuity_ordering.py` (18), `tests/test_thread_ambiguity.py`
+  (26), `tests/test_capability_truth.py` (12), `tests/test_budget_evidence_first.py`
+  (5), `tests/test_capability_consistency.py` (6), `tests/test_zcode_unreadable.py`
+  (12), `tests/test_signal_boundary.py` (5). Suite now collects 1092.
+
+### Fixed
+- **A capability matrix that promised what the adapter denies.** It declared
+  ZCode's `native_resume` as SUPPORTED while `zcode.py` sets `can_resume =
+  False`, so `voyager verify --matrix` told users a resume path existed. The
+  adapter is now the authority for that dimension.
+- **Budget packing kept the unverified and dropped the verifiable.** Under
+  pressure the keep-order put an assistant's self-report above the repository
+  snapshot, files, commands and errors. Evidence now outranks assertion, and
+  packing no longer reorders the bundle when it trims it.
+- **`_priority_of` prefix matching** let `## Goal` capture
+  `## Goal-ranked evidence`, silently giving the evidence section the goal's
+  keep-priority.
+- **A continuation bundle kept only each session's last assistant message**
+  (#14), so a session whose final turn was a progress note lost the proposals
+  and open items it had raised earlier.
+- **"Current verified state" was not verified.** The section held the newest
+  session's last assistant message; it is now `## Latest assistant conclusion`,
+  read as what was said rather than as fact, and the older-session section no
+  longer marks anything "superseded".
+- **A corrupt, locked or permission-denied ZCode database was treated as a
+  vanished source**, marking every one of that provider's sessions
+  `SOURCE_MISSING`. Unreadable is not absent; history is retained and the reason
+  is reported.
+- **A checkpoint id could collide.** Ids came from `time.time()`, whose Windows
+  resolution is ~15.6 ms, so two checkpoints created in the same tick failed on
+  a UNIQUE constraint.
+- **The Codex SessionStart relay hardcoded `C:\Python314\python.exe`** and
+  transcoded its payload through the console code page, so a non-ASCII repo path
+  or a machine without that interpreter broke the hook. The interpreter is
+  resolved at run time and the payload is forwarded as bytes.
+- **`voyager status` reported `NO_THREAD` for a repo with two threads**, because
+  ambiguity also leaves `continuity_available` False; the MCP tools said "no
+  active WorkThread" in the same situation, and Grok's rule writer reported
+  `no_thread`. All three now report the ambiguity.
+- **`current_work(thread_id=<missing>)` returned another thread's bundle**
+  alongside `thread_not_found`. It now reports and stops.
+- **`merge` attached sessions by iterating a set**, so `thread_sessions.ord` —
+  and therefore the merged order and its headline — varied between processes.
+- **The README's install commands did not work**, and one of them installed the
+  wrong project: `voyager` on PyPI is an unrelated nearest-neighbour library.
+  The test counts were stale by a third of the suite.
+- `launcher.py` now passes the WorkThread through to the bundle compiler, and
+  the capability drift guard covers it.
 
 ### Added
 - **Architecture hygiene + roadmap completion** (O6, DECISIONS D19).
