@@ -535,17 +535,18 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # full dev env: 754 collected, 736 passed, 18 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
+python -m pytest tests/ -q                # 1092 collected, 1072 passed, 20 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
 python scripts/run_tests_core_only.py     # core-only simulated: a subset that skips the DB-backed suites
 ```
 
-The two environments skip for different reasons, and the two numbers are not
-interchangeable. With the full dev extras the only 2 skips are
-**data-dependent**: `tests/test_unicode_preservation.py` reads the default local
-index and skips when it holds no Chinese-titled session (`:33`) or no sessions
-at all (`:103`). The core-only run adds 16 **dependency-gated** skips — `mcp`,
-`zstandard` and `PIL` are absent, so `test_continuity_tools.py`, `test_mcp.py`,
-`test_diagram.py` and `test_dsh.py` skip. Neither class is a platform gate.
+Those numbers are from this checkout with **no optional extras installed**. The
+collected count does not depend on the extras; the pass/skip split does. With
+`mcp`, `zstandard`, `Pillow` and the `dsh` extra present, the dependency-gated
+skips disappear and what is left is the **data-dependent** class:
+`tests/test_unicode_preservation.py` reads the default local index and skips
+when it holds no Chinese-titled session (`:33`) or no sessions at all (`:103`).
+On Windows one more skips — `test_zcode_unreadable.py:162`, because `chmod` does
+not deny reads there. Neither class is a platform gate.
 
 CI ([.github/workflows/test.yml](https://github.com/HarryHeYu/sessionFlow/blob/main/.github/workflows/test.yml)) runs the suite
 on Python 3.10–3.13 (Linux) and 3.10/3.13 (Windows — the adapters deal with
