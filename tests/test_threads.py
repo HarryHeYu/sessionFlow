@@ -218,8 +218,18 @@ def test_bare_continue_without_thread_falls_back_to_newest(
 # deterministically; no silent auto-clustering, no cross-thread swallowing
 # ---------------------------------------------------------------------------
 
-def test_continue_repo_resolves_newest_thread(tmp_path, three_sessions,
-                                              monkeypatch, capsys):
+def test_continue_repo_with_two_threads_refuses_and_names_them(
+        tmp_path, three_sessions, monkeypatch, capsys):
+    """Two active threads in one repo: `continue --repo` must not pick one.
+
+    This test used to assert that the newest won.  Issue #17 changed that rule —
+    recency may suggest a default, it does not establish intent, and `continue`
+    had been contradicting the warning `voyager thread reopen` prints ("automatic
+    continuation will now report AMBIGUOUS and refuse to choose").  The original
+    purpose still has to hold, and is asserted below: resolution is
+    deterministic, and one thread's members are never swallowed into another's
+    bundle.
+    """
     store = Store(three_sessions)
     # thread A (older): the three "task" members
     tid_a = store.thread_create(repo_root="E:/shared/repo", title="thread A")
@@ -229,14 +239,10 @@ def test_continue_repo_resolves_newest_thread(tmp_path, three_sessions,
     # deliberately different membership
     tid_b = store.thread_create(repo_root="E:/shared/repo", title="thread B")
     store.thread_attach(tid_b, "claude:d3")
-    # Pin the ordering instead of trusting the wall clock. Every call above
-    # stamps `threads.updated_at` from `time.time()` -- `thread_create` directly,
-    # `thread_attach` via `thread_touch` -- so if the whole six-call sequence
-    # lands inside one clock tick, all the stamps tie and the
-    # `max(cands, key=updated_at)` pick in `cli.py` falls back to list order,
-    # which is thread A. On a coarse clock this test then fails for a reason
-    # that has nothing to do with the rule it is named after. Two explicit
-    # values make the assertion about the rule, not about clock resolution.
+    # Pin the ordering instead of trusting the wall clock: `thread_create` and
+    # `thread_attach` both stamp `threads.updated_at` from `time.time()`, so a
+    # fast run can tie every stamp.  Two explicit values make the assertions
+    # about the rule rather than about clock resolution.
     store.con.execute("UPDATE threads SET updated_at=? WHERE id=?",
                       (100.0, tid_a))
     store.con.execute("UPDATE threads SET updated_at=? WHERE id=?",
@@ -245,11 +251,19 @@ def test_continue_repo_resolves_newest_thread(tmp_path, three_sessions,
     store.close()
 
     monkeypatch.setenv("VOYAGER_NO_SYNC", "1")
-    out_b = tmp_path / "b.md"
+
+    # No --thread: refuse, name every candidate, and point at the way out.
     assert main(["--db", str(three_sessions), "continue", "--repo",
-                 "shared", "--to", "claude", "-o", str(out_b)]) == 0
-    printed = capsys.readouterr().out
-    assert "active thread:" in printed and "thread B" in printed
+                 "shared", "--to", "claude"]) == 2
+    err = capsys.readouterr().err
+    assert "refusing to guess" in err, err
+    assert "thread A" in err and "thread B" in err, err
+    assert "--thread" in err, err
+
+    # Explicit --thread: deterministic, and thread A is still not swallowed.
+    out_b = tmp_path / "b.md"
+    assert main(["--db", str(three_sessions), "continue", "--repo", "shared",
+                 "--thread", tid_b, "--to", "claude", "-o", str(out_b)]) == 0
     content = out_b.read_text(encoding="utf-8")
     assert "other thing" in content
     assert "task part 0" not in content      # thread A members not swallowed

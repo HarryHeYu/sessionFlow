@@ -294,6 +294,17 @@ agent 生成上下文包/接续包）、`voyager_thread_list/show/attach/close`
 Cursor（`mcp.json`）。没装 `mcp` 时，服务会打印上面那行安装命令而不是抛一个
 光秃秃的 `ModuleNotFoundError`；CLI 其余功能完全不需要它。
 
+**同一仓库有多条 active WorkThread 时**：不会替你选。`voyager_current` 会返回
+`status: "ambiguous"` 加候选列表；`voyager_context` 会列出候选而不是谎称
+"没有 WorkThread"；CLI 的 `voyager continue` / `voyager switch` 打印候选并以非零退出；
+`voyager status` 报 `AMBIGUOUS`。要继续请显式指定：
+
+```sh
+voyager continue --thread thr_xxxx     # 或 voyager switch claude --thread ...
+```
+
+**"最近活动"只能作为默认候选，不能证明你想继续的是哪条线。**
+
 ## 支持的平台
 
 | 平台 | 数据源 | 消息 | 工具调用 | Shell 退出码 | 文件 diff | Token | 恢复 |
@@ -306,6 +317,11 @@ Cursor（`mcp.json`）。没装 `mcp` 时，服务会打印上面那行安装命
 | Cursor | `state.vscdb`（SQLite） | ✅ | ✅ | ❌ | ⚠️ 在 raw 里 | ⚠️ | ❌ 仅 IDE |
 | Kiro IDE | workspace-session JSON | ✅ | ❌ 未持久化 | ❌ | ❌ | ❌ | ❌ 仅 IDE |
 | Antigravity | 会话 SQLite（protobuf） | ⚠️ 启发式 | ⚠️ 启发式 | ⚠️ 文本 | ⚠️ 快照在磁盘 | ❌ | ❌ 仅 IDE |
+
+**Resume** 一列写的是 Voyager 会为该 provider 运行的命令 —— 它说明命令存在且已接好，
+**不**说明有人观察到 resume 真的成功过。目前**没有任何 provider 的 native resume 被端到端跑过**，
+所以在那张验证表出现对应行之前，请把这一列的每个 `✅` 都当作 `NOT VERIFIED`。
+（`*_continuity_verdict.md` 覆盖的是 hook 注入，那是另一种能力。）
 
 Cursor 与 Antigravity 适配器标记为实验性：Cursor 只读解析它的 KV 存储，
 Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。

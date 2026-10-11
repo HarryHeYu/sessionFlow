@@ -310,6 +310,23 @@ items exist only because a checkpoint recorded them. `reopen` warns when it woul
 leave two active threads for one repository, because ambiguity is a choice the
 user makes, never something a timestamp settles.
 
+#### When a repository has more than one active WorkThread
+
+Nothing picks one for you. `voyager continue` and `voyager switch` print every
+candidate and exit non-zero; `voyager status` reports `AMBIGUOUS`; the bridge
+ops answer with `thread_ambiguous: true` and a `thread_candidates` list, and the
+one they return is labelled a *default* rather than a decision. Name the thread
+to proceed:
+
+```
+voyager continue --thread thr_xxxx     # or `voyager switch claude --thread ...`
+voyager thread close <id>              # if one line of work is finished
+```
+
+Recency may suggest a default; it never establishes intent. A session that was
+merely re-scanned must not be able to take the headline away from the session the
+work was handed to, which is also why the bundle names the rule that chose it.
+
 ### Dashboard
 
 ```
@@ -467,6 +484,13 @@ For verification of actual zero-touch startup behavior, see ](https://github.com
 | Cursor | `state.vscdb` (SQLite) | ✅ | ✅ | ❌ | ⚠️ in raw | ⚠️ | ❌ IDE only |
 | Kiro IDE | workspace-session JSON | ✅ | ❌ not persisted | ❌ | ❌ | ❌ | ❌ IDE only |
 | Antigravity | conversation SQLite (protobuf) | ⚠️ heuristic | ⚠️ heuristic | ⚠️ text | ⚠️ snapshots on disk | ❌ | ❌ IDE only |
+
+The **Resume** column names the command Voyager will run for that provider — it
+says the command exists and is wired up, **not** that a resume has been observed
+to work. No native resume has been exercised end to end on any provider, so
+treat every `✅` there as `NOT VERIFIED` until the verification table above
+carries a row saying otherwise. (The `*_continuity_verdict.md` files cover hook
+injection, which is a different capability.)
 
 Cursor and Antigravity adapters are marked experimental: Cursor reads its
 key-value store read-only and Antigravity decodes protobuf blobs
