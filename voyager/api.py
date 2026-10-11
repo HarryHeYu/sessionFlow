@@ -256,11 +256,26 @@ def search(db: Optional[Path] = None, query: str = "", provider: Optional[str] =
         store.close()
 
 
+def _resolve_thread(store: Store, repo: Optional[str] = None,
+                    thread_id: Optional[str] = None) -> Dict[str, Any]:
+    """The shared WorkThread resolution.
+
+    Delegates to :func:`voyager.auto.resolve_work_thread` so the session-start
+    hook, the MCP surface and this API cannot answer "which thread is this
+    repo's current work?" differently.  Imported lazily to keep this module's
+    import graph as thin as it was.
+    """
+    from .auto import resolve_work_thread
+    return resolve_work_thread(store, repo=repo, thread_id=thread_id)
+
+
 def _newest_thread_for_repo(store: Store, repo: Optional[str]):
-    threads = [t for t in store.thread_list("active")
-               if not repo or (t["repo_root"] and same_repo_loose(t["repo_root"], repo))]
-    threads.sort(key=lambda t: t["updated_at"] or 0, reverse=True)
-    return threads[0] if threads else None
+    """The default thread for a repo.
+
+    Kept for callers that only need the row; new code should call
+    :func:`_resolve_thread`, which also reports that a default is all it is.
+    """
+    return _resolve_thread(store, repo=repo)["thread"]
 
 
 def _newest_session_for_repo(store: Store, repo: Optional[str]):
@@ -274,7 +289,8 @@ def _newest_session_for_repo(store: Store, repo: Optional[str]):
 
 def current_work(db: Optional[Path] = None, repo: Optional[str] = None,
                  goal: Optional[str] = None, budget: Optional[str] = None,
-                 target: Optional[str] = None) -> Dict[str, Any]:
+                 target: Optional[str] = None,
+                 thread_id: Optional[str] = None) -> Dict[str, Any]:
     """What is the current work for this repo?  Read-only.
 
     The ``sessionflow_current_work`` endpoint: the active WorkThread (if any),
@@ -282,11 +298,41 @@ def current_work(db: Optional[Path] = None, repo: Optional[str] = None,
     so a client does not stitch several calls together and drift from what the
     CLI would have chosen.  Falls back to the newest session when there is no
     WorkThread.
+
+    **Recency may suggest a default; it does not establish intent.**  When a
+    repo has more than one active WorkThread the reply carries
+    ``thread_ambiguous: true`` and every candidate (``thread_candidates``), and
+    the ``thread`` field is labelled as a default rather than presented as the
+    answer.  With exactly one thread nothing is added, so the common case stays
+    quiet.  Naming ``thread_id`` is an explicit choice: it is honoured even if
+    it belongs to another repo (reported as ``thread_out_of_scope``), and a
+    ``thread_id`` that does not exist is reported as ``thread_not_found``
+    instead of silently falling back to some other thread.
+
+    All of those fields are additive; ``schema_version`` stays 1.
     """
     store = Store(db)
     try:
-        thread = _newest_thread_for_repo(store, repo)
+        resolved = _resolve_thread(store, repo=repo, thread_id=thread_id)
+        thread = resolved["thread"]
         out: Dict[str, Any] = {"repo": repo, "has_thread": thread is not None}
+
+        if resolved["explicit"]:
+            out["thread_requested"] = thread_id
+            if resolved["not_found"]:
+                out["thread_not_found"] = True
+            elif resolved["out_of_scope"]:
+                out["thread_out_of_scope"] = True
+        elif resolved["status"] == "ambiguous":
+            out["thread_ambiguous"] = True
+            out["thread_candidates"] = resolved["candidates"]
+            if resolved["candidates_truncated"]:
+                out["candidates_truncated"] = True
+            out["thread_default_reason"] = (
+                "{0} active WorkThreads in scope; `thread` is the most "
+                "recently active one, which is a default and not a choice "
+                "anyone made".format(len(resolved["candidates"])))
+
         refs: List[str] = []
         if thread:
             out["thread"] = {k: thread[k] for k in
@@ -296,6 +342,12 @@ def current_work(db: Optional[Path] = None, repo: Optional[str] = None,
             out["members"] = detail.get("members", [])
             out["lease"] = detail.get("lease")
             refs = [m["id"] for m in out["members"]]
+        elif resolved["not_found"]:
+            # The caller named a thread and it is not there.  Falling back to
+            # "the newest session of this repo" would answer a question nobody
+            # asked, and the continuation bundle would look authoritative while
+            # `thread_not_found` sat next to it.  Report, do not substitute.
+            pass
         else:
             row = _newest_session_for_repo(store, repo)
             if row is not None:
@@ -326,14 +378,23 @@ def continue_context(db: Optional[Path] = None,
     :func:`voyager.continuity.build_continuation_bundle` via
     :func:`bundle_preview` -- the plugin must not grow a second continuation
     algorithm.  Read-only.
+
+    A named ``thread_id`` that does not exist is an error, not a cue to fall
+    back to some other thread: the caller asked for a specific one.  When the
+    repo scope resolves to more than one active thread the bundle is still
+    compiled (this is a read), but the reply says so -- ``thread_ambiguous``
+    plus ``thread_candidates`` -- and labels the one it used as a default.
     """
     store = Store(db)
+    resolved: Optional[Dict[str, Any]] = None
     try:
         refs = list(session_refs or [])
-        if not refs and thread_id:
-            refs = [m["id"] for m in store.thread_members(thread_id)]
         if not refs:
-            thread = _newest_thread_for_repo(store, repo)
+            resolved = _resolve_thread(store, repo=repo, thread_id=thread_id)
+            if resolved["not_found"]:
+                return {"error": "no such WorkThread: %s" % thread_id,
+                        "thread_requested": thread_id, "thread_not_found": True}
+            thread = resolved["thread"]
             if thread:
                 refs = [m["id"] for m in store.thread_members(thread["id"])]
         if not refs:
@@ -348,6 +409,21 @@ def continue_context(db: Optional[Path] = None,
                          target=target)
     if isinstance(out, dict):
         out.setdefault("scope", refs)
+        if resolved is not None:
+            if resolved["explicit"]:
+                out["thread_requested"] = thread_id
+                if resolved["out_of_scope"]:
+                    out["thread_out_of_scope"] = True
+            elif resolved["status"] == "ambiguous":
+                out["thread_ambiguous"] = True
+                out["thread_candidates"] = resolved["candidates"]
+                if resolved["candidates_truncated"]:
+                    out["candidates_truncated"] = True
+                out["thread_default_reason"] = (
+                    "{0} active WorkThreads in scope; the bundle was compiled "
+                    "from the most recently active one, which is a default and "
+                    "not a choice anyone made".format(
+                        len(resolved["candidates"])))
     return out
 
 

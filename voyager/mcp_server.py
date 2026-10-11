@@ -349,6 +349,11 @@ def voyager_current(cwd: str = "", provider: str = "",
     disc = discover_continuity(store, cwd=cwd or None, provider=provider or None,
                                native_session_id=native_session_id or None)
     store.close()
+    if disc["status"] == "ambiguous":
+        # Not "no active WorkThread" — there are several.  The JSON carries the
+        # candidates and the recommended action, so return it rather than a
+        # sentence that would be untrue.
+        return json.dumps(disc, ensure_ascii=False, indent=2, default=str)
     if not disc["continuity_available"]:
         return "no active WorkThread for this repo"
     return json.dumps(disc, ensure_ascii=False, indent=2, default=str)
@@ -373,6 +378,22 @@ def voyager_context(cwd: str = "", provider: str = "",
                                    provider=provider or None,
                                    native_session_id=native_session_id or None,
                                    goal=goal or None, budget=budget or None)
+    # `get_continuation_context` reports the discovery under `discovery` and has
+    # no top-level status; ambiguity arrives as continuity_available=False.
+    disc = res.get("discovery") or {}
+    if disc.get("status") == "ambiguous":
+        # "no active WorkThread" would be false here: there are several, and
+        # saying otherwise sends the caller looking for a problem that is not
+        # there.  Name them and let the caller choose.
+        cands = disc.get("candidate_threads") or []
+        lines = ["{0} active WorkThreads for this repo — nothing was chosen; "
+                 "pick one before continuing:".format(len(cands))]
+        for c in cands:
+            lines.append("  {0}  {1}".format(c["id"], (c["title"] or "")[:70]))
+        if cands:
+            lines.append("(The most recently active is {0}, but activity time "
+                         "is not a decision anyone made.)".format(cands[0]["id"]))
+        return "\n".join(lines)
     if not res["continuity_available"]:
         return "no active WorkThread — nothing to continue"
     return res["context"]

@@ -17,6 +17,7 @@ from .db_health import (cmd_db_backup, cmd_db_check, cmd_db_compact,
                         cmd_db_repair)
 from .adapters import load_all
 from .adapters.base import enabled_adapters, git_info
+from .auto import resolve_work_thread
 from .store import Store, default_db_path, lease_state
 from .integrations.hook import cmd_hook_startup
 from .util import fmt_ts, same_repo_loose, parse_when as _parse_when
@@ -997,7 +998,15 @@ def cmd_integrate_remove(args) -> int:
 
 
 def _continuity_status_enum(disc: dict) -> str:
-    """READY | PENDING_ATTACH | AMBIGUOUS | STALE | NO_THREAD."""
+    """READY | PENDING_ATTACH | AMBIGUOUS | STALE | NO_THREAD.
+
+    AMBIGUOUS comes first: more than one active WorkThread for the repo leaves
+    ``continuity_available`` False too, and reporting that as NO_THREAD tells
+    the user their threads are missing when the truth is they have a choice to
+    make.  (The other AMBIGUOUS source, a pending attach, is checked below.)
+    """
+    if disc.get("status") == "ambiguous":
+        return "AMBIGUOUS"
     if not disc.get("continuity_available"):
         return "NO_THREAD"
     pend = disc.get("pending_attach") or []
@@ -1025,6 +1034,14 @@ def cmd_status(args) -> int:
         return 0
     t = disc.get("active_thread")
     if not t:
+        if enum == "AMBIGUOUS":
+            print("continuity: AMBIGUOUS — {0} active WorkThreads for this "
+                  "repo; nothing was chosen".format(
+                      len(disc.get("candidate_threads") or [])))
+            for c in disc.get("candidate_threads") or []:
+                print("  {0}  {1}".format(c["id"], (c["title"] or "")[:70]))
+            print("  pick one: voyager continue --thread <id>")
+            return 0
         print("continuity: NO_THREAD — no active WorkThread for this repo")
         print("  create one: voyager thread create --repo <path>")
         return 0
@@ -1082,6 +1099,12 @@ def cmd_hook_grok_context(args) -> int:
         if status == "written":
             print("Voyager: continuation context -> {0} ({1} chars, thread {2})"
                   .format(result["path"], result["chars"], result["thread"]))
+        elif status == "ambiguous":
+            print("Voyager: {0} active WorkThreads for this repo — no "
+                  "continuation rule written (nothing was chosen)"
+                  .format(len(result.get("candidates") or [])))
+            if result.get("message"):
+                print("  " + result["message"].replace("\n", "\n  "))
         elif status == "no_thread":
             print("Voyager: no active WorkThread for this repo; rules cleared")
         else:
@@ -1186,6 +1209,26 @@ def _continue_thread(store: Store, t, args) -> int:
     return _handoff_via_engine(store, args, "continue", thread=t, target=target)
 
 
+def _print_thread_ambiguity(repo: str, resolved: dict) -> None:
+    """Refuse to choose, and say exactly how to choose.
+
+    Recency may suggest a default; it does not establish intent, so the
+    commands that would act on one thread print every candidate and stop.
+    """
+    cands = resolved["candidates"]
+    print("error: {0} active WorkThreads for this repo — refusing to guess "
+          "which one you meant.".format(len(cands)), file=sys.stderr)
+    print("repo: {0}".format(repo), file=sys.stderr)
+    for c in cands:
+        print("  {0}  {1}".format(c["id"], (c["title"] or "")[:70]),
+              file=sys.stderr)
+    if resolved.get("candidates_truncated"):
+        print("  ... (truncated)", file=sys.stderr)
+    print("Pick one explicitly: --thread <id>", file=sys.stderr)
+    print("(The most recently active is {0}, but activity time is not a "
+          "choice you made.)".format(cands[0]["id"]), file=sys.stderr)
+
+
 def cmd_continue(args) -> int:
     """One command to pick work back up: native resume when possible,
     automatic cross-agent handoff otherwise.
@@ -1200,8 +1243,11 @@ def cmd_continue(args) -> int:
                   providers=[args.platform] if getattr(args, "platform", None) else None)
 
     # -- WorkThread scope --------------------------------------------------
-    # Deterministic only: an explicit thread wins, otherwise the most
-    # recently updated active thread for this repo is picked LOUDLY.
+    # Deterministic only: an explicit thread wins.  Otherwise the repo's active
+    # threads are resolved by the shared resolver, and more than one is
+    # AMBIGUOUS: this refuses rather than picking the newest, which is what
+    # `voyager thread reopen` has always told users would happen.  Recency is
+    # not evidence that the user chose that line of work.
     # Multi-signal auto-clustering is deliberately NOT implemented
     # (roadmap Deferred) — sessions are never silently swallowed.
     t = None
@@ -1218,10 +1264,13 @@ def cmd_continue(args) -> int:
         else:
             repo = (git_info(os.getcwd()).get("repo_root")
                     or os.getcwd().replace("\\", "/"))
-        cands = [x for x in store.thread_list("active")
-                 if x["repo_root"] and same_repo_loose(x["repo_root"], repo)]
-        if cands:
-            t = max(cands, key=lambda x: x["updated_at"] or 0)
+        resolved = resolve_work_thread(store, repo=repo)
+        if resolved["status"] == "ambiguous":
+            _print_thread_ambiguity(repo, resolved)
+            store.close()
+            return 2
+        t = resolved["thread"]
+        if t is not None:
             print("active thread: {0}  ({1})".format(
                 t["id"], (t["title"] or "")[:70]))
     if t is not None:
@@ -1531,19 +1580,23 @@ def cmd_switch(args) -> int:
         from .adapters.base import git_info
         repo = repo_ref or (git_info(os.getcwd()).get("repo_root")
                             or os.getcwd().replace("\\", "/"))
-        cands = [x for x in store.thread_list("active")
-                 if x["repo_root"] and same_repo_loose(x["repo_root"], repo)]
-        if not cands:
+        resolved = resolve_work_thread(store, repo=repo)
+        if resolved["status"] == "no_thread":
             print("error: no active WorkThread for this repo ({0}).".format(repo))
             print("Create one: voyager thread create --repo {0} --attach <ids>".format(repo))
             print("Or continue without switching: voyager continue")
             store.close()
             return 1
-        # P9: this branch used to fall through to `thread=t` with `t` unbound
-        # (the comprehension's `t` never escapes in py3), so `voyager switch
-        # <agent>` without --thread raised UnboundLocalError.  Pick the newest
-        # active thread for the repo, loudly, exactly like `continue` does.
-        t = max(cands, key=lambda x: x["updated_at"] or 0)
+        if resolved["status"] == "ambiguous":
+            # A handoff writes a package and takes a lease, so the wrong thread
+            # is not a cosmetic mistake.  Refuse, and print every candidate.
+            _print_thread_ambiguity(repo, resolved)
+            store.close()
+            return 2
+        # `t` used to be leaked from a comprehension here, so `voyager switch
+        # <agent>` without --thread raised UnboundLocalError before that was
+        # fixed.  Now the resolver is the only thing that picks.
+        t = resolved["thread"]
         print("active thread: {0}  ({1})".format(t["id"], (t["title"] or "")[:70]))
 
     return _handoff_via_engine(store, args, "switch", thread=t, target=target)

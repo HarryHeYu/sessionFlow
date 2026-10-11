@@ -148,6 +148,92 @@ def resolve_pending_attaches(store: Store, now: Optional[float] = None,
 # Phase B — continuity discovery (shared core primitive)
 # ---------------------------------------------------------------------------
 
+#: Upper bound on reported candidates.  A repo normally has a handful of active
+#: threads; an unscoped query (`repo=None`) can see every thread in the index,
+#: and a caller that has to read 300 of them to learn there is an ambiguity has
+#: been told nothing useful.  Truncation is always reported.
+MAX_THREAD_CANDIDATES = 20
+
+
+def resolve_work_thread(store: Store, repo: Optional[str] = None,
+                        thread_id: Optional[str] = None) -> Dict[str, Any]:
+    """Which WorkThread is the current work for this repo?  The one answer.
+
+    Recency may suggest a **default**; it never establishes **intent**.  This is
+    the single resolver behind ``discover_continuity`` (the session-start and MCP
+    surface), ``api.current_work`` and ``api.continue_context``, so those three
+    cannot drift into three different answers to the same question.
+
+    Returns a dict with:
+
+    * ``status`` — ``"no_thread"``, ``"success"`` or ``"ambiguous"``.  The last
+      one means "there is more than one candidate and nothing here chose
+      between them"; the callers that must act on a single thread are expected
+      to stop and ask, not to take ``thread`` as the answer.
+    * ``thread`` — the row, or ``None``.  Under ``"ambiguous"`` this is the most
+      recently active candidate, offered so a caller can show *a* default; it
+      must be labelled as a default wherever it is displayed.
+    * ``candidates`` — every active thread in scope, newest first, as
+      ``{id, title, updated_at, goal, repo_root}``.  Ordered by
+      ``(updated_at, id)`` descending: equal timestamps must order the same way
+      on every run, and SQLite's ``GROUP BY`` order is not a contract.
+    * ``candidates_truncated`` — True when the list was capped at
+      :data:`MAX_THREAD_CANDIDATES`.
+    * ``explicit`` — the caller named ``thread_id``.
+    * ``not_found`` — the caller named a ``thread_id`` that does not exist.
+    * ``out_of_scope`` — the named thread exists but belongs to another repo.
+      The named thread is still honoured: the caller asked for it by name.
+    """
+    def _row(t) -> Dict[str, Any]:
+        """A thread row that always carries `members`.
+
+        ``thread_list`` adds it with a COUNT; ``thread_get`` (the explicit-id
+        path) does not, and every caller that renders a thread reads it.  Rows
+        are normalised here so the two paths cannot differ.
+        """
+        d = dict(t)
+        if "members" not in d:
+            d["members"] = len(store.thread_member_ids(d["id"]))
+        return d
+
+    def _cand(t) -> Dict[str, Any]:
+        return {"id": t["id"], "title": t["title"],
+                "updated_at": t["updated_at"], "goal": t["goal"],
+                "repo_root": t["repo_root"]}
+
+    if thread_id:
+        t = store.thread_get(thread_id)
+        if t is None:
+            return {"status": "no_thread", "thread": None, "candidates": [],
+                    "candidates_truncated": False, "explicit": True,
+                    "not_found": True, "out_of_scope": False}
+        t = _row(t)
+        out_of_scope = bool(repo and t["repo_root"]
+                            and not same_repo_loose(t["repo_root"], repo))
+        return {"status": "success", "thread": t, "candidates": [_cand(t)],
+                "candidates_truncated": False, "explicit": True,
+                "not_found": False, "out_of_scope": out_of_scope}
+
+    cands = [t for t in store.thread_list("active")
+             if not repo or (t["repo_root"] and same_repo_loose(t["repo_root"], repo))]
+    cands.sort(key=lambda t: (t["updated_at"] or 0, t["id"] or ""), reverse=True)
+    truncated = len(cands) > MAX_THREAD_CANDIDATES
+    shown = cands[:MAX_THREAD_CANDIDATES]
+
+    if not cands:
+        return {"status": "no_thread", "thread": None, "candidates": [],
+                "candidates_truncated": False, "explicit": False,
+                "not_found": False, "out_of_scope": False}
+    if len(cands) == 1:
+        return {"status": "success", "thread": _row(cands[0]),
+                "candidates": [_cand(cands[0])], "candidates_truncated": False,
+                "explicit": False, "not_found": False, "out_of_scope": False}
+    return {"status": "ambiguous", "thread": _row(cands[0]),
+            "candidates": [_cand(t) for t in shown],
+            "candidates_truncated": truncated, "explicit": False,
+            "not_found": False, "out_of_scope": False}
+
+
 def discover_continuity(store: Store, cwd: Optional[str] = None,
                         provider: Optional[str] = None,
                         native_session_id: Optional[str] = None,
@@ -171,14 +257,8 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
     repo = repo or (git_info(cwd or os.getcwd()).get("repo_root")
                     or (cwd or os.getcwd()).replace("\\", "/"))
 
-    # Filter active threads for this repo
-    active_threads = [t for t in store.thread_list("active")
-                     if t["repo_root"] and same_repo_loose(t["repo_root"], repo)]
-
-    if thread_id:
-        # Explicit thread override - single thread mode
-        t = store.thread_get(thread_id)
-        active_threads = [t] if t else []
+    # One resolver for the whole codebase: see resolve_work_thread.
+    resolved = resolve_work_thread(store, repo=repo, thread_id=thread_id)
 
     result: Dict[str, Any] = {
         "repo_root": repo,
@@ -187,6 +267,8 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
         "active_thread": None,
         "current_goal": None,
         "candidate_threads": [],  # for ambiguity diagnostics
+        "candidates_truncated": resolved["candidates_truncated"],
+        "thread_out_of_scope": resolved["out_of_scope"],
         "latest_holder": None,
         "latest_session": None,
         "lease_state": {"held": False, "expired": False, "why": "free",
@@ -196,27 +278,20 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
     }
 
     # SECURITY CHECK: multiple active threads = ambiguous
-    if len(active_threads) == 0:
+    if resolved["status"] == "no_thread":
+        result["thread_not_found"] = resolved["not_found"]
         return result
 
-    if len(active_threads) > 1:
+    if resolved["status"] == "ambiguous":
         # AMBIGUOUS - do not auto-select
         result["status"] = "ambiguous"
-        result["candidate_threads"] = [
-            {
-                "id": t["id"],
-                "title": t["title"],
-                "updated_at": t["updated_at"],
-                "goal": t["goal"],
-            }
-            for t in active_threads
-        ]
+        result["candidate_threads"] = resolved["candidates"]
         result["continuity_available"] = False
         result["recommended_action"] = "resolve-ambiguity"
         return result
 
     # Exactly one active thread - safe to use
-    thread = active_threads[0]
+    thread = resolved["thread"]
     result["status"] = "success"
     result["continuity_available"] = True
     result["active_thread"] = dict(thread)

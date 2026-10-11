@@ -157,12 +157,21 @@ def write_context_rules(
         # the repo the user is in. It must not delete a rule another surface
         # wrote for the repo the next session will actually start in.
         removed = clear_context_rules(home) if clear else False
-        return {
-            "status": "no_thread",
+        # "no_thread" would be untrue when the repo has several: the rule is
+        # withheld because there is a choice to make, not because the threads
+        # are missing. Behaviour is identical either way -- nothing is written.
+        ambiguous = (getattr(result, "attach_status", "")
+                     == "ERROR_AMBIGUOUS_WORKTHREAD")
+        payload = {
+            "status": "ambiguous" if ambiguous else "no_thread",
             "thread": None,
             "path": str(path),
             "cleared": removed,
         }
+        if ambiguous:
+            payload["message"] = getattr(result, "ambiguity_error", "") or (
+                "multiple active WorkThreads for this repo")
+        return payload
 
     repo_root = getattr(result, "repo_root", None) or cwd
     body = _header(str(repo_root), str(thread_id)) + context
