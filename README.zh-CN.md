@@ -1,12 +1,28 @@
 # sessionFlow 🧭
 
 [![tests](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml)
+[![release](https://img.shields.io/github/v/release/HarryHeYu/sessionFlow)](https://github.com/HarryHeYu/sessionFlow/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**多个 AI Coding Agent 的会话，统一索引、统一检索、统一续接。**
-（CLI 命令是 `voyager`；GitHub 仓库叫 sessionFlow）
+**面向 AI 编码助手的本地会话索引与跨 Agent 工作接续。**
+
+把你机器上所有 AI 编码 Agent 的会话归并成**一份本地索引**：检索整段编码历史、
+查看某个项目的跨 Agent 时间线、把一个 Agent 的工作交给另一个 Agent 而不断线。
+全部在本机完成——无账号、无云端、无遥测。
+
+（CLI 命令是 `voyager`；GitHub 仓库叫 sessionFlow。本仓库**不是** DSH 专属——
+[DSH 插件](https://github.com/HarryHeYu/dsh-sessionflow)只是它的一个客户端。）
+
+|  |  |
+|---|---|
+| **是什么** | 在编码 Agent 已经写到磁盘上的会话历史之上，加一层本地索引 + 接续层。 |
+| **为什么用** | 你的历史分散在八种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西。 |
+| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"` —— [详见](#安装) |
+| **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
+| **当前版本** | [v1.1.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.1.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
 
 你的 AI 编码历史是碎片化的：
 

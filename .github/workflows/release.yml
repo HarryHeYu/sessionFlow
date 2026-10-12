@@ -1,9 +1,38 @@
 name: release
 
-# Create the GitHub Release automatically when a v* tag lands. Notes come
-# from the tag annotation; release-note files under docs/releases/ (if the
-# tag matches one) are preferred. PyPI publishing is deliberately NOT done
-# here — that stays a manual, credential-held step.
+# Turn a v* tag into a GitHub Release with the built distributions attached.
+#
+#   tag -> checkout the exact tag -> full suite -> build wheel + sdist ->
+#   twine check -> assert the version matches the tag -> create the Release as a
+#   DRAFT -> attach the distributions -> publish.
+#
+# Design notes (each one is a decision, not a default):
+#
+# * The Release is created as a DRAFT and only published once every asset is
+#   attached.  A failure in the build, the checks or an upload therefore leaves
+#   nothing announced.  A draft that is never published is visible to
+#   maintainers and invisible to everyone else.
+# * Re-running the workflow is safe.  An existing Release is left exactly as it
+#   is (notes are never rewritten), and an asset that is already attached is
+#   skipped rather than replaced.  That also repairs a partial upload: the
+#   second run attaches only what is missing.
+# * No asset is ever overwritten.  If an asset name already exists with
+#   different content the run reports it and leaves it alone; deleting it is a
+#   human decision.
+# * `concurrency.cancel-in-progress: false` keeps a second run from killing a
+#   release that is halfway through.
+# * Only GITHUB_TOKEN is used, with `contents: write` — the minimum that can
+#   create a Release.  No long-lived personal token, no repository secret.
+# * PyPI publishing is deliberately NOT done here — that stays a manual,
+#   credential-held step.
+#
+# NOT YET EXERCISED ON A REAL TAG.  This revision has been validated statically
+# (YAML shape, `bash -n` on every shell block, the embedded Python compiles) and
+# behaviourally against a stub `gh` for the fresh / re-run / partial-upload
+# paths.  It has not been run against a real release, because doing so would
+# mean cutting a tag.  The first real tag after v1.1.0 is the true test; if it
+# fails, the previous workflow can be restored without touching any existing
+# Release.
 
 on:
   push:
@@ -20,7 +49,10 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DIST: ${{ runner.temp }}/dist
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +72,61 @@ jobs:
         run: |
           python -m pytest tests/ -q
 
+      - name: Build the distributions from the tag tree
+        run: |
+          python -m pip install build twine
+          # `python -m build` builds from the checked-out tag tree; the output
+          # goes to $DIST so nothing lands in the repository.
+          python -m build --outdir "$DIST"
+          ls -l "$DIST"
+
+      - name: Check the distributions
+        run: |
+          python -m twine check "$DIST"/*
+          python - <<'PY'
+          import glob, os, sys, tarfile, zipfile
+
+          dist = os.environ["DIST"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          want = tag[1:] if tag.startswith("v") else tag
+
+          wheels = glob.glob(os.path.join(dist, "*.whl"))
+          sdists = glob.glob(os.path.join(dist, "*.tar.gz"))
+          if len(wheels) != 1 or len(sdists) != 1:
+              sys.exit(f"expected one wheel and one sdist, got {wheels} {sdists}")
+
+          # The version in the artifact must be the version in the tag, or the
+          # Release would advertise something it does not contain.
+          with zipfile.ZipFile(wheels[0]) as z:
+              names = z.namelist()
+              meta = [n for n in names if n.endswith(".dist-info/METADATA")][0]
+              text = z.read(meta).decode("utf-8", "replace")
+              version = next(l.split(": ", 1)[1] for l in text.splitlines()
+                             if l.startswith("Version: "))
+          if version != want:
+              sys.exit(f"wheel version {version!r} != tag {want!r}")
+
+          # Nothing from the working tree's tests, or a scratch directory, may
+          # ride along in the wheel.
+          leaked = [n for n in names
+                    if n.startswith("tests/") or "scratch" in n.lower()]
+          if leaked:
+              sys.exit(f"wheel carries tests/scratch content: {leaked[:10]}")
+
+          # The sdist is a source distribution: it ships tests/ on purpose (that
+          # is how a consumer runs them).  It must still carry no scratch or
+          # private path.
+          with tarfile.open(sdists[0]) as t:
+              members = t.getnames()
+          leaked = [n for n in members
+                    if "scratch" in n.lower() or "/.git/" in n]
+          if leaked:
+              sys.exit(f"sdist carries scratch/private content: {leaked[:10]}")
+
+          print(f"version {version} matches tag {tag}; "
+                f"wheel {len(names)} files, sdist {len(members)} entries")
+          PY
+
       - name: Collect release notes
         id: notes
         shell: bash
@@ -57,15 +144,50 @@ jobs:
               > "$OUT"
           fi
 
-      - name: Create the GitHub Release
+      - name: Create the GitHub Release as a draft
+        id: create
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — leaving it untouched"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           ARGS=(--title "sessionFlow ${TAG}"
-                --notes-file "${RUNNER_TEMP}/release-notes.md")
+                --notes-file "${RUNNER_TEMP}/release-notes.md"
+                --draft)
           case "$TAG" in
             *rc*|*a*|*b*) ARGS+=(--prerelease) ;;
           esac
           gh release create "$TAG" "${ARGS[@]}"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the distributions
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          EXISTING="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for f in "$DIST"/*; do
+            name="$(basename "$f")"
+            if printf '%s\n' "$EXISTING" | grep -Fxq "$name"; then
+              echo "asset $name is already attached — not overwriting"
+            else
+              gh release upload "$TAG" "$f"
+              echo "attached $name"
+            fi
+          done
+          echo "--- release assets now ---"
+          gh release view "$TAG" --json assets \
+            --jq '.assets[] | "\(.name)  \(.size) B  \(.state)"'
+
+      - name: Publish the Release
+        if: steps.create.outputs.created == 'true'
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          case "$TAG" in
+            *rc*|*a*|*b*) gh release edit "$TAG" --draft=false ;;
+            *)            gh release edit "$TAG" --draft=false --latest ;;
+          esac
+          echo "published: $(gh release view "$TAG" --json url --jq .url)"

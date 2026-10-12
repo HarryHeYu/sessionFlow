@@ -1,12 +1,30 @@
 # sessionFlow 🧭
 
 [![tests](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml/badge.svg)](https://github.com/HarryHeYu/sessionFlow/actions/workflows/test.yml)
+[![release](https://img.shields.io/github/v/release/HarryHeYu/sessionFlow)](https://github.com/HarryHeYu/sessionFlow/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/HarryHeYu/sessionFlow/blob/main/LICENSE)
 ![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**One searchable memory layer for every AI coding agent.**
-(the CLI command is `voyager`; the GitHub project is sessionFlow)
+**Local session indexing and cross-agent work continuity for AI coding assistants.**
+
+One local index over every AI coding agent on your machine. Search your entire
+coding history, read a project's cross-agent timeline, and hand work from one
+agent to another without losing the thread. Everything stays on your machine:
+no account, no cloud, no telemetry.
+
+(The CLI command is `voyager`; the GitHub project is sessionFlow. This repo is
+**not** DSH-only — the [DSH plugin](https://github.com/HarryHeYu/dsh-sessionflow)
+is one client of it, and the core is a general-purpose local tool.)
+
+|  |  |
+|---|---|
+| **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
+| **Why use it** | Your history is split across eight formats. sessionFlow makes it one thing you can search, summarize, export and continue. |
+| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"` — [details](#install) |
+| **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
+| **Current release** | [v1.1.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.1.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 
 Your AI coding history is fragmented:
 
@@ -63,7 +81,7 @@ a1b2c3d4-...                          zcode  2026-09-13 01:13   162  206  重构
 5e4d3c2b-...                          claude 2026-07-17 12:46    89   70  分析数据集结构并设计评测脚本
 ```
 
-Use cases live in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/use-cases.md) — lost context,
+Use cases live in [docs/use-cases.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/use-cases.md) — lost context,
 agent switching, engineering memory.
 
 ## Why
@@ -194,7 +212,7 @@ automatic handoff package for the rest. `voyager continue --repo myproj
 --launch` goes straight back into a specific project; multi-session
 synthesis (`voyager merge A B C`) groups the work into a **WorkThread**
 and cross-agent switch is one command (`voyager switch codex` — lease
-aware, see ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md)).
+aware, see [docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md)).
 
 `switch`, `continue`, `handoff` and `merge` are four spellings of **one
 engine** (`continuity.handoff_thread` — see
@@ -420,7 +438,7 @@ For Codex, `voyager integrate install codex` registers an absolute `SessionStart
 claude --debug hooks --init-only     # expect: Found 1 hook matchers in settings
 ```
 
-That line was observed on 2026-09-24, and the real `session_id` it carried then completed the whole chain: transcript discovered → indexed → pending row resolved → session attached to WorkThread `thr_0854d50b88`, with no Voyager command. What is **still** unproven is that the model actually *read and used* the injected context, and no provider prints `Y` — the CLI letter comes from static configuration, not from this observation. See ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md#live-verification-2026-09-24--done) for the evidence table.
+That line was observed on 2026-09-24, and the real `session_id` it carried then completed the whole chain: transcript discovered → indexed → pending row resolved → session attached to WorkThread `thr_0854d50b88`, with no Voyager command. What is **still** unproven is that the model actually *read and used* the injected context, and no provider prints `Y` — the CLI letter comes from static configuration, not from this observation. See [docs/DOGFOOD.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md#live-verification-2026-09-24--done) for the evidence table.
 
 ### What works right now ✅
 
@@ -449,7 +467,7 @@ voyager integrate status           # per-provider truth, including whether the h
 voyager integrate remove claude    # removes only Voyager's entries, leaves your hooks alone
 ```
 
-See ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) for the detailed verification procedure.
+See [docs/DOGFOOD.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) for the detailed verification procedure.
 
 ## Integration — teach agents about Voyager
 
@@ -497,7 +515,7 @@ injection, which is a different capability.)
 Cursor and Antigravity adapters are marked experimental: Cursor reads its
 key-value store read-only and Antigravity decodes protobuf blobs
 heuristically (no public schema). Full per-field availability matrix and
-data-source paths for every tool are in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/RECON.md).
+data-source paths for every tool are in [docs/RECON.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/RECON.md).
 
 ## DeepSeek Harness integration
 
@@ -567,7 +585,7 @@ back to the source. Everything lands in a local SQLite index with FTS5
 tracked by `(mtime, size)` and re-parsed only when they change; sessions
 whose source files vanish are pruned.
 
-Details in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/architecture.md),
+Details in [docs/architecture.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/architecture.md),
 [docs/DECISIONS.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DECISIONS.md), [docs/API.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/API.md) and
 [docs/FAQ.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/FAQ.md) and everyday recipes in
 [docs/WORKFLOWS.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/WORKFLOWS.md).
@@ -578,11 +596,11 @@ The Continuity Engine core is complete (see
 [docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the full close-out). The
 post-1.0 backlog — VS Code Context Composer UI, auto-clustering
 research, Claude/DSH transcript gates, scoped scan, fs-event watcher,
-PyPI/packaging polish — lives in ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md).
+PyPI/packaging polish — lives in [docs/POST-1.0.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md).
 
 Phased plan, CLI sketches, and the issue list:
 [docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) · [中文](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.zh-CN.md).
 
 ## License
 
-MIT — see ](https://github.com/HarryHeYu/sessionFlow/blob/main/LICENSE).
+MIT — see [LICENSE](https://github.com/HarryHeYu/sessionFlow/blob/main/LICENSE).
