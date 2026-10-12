@@ -50,9 +50,12 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # `github` is readable here; `runner` is NOT — a job-level `env` cannot see
+    # the `runner` context, and the workflow file is rejected outright if it
+    # tries.  $RUNNER_TEMP is a default environment variable available to every
+    # step, so the artifact directory is built from that instead.
     env:
       GH_TOKEN: ${{ github.token }}
-      DIST: ${{ runner.temp }}/dist
     steps:
       - uses: actions/checkout@v4
 
@@ -76,17 +79,17 @@ jobs:
         run: |
           python -m pip install build twine
           # `python -m build` builds from the checked-out tag tree; the output
-          # goes to $DIST so nothing lands in the repository.
-          python -m build --outdir "$DIST"
-          ls -l "$DIST"
+          # goes to $RUNNER_TEMP/dist so nothing lands in the repository.
+          python -m build --outdir "${RUNNER_TEMP}/dist"
+          ls -l "${RUNNER_TEMP}/dist"
 
       - name: Check the distributions
         run: |
-          python -m twine check "$DIST"/*
+          python -m twine check "${RUNNER_TEMP}"/dist/*
           python - <<'PY'
           import glob, os, sys, tarfile, zipfile
 
-          dist = os.environ["DIST"]
+          dist = os.path.join(os.environ["RUNNER_TEMP"], "dist")
           tag = os.environ["GITHUB_REF_NAME"]
           want = tag[1:] if tag.startswith("v") else tag
 
@@ -168,7 +171,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           EXISTING="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
-          for f in "$DIST"/*; do
+          for f in "${RUNNER_TEMP}"/dist/*; do
             name="$(basename "$f")"
             if printf '%s\n' "$EXISTING" | grep -Fxq "$name"; then
               echo "asset $name is already attached — not overwriting"
