@@ -333,6 +333,11 @@ _STATUS_EVENT = {
     "active": "THREAD_REOPENED",
 }
 
+#: Distinguishes "this path is not in the pre-read snapshot" from "it is, and it
+#: could not be stat'ed then".  The two need opposite handling: the first falls
+#: back to a live stat, the second must not record a fingerprint at all.
+_MISSING = object()
+
 
 class Store:
     def __init__(self, db_path: Optional[Path] = None):
@@ -383,10 +388,19 @@ class Store:
                 if col not in ses_cols:
                     self.con.execute(
                         f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
-            self.con.execute(
-                "UPDATE sessions SET source_state='ACTIVE_SOURCE'"
-                " WHERE source_state='LIVE' OR source_state IS NULL"
-                " OR source_state=''")
+            # Only write when there is something to normalise.  This runs on
+            # every open, and an unconditional UPDATE takes the write lock even
+            # when it matches no rows -- which made opening an up-to-date index
+            # fail outright whenever another process held the lock (another
+            # scan, a prune, a handoff).  The SELECT needs no lock at all.
+            if self.con.execute(
+                    "SELECT 1 FROM sessions WHERE source_state='LIVE'"
+                    " OR source_state IS NULL OR source_state=''"
+                    " LIMIT 1").fetchone():
+                self.con.execute(
+                    "UPDATE sessions SET source_state='ACTIVE_SOURCE'"
+                    " WHERE source_state='LIVE' OR source_state IS NULL"
+                    " OR source_state=''")
         src_cols = [r[1] for r in self.con.execute("PRAGMA table_info(sources)")]
         if src_cols:
             for col, decl in (("last_seen", "REAL"), ("missing_since", "REAL")):
@@ -396,7 +410,14 @@ class Store:
         self.con.executescript(SCHEMA)
         if not _fts_has_sid(self.con):
             _rebuild_fts(self.con)
-        self.con.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('schema', '1')")
+        # Guarded for the same reason as the backfill above: an INSERT takes the
+        # write lock even when OR IGNORE would skip it, so writing it
+        # unconditionally made every open -- including a plain read -- need
+        # exclusive access to the index.
+        if not self.con.execute(
+                "SELECT 1 FROM meta WHERE key='schema'").fetchone():
+            self.con.execute(
+                "INSERT OR IGNORE INTO meta(key, value) VALUES('schema', '1')")
         self.con.commit()
 
     # -- source tracking ---------------------------------------------------
@@ -429,6 +450,7 @@ class Store:
         source_path: Path,
         extra_sources: Optional[List[Path]] = None,
         stamp_sources: bool = True,
+        fingerprints: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Atomically (re)write one session and mark its source fresh.
 
@@ -547,10 +569,10 @@ class Store:
                 # stale missing_since would make doctor report a healthy source
                 # as gone.
                 self._write_source_row(provider, source_path, sid, seen_at,
-                                       strict=True)
+                                       strict=True, fingerprints=fingerprints)
                 for p in extra_sources or []:
                     self._write_source_row(provider, p, sid, seen_at,
-                                           strict=False)
+                                           strict=False, fingerprints=fingerprints)
             if was_retained:
                 # O3: the session just came back.  Log it inside this
                 # transaction so the marker and the timeline fact cannot
@@ -570,30 +592,50 @@ class Store:
             raise
 
     def _write_source_row(self, provider: str, path: Path, sid: str,
-                          seen_at: float, strict: bool) -> bool:
+                          seen_at: float, strict: bool,
+                          fingerprints: Optional[Dict[str, Any]] = None) -> bool:
         """Register one (provider, path, sid) as fresh, clearing missing_since.
+
+        ``fingerprints`` is the pre-read snapshot from the caller: the state of
+        each source *before* it was read.  Recording that, rather than a fresh
+        stat, is what makes the row describe the version that was indexed -- see
+        ``docs/SCAN_CONSISTENCY.md`` §12.  A path absent from the snapshot falls
+        back to a live stat; a path present but unreadable then records nothing,
+        so the source keeps reading as changed and is retried.
 
         ``strict`` keeps ``replace_session``'s long-standing behaviour for its
         anchor source: an OSError there rolls the session back so the whole
         ingest is retried, rather than leaving a session with no source row.
-        Optional sources never fail the write.  Returns False when the file
-        could not be stat'ed.
+        Optional sources never fail the write.  Returns False when no row was
+        written.
         """
-        try:
-            mtime, size = self.source_fingerprint(path)
-        except OSError:
+        key = str(path)
+        fp = (fingerprints.get(key, _MISSING)
+              if fingerprints is not None else _MISSING)
+        if fp is _MISSING:
+            try:
+                fp = self.source_fingerprint(path)
+            except OSError:
+                if strict:
+                    raise
+                return False
+        if fp is None:
+            # the snapshot saw this path and could not stat it: never record a
+            # fingerprint for a file that was not readable when we looked
             if strict:
-                raise
+                raise OSError(f"source is not readable: {path}")
             return False
+        mtime, size = fp
         self.con.execute(
             "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size,"
             " last_seen, missing_since) VALUES (?,?,?,?,?,?,NULL)",
-            (provider, str(path), sid, mtime, size, seen_at),
+            (provider, key, sid, mtime, size, seen_at),
         )
         return True
 
     def stamp_sources(self, entries: Iterable[Tuple[str, Path, str,
-                                                    Optional[List[Path]]]]) -> int:
+                                                    Optional[List[Path]]]],
+                      fingerprints: Optional[Dict[str, Any]] = None) -> int:
         """Record freshness for a whole multi-session artifact, in one commit.
 
         The counterpart of ``replace_session(stamp_sources=False)``.  It runs
@@ -604,6 +646,10 @@ class Store:
         idempotent, so redoing is always safe.  This is the ordering that makes
         a partial write recoverable without ``--force``
         (``docs/SCAN_CONSISTENCY.md``, defect D5).
+
+        ``fingerprints`` is the caller's pre-read snapshot, so a provider that
+        wrote to the artifact while it was being read leaves current != recorded
+        and the next scan re-reads it.
 
         Returns the number of source files registered.  A file that cannot be
         stat'ed is skipped rather than stamped, which keeps the artifact
@@ -616,11 +662,12 @@ class Store:
         try:
             for provider, path, sid, extras in entries:
                 if self._write_source_row(provider, path, sid, seen_at,
-                                          strict=False):
+                                          strict=False, fingerprints=fingerprints):
                     written += 1
                 for p in extras or []:
                     if self._write_source_row(provider, p, sid, seen_at,
-                                              strict=False):
+                                              strict=False,
+                                              fingerprints=fingerprints):
                         written += 1
             self.con.execute("COMMIT")
         except Exception:

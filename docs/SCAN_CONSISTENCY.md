@@ -70,6 +70,17 @@ Durability consequence, stated precisely:
 
 I1–I3 hold today. **I4 does not** — see §5.
 
+**Re-verified after the D6/D7/D8 changes** (§11–§14), on a real disk database,
+with a real child process killed with `os._exit`:
+
+| invariant | evidence |
+|---|---|
+| I1 | a kill inside a session transaction leaves `(sessions, events, sources) == (0, 0, 0)` |
+| I2 | `dup_groups=0` after a killed 10,020-session scan, after two concurrent scans, and after a transient lock |
+| I3 | prune is still mark-only; a failed prune leaves the index intact |
+| I4 | a killed scan converges on a plain re-scan (500 written → 10,020 indexed), as does every concurrency scenario |
+| I5 | the D6 and D7 fixes removed the two cases where `--force` was the only way back |
+
 ## 3. Scenario-by-scenario
 
 | # | interruption | what happens | verdict |
@@ -318,4 +329,189 @@ observed rather than as a precise multiplier.
 
 Peak RSS is unchanged (~407 MB on this dataset): neither change touches
 materialisation, which §9 C leaves for its own round.
+
+---
+
+## 11. D6 — how far does one failing write propagate?
+
+Measured before any change (`E:\sessionflow-scratch\p14\probe_d6.py`):
+
+| scenario | result |
+|---|---|
+| per-file, write fails on source 2 of 3 | **scan aborts**; source 3 never processed |
+| per-file, *parse* fails on source 2 of 3 | scan completes, 2 of 3 indexed |
+| multi-session, write fails on session 2 of 3 | scan aborts; **0 source rows** (artifact correctly unstamped) |
+| two providers, the first one's write fails | **the second provider is never scanned at all** |
+| plain re-scan after any of the above | converges |
+
+So the defect is not "errors are fatal" — parse errors were already isolated.
+It is that the **write** path is unguarded, and the adapter loop is unguarded
+above it, so one locked provider database costs the whole round.
+
+### The options
+
+| | A fail-fast | B per-source isolation | C per-session isolation + "source incomplete" |
+|---|---|---|---|
+| keeps other sources | no | yes | yes |
+| keeps other providers | no | yes | yes |
+| granularity vs the write unit | — | coarser than the transaction (a multi-session artifact is many sessions but one source) | **matches** — one write, one decision |
+| incomplete artifact stamped? | n/a (nothing continues) | **risk: yes** — stamping the survivors makes a shared-path artifact look complete and strands the session that failed (D5 again) | **no** — a failed path is withheld from the stamp |
+| fingerprint after failure | rolled back | rolled back | rolled back |
+| prune | unaffected | unaffected | unaffected — `disk_paths` comes from discovery, not from writes |
+| retry | next scan | next scan | next scan |
+| consistency | unchanged | unchanged | unchanged |
+
+### Decision — C, with a bounded backstop
+
+Implemented in `run_scan()`:
+
+* each `replace_session()` is wrapped; the failure is reported and the round
+  continues;
+* the failed bundle's source path is withheld from `stamp_sources()`, so a
+  shared-path artifact that lost a session keeps reading as changed;
+* after `MAX_WRITE_FAILURES` (25) the original exception is re-raised.
+
+The backstop is what keeps this from becoming "silently index nothing". One
+failure is a source problem; a failure on everything is an index problem, and
+that must be loud. Nothing is half-written either way — each session is still
+one transaction, and the failed one is rolled back whole.
+
+Effects, stated explicitly because the round asked for them:
+
+* **fingerprint** — a failed write rolls back with its source row, so the file
+  keeps its previous fingerprint and `source_changed()` stays true.
+* **prune** — untouched. `disk_paths` is built from `discover()`, so a source we
+  failed to *write* is still a source we *saw*; it is never marked
+  `SOURCE_MISSING`.
+* **retry** — the next plain scan retries it. No `--force` needed.
+* **consistency** — unchanged; the invariants in §2 all still hold.
+
+## 12. D7 — the fingerprint must describe the version that was read
+
+The real order was:
+
+```
+source_changed(src)      # stat #1: decides whether to re-parse
+ad.parse(src)            # read
+replace_session(...)     # stat #2: and THIS was the fingerprint recorded
+```
+
+Recording stat #2 means any write landing between the read and the write is
+recorded as though it had been indexed. Reproduced
+(`E:\sessionflow-scratch\p14\probe_d7.py`):
+
+| scenario | before | after a plain re-scan |
+|---|---|---|
+| source appended after parse, before the write | recorded fingerprint == the file's actual fingerprint | **STUCK** — the appended message is never indexed |
+| multi-session artifact written by another process mid-read | recorded == actual | **STUCK** — the late session is never indexed |
+| same size **and** same mtime, different content | `new=0 unchanged=1` | stale content stays |
+
+The second row is the serious one. For a multi-session artifact the window is
+the whole `ad.scan()` call — seconds to minutes for a large database — and
+`voyager watch` exists precisely to scan in the background next to a running
+provider agent.
+
+### The fix
+
+Take the fingerprint **before** the source is read, and record that. `run_scan`
+snapshots every discovered source once, only on a round that is going to read
+(a no-op scan returns before it), and passes the snapshot down through
+`replace_session`/`stamp_sources` into `_write_source_row`. A path that changed
+during the read therefore leaves current != recorded, and the next scan re-reads
+it. No transaction semantics move: the session, its events and its source row
+are still one commit.
+
+### The residual limitation, and why it is not fixed
+
+A change that preserves **both** size and mtime — a directory restored from a
+backup, `rsync -t`, `cp -p`, an archive extraction — is invisible to a
+size+mtime fingerprint, and stays invisible until the file changes again.
+
+Nothing short of reading the file can see it, and reading every file on every
+scan defeats the fingerprint entirely. Measured: reading and hashing the 10,000
+file corpus takes **122 s**, against **1.6 s** for the no-op scan that reads
+nothing — the cheap path is fast *because* it does not open the files. A
+content hash is therefore rejected, and `--force` remains the documented answer
+for "I restored these from somewhere and I want them re-read".
+
+`ctime` would catch it on POSIX, but Python's `st_ctime` is *creation* time on
+Windows and does not change on an in-place rewrite, so it would make the
+fingerprint mean different things on different platforms. Not worth it for a
+patch release.
+
+## 13. D8 — opening the index required the write lock
+
+`Store.__init__` ran two unconditional writes on every open:
+
+* `INSERT OR IGNORE INTO meta(key, value) VALUES('schema', '1')`
+* the O2 backfill `UPDATE sessions SET source_state='ACTIVE_SOURCE' WHERE ...`
+
+Both are no-ops once the database is current, and both still take the write
+lock. Measured with another connection holding `BEGIN IMMEDIATE`
+(`E:\sessionflow-scratch\p14\probe_lock.py`):
+
+| statement | needs the write lock |
+|---|---|
+| `PRAGMA journal_mode=WAL` | no |
+| `PRAGMA synchronous=NORMAL` | no |
+| `executescript(SCHEMA)` (every statement is `IF NOT EXISTS`) | no |
+| **`INSERT OR IGNORE INTO meta`** | **yes** |
+| **backfill `UPDATE sessions`** | **yes** |
+| the read that would let us skip it | no |
+
+Every entry point constructs `Store()` — `scan`, `continue`, `status`, the MCP
+tools, the DSH bridge — so with `voyager watch` scanning in the background a
+foreground command could die at startup with an unhandled `database is locked`
+after the 5 s busy timeout. Reproduced: a scan exited 1 with a traceback at
+`store.py:391` while another process held the lock.
+
+**Fix**: guard both writes with a read, so a current index opens without ever
+asking for the write lock, while a legacy database still migrates. What it does
+**not** fix: the scan still *writes* (sessions, prune), so a long-running writer
+can still make a scan's writes fail — that is §11's problem, and §14 shows how
+it now degrades.
+
+## 14. Concurrent scans — measured, and why no new lock
+
+Two real processes against one on-disk index
+(`E:\sessionflow-scratch\p14\concurrency_probe.py`, 400 sessions in one ZCode
+artifact). After every scenario the same four things are checked: sessions,
+`event_fts` row count against `events`, `SOURCE_MISSING` count, and duplicate
+event groups.
+
+| scenario | result |
+|---|---|
+| two scans, same provider, same index | both rc=0, **0 lock messages**, all four checks OK |
+| two scans, different providers, same index | both rc=0, all four checks OK |
+| another process holds a write transaction for 8 s | rc=0 — reports `prune failed (database is locked)`, all four checks OK, converges on the next scan |
+| one scanner killed mid-scan (`os._exit`) while another scans | killer rc=137, survivor rc=0, all four checks OK |
+
+So: **there is no concurrency defect to fix in the SQLite layer.** WAL plus the
+per-session transaction already give the right answer — no duplicated events, no
+lost sessions, no false `SOURCE_MISSING`, FTS consistent, and every scenario
+converges. The failures that *did* exist were ours, and they were not about
+locking at all: a contended write aborted the whole scan (§11) and opening the
+index needed the write lock (§13).
+
+Two further measurements that decided the design:
+
+* **A blocked session write fails immediately**, not after the busy timeout —
+  SQLite refuses to wait inside a transaction that has already read. 25 blocked
+  writes take about a second, which is why the failure threshold is paired with
+  a grace period rather than being a bare count.
+* **A blocked prune does wait** the full 5 s. Case A above is 6.3 s, of which
+  ~5 s is that timeout.
+
+**Decision: no scan lock, no new coordination layer, no unbounded retry.** The
+D13 WorkThread lease is not reused as a scan lock — it is WorkThread-scoped and
+has a different lifetime; a second lock model would be a second thing to get
+wrong. The measured behaviour above is the argument: the failure mode was
+"abort the round", and fixing that (plus D8) removes the need for anything else.
+
+Case B is worth recording as a known, bounded limitation: with 400 sessions to
+write and the lock held throughout, every write fails fast, the scan completes
+having written nothing, and it says so —
+`400 session(s) could not be written and will be retried on the next scan; the
+index is consistent and nothing was half-written`. A plain scan afterwards
+indexed all 400. The round is lost, the data is not.
 
