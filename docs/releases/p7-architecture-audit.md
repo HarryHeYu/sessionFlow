@@ -171,13 +171,17 @@ result.
 | gate | result |
 |---|---|
 | Core full pytest (local) | **1123 passed, 4 skipped, 31 subtests** (10m27s). 1114 + the 9 new tests |
+| **Core CI** | run [`38425304649`](https://github.com/HarryHeYu/sessionFlow/actions/runs/38425304649) on `8688bba` — **10/10 jobs success**, ubuntu-latest + windows-latest, py3.10–3.13, plus the core-only installs: **1123 passed, 4 skipped, 31 subtests** |
 | the 4 skips | unchanged data/platform gates: scratch root unset, no CJK sessions, Windows `chmod` |
 | New tests | `test_scan_characterization.py` 7 · `test_util.py` +2 |
 | Targeted suites | scan + auto: 54 passed; adapters + util + hooks: 90 passed |
 | Plugin build | `npm run build` clean |
 | Plugin tests | **40/40 on 4 of 5 runs**; one run reported 39/40. The suite contains deadline/timeout tests, so at least one is timing-sensitive. Not attributable to this round — the bridge contract is unchanged and the plugin never imports core internals — but it is a real flake and is reported rather than averaged away |
-| Linux / Windows CI | see GitHub below |
-| core-only job | included in the CI matrix |
+| Linux / Windows CI | same run, 10/10 |
+| core-only job | included in the CI matrix and green |
+
+Local and CI agree at 1123, which is 1114 + the 9 new tests — the suite grew by
+exactly what was added, so nothing was silently skipped.
 
 ## GitHub
 
