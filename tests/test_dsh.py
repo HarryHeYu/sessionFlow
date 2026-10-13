@@ -19,11 +19,29 @@ def test_dsh_parse(adapter_of, patch_paths, dsh_fixture):
     assert s["native_session_id"] == "session-dsh-1"
     assert s["title"] == "你好，跑个测试"
     assert s["model"] == "deepseek-v4-pro"
-    assert s["resume_cmd"] == "dsh --resume session-dsh-1"
+    # `dsh --resume <session>` does not run: dsh requires `--profile <name>`
+    # ("error: --profile <name> is required", dsh 0.1.5-rc.3), and a DSH session
+    # records no profile — the path is ~/.dsh/sessions/<munged-cwd>/session-<id>/
+    # and the session record carries cwd and agentPreset, not a profile name.
+    # So no resume command can be built that would actually work.
+    assert s["can_resume"] is False
+    assert s["resume_cmd"] is None
     kinds = [e["kind"] for e in evs]
     assert kinds.count("user") == 1 and kinds.count("assistant") == 1
     assert kinds.count("tool_call") == 1 and kinds.count("tool_result") == 1
     assert kinds.count("reasoning") == 1
+
+
+def test_dsh_does_not_claim_a_resume_it_cannot_build(adapter_of):
+    """The adapter is the authority the capability matrix reads.
+
+    DSH is resumable in principle — `dsh --profile <p> --resume <session>` — but
+    the profile is not recoverable from a session, so Voyager cannot construct a
+    command that runs.  The adapter must therefore say so, or `verify --matrix`
+    advertises SUPPORTED while `voyager resume` refuses the same session.
+    """
+    ad = adapter_of("dsh")
+    assert ad.can_resume is False
 
 
 def test_dsh_corrupt_zstd_is_reported(adapter_of, patch_paths, dsh_fixture):

@@ -119,11 +119,16 @@ class TestCollectIssues:
         assert "EXTERNAL_CODEX_APPSERVER_CONPTY_POPUP" in codes
 
     def test_collect_issues_includes_o1_debts(self):
-        """O4.13: O1 debts are reported, not fixed."""
+        """O4.13: O1 debts are reported, not fixed.
+
+        `OVERVIEW_RECENT_SESSIONS_N1` used to be the other one.  It is fixed —
+        `api.overview` no longer reads events for rows it is about to discard —
+        so it must not be reported as outstanding debt any more.
+        """
         issues = collect_issues()
         codes = {i.code for i in issues}
-        assert "OVERVIEW_RECENT_SESSIONS_N1" in codes
         assert "SCAN_MATERIALISE_ALL_BEFORE_WRITE" in codes
+        assert "OVERVIEW_RECENT_SESSIONS_N1" not in codes
 
     def test_store_unavailable_is_critical(self, tmp_path, monkeypatch):
         monkeypatch.setattr(doctor, "_store_path",

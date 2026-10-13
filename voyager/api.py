@@ -61,12 +61,20 @@ def overview(db: Optional[Path] = None, repo: Optional[str] = None,
         threads = [t for t in threads
                    if t["repo_root"] and same_repo_loose(t["repo_root"], repo)]
     cutoff = time.time() - hours * 3600
+    # Filter and order the cheap columns first, truncate, and only then read
+    # events for the rows that are actually returned.  Reading events inside
+    # the candidate loop made this an N+1 (OVERVIEW_RECENT_SESSIONS_N1): on the
+    # 10k benchmark dataset it issued 10,016 statements to produce 12 rows,
+    # with subprocess = 0, so the recorded reason for leaving it alone — that
+    # the cost was sandbox spawn overhead rather than the query — did not hold.
+    candidates = [
+        r for r in store.sessions()
+        if (r["updated_at"] or 0) >= cutoff
+        and not (repo and not same_repo_loose(r["repo_root"] or r["cwd"] or "", repo))
+    ]
+    candidates.sort(key=lambda x: x["updated_at"] or 0, reverse=True)
     recent = []
-    for r in store.sessions():
-        if (r["updated_at"] or 0) < cutoff:
-            continue
-        if repo and not same_repo_loose(r["repo_root"] or r["cwd"] or "", repo):
-            continue
+    for r in candidates[:limit]:
         last_user = ""
         for e in reversed(store.events(r["id"])):
             if e["kind"] == "user" and e["content"]:
@@ -83,9 +91,8 @@ def overview(db: Optional[Path] = None, repo: Optional[str] = None,
             "source_state": r["source_state"],
         })
     store.close()
-    recent.sort(key=lambda x: x["updated_at"] or 0, reverse=True)
     return {"stats": stats, "threads": threads[:limit],
-            "recent_sessions": recent[:limit]}
+            "recent_sessions": recent}
 
 
 def thread_detail(db: Optional[Path] = None, thread_id: str = "") -> Dict[str, Any]:

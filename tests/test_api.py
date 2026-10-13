@@ -118,3 +118,51 @@ def test_bridge_round_trip(db):
     finally:
         p.terminate()
         p.wait(timeout=10)
+
+
+def test_overview_reads_events_only_for_the_rows_it_returns(tmp_path,
+                                                            monkeypatch):
+    """`overview` fetched every session's events, then kept `limit` rows.
+
+    That is the documented ``OVERVIEW_RECENT_SESSIONS_N1``.  On the 10k
+    benchmark dataset it issued 10,016 statements to produce 12 rows, with
+    `subprocess = 0` — so the debt's recorded justification ("the wall-clock
+    cost is dominated by sandbox spawn overhead, not the query") does not hold.
+    """
+    from voyager.api import overview
+
+    db = tmp_path / "index.db"
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}\n", encoding="utf-8")
+
+    store = Store(db)
+    total = 40
+    for i in range(total):
+        sid = "codex:s%02d" % i
+        session = new_session(
+            id=sid, provider="codex", native_session_id=sid, title="t",
+            started_at=1.0, updated_at=1.0 + i, cwd="E:/p", repo_root="E:/p",
+            message_count=1, tool_count=0)
+        store.replace_session(
+            session,
+            [new_event(sid=sid, ts=1.0 + i, seq=1, kind="user", role="user",
+                       content="hello")],
+            "codex", src)
+    store.close()
+
+    seen = {"n": 0}
+    real_events = Store.events
+
+    def counting_events(self, sid):
+        seen["n"] += 1
+        return real_events(self, sid)
+
+    monkeypatch.setattr(Store, "events", counting_events)
+
+    limit = 12
+    out = overview(db=db, hours=10 ** 6, limit=limit)
+
+    assert len(out["recent_sessions"]) == limit
+    assert seen["n"] <= limit, (
+        "overview read events for %d of %d sessions to return %d rows"
+        % (seen["n"], total, limit))

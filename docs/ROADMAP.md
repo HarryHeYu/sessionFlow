@@ -203,7 +203,7 @@ Eight agents, eight on-disk formats. They are not interchangeable.
 | Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | **yes**, new id, lease required (probe HIT) |
 | Claude Code | project JSONL + `uuid`/`parentUuid` chain + file-history | `claude --resume` | not proven (headless resume timed out) |
 | Grok | `chat_history.jsonl` (OpenAI-style) + `summary.json` | `grok -r` | **yes**, new id, lease required (probe HIT) |
-| DSH | zstd JSONL | `dsh --resume` | later, opt-in, new id only |
+| DSH | zstd JSONL | `dsh --profile <p> --resume` | later, opt-in, new id only |
 | ZCode | SQLite `message`/`part` | none confirmed | **no** |
 | Cursor | `state.vscdb` KV | none | **no** |
 | Antigravity | SQLite + protobuf | none | **no** |

@@ -44,6 +44,21 @@ BENCH_ROOT = Path(os.environ.get("VOYAGER_BENCH_ROOT",
                                  str(REPO.drive) + "/voyager-bench"))
 
 FTS_BODY_CAP = 600
+
+#: ``api.overview`` defaults to a 48-hour window, and the synthetic datasets are
+#: generated once and then age.  Left at the default the task measures a
+#: different thing every day: on 2026-10-02 the 10k dataset was fresh and the
+#: task issued ``q=2806`` (the documented ``OVERVIEW_RECENT_SESSIONS_N1``); on
+#: 2026-10-13 the same dataset was 258 h old, every session fell outside the
+#: window, and the same task issued ``q=4``.  A number that moves with the
+#: calendar cannot be compared across runs — and it is exactly how a live N+1
+#: gets mistaken for a fixed one.
+#:
+#: The window below is deliberately "all of it": this task exists to measure
+#: the *query path* over the whole index, not the effect of a time filter, and
+#: no dataset Voyager can be pointed at is a century old.  ``limit`` still caps
+#: what is returned; only the loop that does the work is what we are timing.
+OVERVIEW_WINDOW_HOURS = 24 * 365 * 100
 WORDPOOL = (
     ["refactor", "lease", "WorkThread", "session", "index", "测试", "里程碑",
      "性能", "benchmark", "checkpoint", "pending", "attach", "FTS", "trigram",
@@ -313,7 +328,7 @@ def _install_instrumentation():
 
 def _task_overview(db, repo, thread):
     import voyager.api as api
-    return api.overview(db=db, repo=repo)
+    return api.overview(db=db, repo=repo, hours=OVERVIEW_WINDOW_HOURS)
 
 
 def _task_sessions(db, repo, thread):
@@ -486,6 +501,35 @@ def _spawn_worker(task, db, src, repo, thread) -> dict:
     return json.loads(lines[-1])
 
 
+def scan_jobs(bench: Path, src: Path, tasks, prefix: str) -> list:
+    """Build file-backed scan jobs, each starting from a fresh database.
+
+    These jobs must NOT use ``":memory:"``.  ``_scan_setup`` seeds fingerprints
+    in an untimed pass and closes its ``Store``; the measured pass then opens a
+    new one.  With a shared file the fingerprints carry, which is the whole
+    point of ``scan_inc``/``scan_touch``.  With ``":memory:"`` the database is
+    discarded when the setup closes it, every source looks new, and the task
+    silently measures a COLD scan under an incremental name.
+
+    Measured on ``codex_src10k`` (10,000 sessions / 100,000 events), same
+    machine: ``scan_inc`` reads ``txn=10000 execute=330018 wall=80.5 s``
+    against ``":memory:"`` and ``txn=0 execute=40019 wall=18.8 s`` file-backed.
+
+    The file is removed first so a previous run's index is never reused:
+    ``scan_initial`` has to be a cold scan, or it is not the baseline the other
+    three are compared against.
+    """
+    jobs = []
+    for task in tasks:
+        path = bench / ("%s_%s.db" % (prefix, task))
+        for suffix in ("", "-wal", "-shm"):
+            stale = Path(str(path) + suffix)
+            if stale.exists():
+                stale.unlink()
+        jobs.append((task, str(path), str(src), None, None))
+    return jobs
+
+
 def run_suite(full: bool, out_json) -> None:
     real_db = Path.home() / ".voyager" / "index.db"
     bench = BENCH_ROOT
@@ -508,10 +552,9 @@ def run_suite(full: bool, out_json) -> None:
              for t in read_tasks]
     if not codex10k.exists():
         gen_codex(codex10k, 10_000, 10)
-    jobs += [("scan_initial", ":memory:", str(codex10k), None, None),
-             ("scan_inc", ":memory:", str(codex10k), None, None),
-             ("scan_touch", ":memory:", str(codex10k), None, None),
-             ("scan_force", ":memory:", str(codex10k), None, None)]
+    jobs += scan_jobs(bench, codex10k,
+                      ("scan_initial", "scan_inc", "scan_touch", "scan_force"),
+                      "scan10k")
     if full:
         if not syn100k.exists():
             gen_store(syn100k, 100_000, 10)

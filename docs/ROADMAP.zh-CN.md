@@ -139,7 +139,7 @@ Voyager 不会声称能做 session migration。用户侧的缝是一条命令（
 | Codex | `rollout-*.jsonl` `{timestamp,ordinal,type,payload}` | `codex resume` / `codex exec resume` | **可以**，新 id，必须持锁（探测 HIT） |
 | Claude Code | project JSONL + `uuid`/`parentUuid` 链 + file-history | `claude --resume` | 未证实（无头 resume 超时） |
 | Grok | `chat_history.jsonl`（OpenAI 风格）+ `summary.json` | `grok -r` | **可以**，新 id，必须持锁（探测 HIT） |
-| DSH | zstd JSONL | `dsh --resume` | 以后、opt-in、只写新 id |
+| DSH | zstd JSONL | `dsh --profile <p> --resume` | 以后、opt-in、只写新 id |
 | ZCode | SQLite `message`/`part` | 未确认 | **不能** |
 | Cursor | `state.vscdb` KV | 无 | **不能** |
 | Antigravity | SQLite + protobuf | 无 | **不能** |

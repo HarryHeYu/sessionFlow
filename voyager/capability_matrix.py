@@ -209,7 +209,7 @@ DECLARED: Dict[str, Dict[str, Tuple[str, str]]] = {
     "dsh": {
         "session_discovery": (LIVE_VERIFIED, _ADAPTER + "; zstd JSONL"),
         "session_indexing": (LIVE_VERIFIED, _ADAPTER),
-        "native_resume": (SUPPORTED, "`dsh --resume` is documented"),
+        "native_resume": (NOT_FOUND, "`dsh --resume` needs `--profile`, which a session does not record"),
         "startup_hook": (NOT_FOUND, "no native startup surface; profiles/plugins/ACP only"),
         "dynamic_context_injection": (NOT_FOUND, "no startup surface to inject into"),
         "native_session_id_at_start": (NOT_FOUND, "no startup surface"),

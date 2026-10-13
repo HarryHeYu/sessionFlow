@@ -55,7 +55,15 @@ def _commands_from_args(name: str, arguments: Any) -> Optional[str]:
 
 class DshAdapter(Adapter):
     provider = "dsh"
-    can_resume = True
+    # DSH can resume, but not with a command Voyager can build.  `dsh` requires
+    # `--profile <name>` before any app argument — `dsh --resume <session>` exits
+    # 1 with "error: --profile <name> is required" (0.1.5-rc.3) — and a session
+    # carries no profile: the path is
+    # `~/.dsh/sessions/<munged-cwd>/session-<uuid>/` and the record holds `cwd`
+    # and `agentPreset`, never a profile name.  Advertising a resume we cannot
+    # construct would make `verify --matrix` say SUPPORTED while `voyager resume`
+    # refuses the same session, so the adapter reports what it can actually do.
+    can_resume = False
     can_fork = False
 
     def discover(self) -> List[Path]:
@@ -185,7 +193,7 @@ class DshAdapter(Adapter):
         session["model"] = model
         session["message_count"] = sum(1 for e in events if e["kind"] in ("user", "assistant"))
         session["tool_count"] = sum(1 for e in events if e["kind"] == "tool_call")
-        session["resume_cmd"] = f"dsh --resume {native}"
+        # No resume_cmd: see DshAdapter.can_resume for why one cannot be built.
         session["metadata"] = {"context_window": context_window}
         git = git_info(cwd)
         return {

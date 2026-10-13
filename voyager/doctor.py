@@ -114,13 +114,14 @@ KNOWN_DEBTS: Tuple[Dict[str, str], ...] = (
 )
 
 #: O1 performance debts (O4.13: report only, do not fix).
+#:
+#: `OVERVIEW_RECENT_SESSIONS_N1` used to be listed here.  It was fixed once the
+#: benchmark could actually measure it: the recorded reason for leaving it —
+#: "the wall-clock cost is dominated by sandbox spawn overhead, not the query" —
+#: was read off a run whose `subprocess` count was zero.  Measured properly on
+#: the 10k dataset, `api.overview` issued 10,016 statements to return 12 rows;
+#: it now issues ~16.
 O1_DEBTS: Tuple[Dict[str, str], ...] = (
-    {"code": "OVERVIEW_RECENT_SESSIONS_N1",
-     "severity": INFO, "category": "debt",
-     "repair_kind": READ_ONLY_DIAGNOSIS,
-     "message": "overview's recent-sessions query is N+1 on thread membership; "
-                "not fixed because the wall-clock cost is dominated by sandbox "
-                "spawn overhead, not the query"},
     {"code": "SCAN_MATERIALISE_ALL_BEFORE_WRITE",
      "severity": INFO, "category": "debt",
      "repair_kind": READ_ONLY_DIAGNOSIS,
