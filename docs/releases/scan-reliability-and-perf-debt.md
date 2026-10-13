@@ -214,6 +214,26 @@ FAILED tests/test_scan_consistency.py::test_partial_write_of_a_multi_session_art
 2 failed, 4 passed
 ```
 
+**CI is the full-suite gate** — run [`38363927135`](https://github.com/HarryHeYu/sessionFlow/actions/runs/38363927135)
+on `c5bfeda`, **10/10 jobs success** (ubuntu-latest and windows-latest, py3.10–3.13, plus the
+core-only installs):
+
+```
+1100 passed, 4 skipped, 31 subtests passed
+```
+
+1094 before this round, 1100 after — the six new tests, and the same four
+data/platform-gated skips as before.
+
+One caveat, stated plainly: **the full suite was not completed locally this
+round.** It was started, and after ~29 minutes it had produced no output and an
+empty `--basetemp`, with `tasklist` itself starting to fail. That is this
+sandbox's known delete-guard failure mode, and it was self-inflicted — the
+measurement scripts in this round ran many `rm -f` loops in the same turn, which
+is the documented way to exhaust the guard. The targeted files were re-run green
+afterwards, and CI ran the whole suite on two platforms, so the gate is real;
+but the local full run is not evidence, and is not presented as such.
+
 ## 6. Issue #12
 
 | item | state |
