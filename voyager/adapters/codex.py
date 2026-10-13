@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .base import Adapter, finish_session, git_info, register
 from .. import provenance
 from ..model import new_event, new_session, text_of
+from ..util import parse_ts
 
 HOME = Path.home()
 SESSIONS_DIR = HOME / ".codex" / "sessions"
@@ -88,17 +88,6 @@ def _ro_connect(path: Path):
         return con
     except Exception:
         return None
-
-
-def parse_ts(iso: Optional[str]) -> Optional[float]:
-    if not iso:
-        return None
-    try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
 _ENV_NOISE = re.compile(
     r"<(environment_context|user_instructions|ENVIRONMENT_CONTEXT|user_instructions)>"
     r".*?</\1>", re.S,

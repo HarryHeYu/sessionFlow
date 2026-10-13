@@ -104,3 +104,18 @@ def parse_when(value: Optional[str]) -> Optional[float]:
         except ValueError:
             continue
     raise ValueError("unrecognised time %r (try 2026-09-30 or 7d)" % value)
+
+def parse_ts(iso: Optional[str]) -> Optional[float]:
+    """An ISO-8601 timestamp as a POSIX float, or ``None``.
+
+    Was three byte-identical copies (claude / codex / grok adapters).  Providers
+    differ in plenty of ways that matter; parsing a timestamp is not one of
+    them, and three copies is three places to fix when a provider starts
+    emitting a format ``fromisoformat`` does not accept.
+    """
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None

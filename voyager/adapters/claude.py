@@ -9,28 +9,17 @@ file-history-snapshot events -> `voyager diff` support.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .base import Adapter, finish_session, git_info, register
 from .. import provenance
 from ..model import new_event, new_session, text_of
+from ..util import parse_ts
 
 HOME = Path.home()
 PROJECTS_DIR = HOME / ".claude" / "projects"
 FILE_HISTORY_DIR = HOME / ".claude" / "file-history"
-
-
-def parse_ts(iso: Optional[str]) -> Optional[float]:
-    if not iso:
-        return None
-    try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
 def _blocks(content: Any):
     """Yield (block_type, block) pairs from a message content value."""
     if content is None:

@@ -20,12 +20,14 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from voyager.util import fmt_ts, fmt_ts_seconds, same_repo, same_repo_loose
+from voyager.util import (fmt_ts, fmt_ts_seconds, parse_ts, same_repo,
+                          same_repo_loose)
 
 VOYAGER = Path(__file__).resolve().parent.parent / "voyager"
 
 #: Names that must have exactly one definition, in ``voyager/util.py``.
-SHARED = {"same_repo", "same_repo_loose", "fmt_ts", "fmt_ts_seconds"}
+SHARED = {"same_repo", "same_repo_loose", "fmt_ts", "fmt_ts_seconds",
+          "parse_ts"}
 #: The private names the consolidation removed; must never come back.
 RETIRED = {"_same_repo", "_fmt_ts"}
 
@@ -88,6 +90,20 @@ def test_fmt_ts_shapes():
     assert len(fmt_ts_seconds(t)) > len(fmt_ts(t))
 
 
+def test_parse_ts_accepts_the_shapes_the_providers_emit():
+    """claude / codex / grok all emit ISO-8601, with either Z or an offset."""
+    assert parse_ts("2026-08-02T10:00:00Z") == parse_ts("2026-08-02T10:00:00+00:00")
+    assert parse_ts("2026-08-02T10:00:00Z") is not None
+    # an explicit offset is honoured, not treated as UTC
+    assert parse_ts("2026-08-02T10:00:00+02:00") != parse_ts("2026-08-02T10:00:00Z")
+
+
+def test_parse_ts_is_lenient_about_missing_and_bad_values():
+    """A bad timestamp must cost one event, never the whole session."""
+    for bad in (None, "", "not a timestamp", "2026-13-45T99:99:99Z"):
+        assert parse_ts(bad) is None, bad
+
+
 # --- no re-duplication ------------------------------------------------------
 
 def _defined_function_names(path: Path):
@@ -98,10 +114,16 @@ def _defined_function_names(path: Path):
 
 
 def _util_imported_names(path: Path):
+    """Names imported from ``voyager.util``.
+
+    Handles both ``from .util import x`` (level 1, same package) and
+    ``from ..util import x`` (level 2, one package down, as the adapters use).
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "util" and node.level == 1:
+        if isinstance(node, ast.ImportFrom) and node.module == "util" \
+                and node.level in (1, 2):
             names.update(a.name for a in node.names)
     return names
 
@@ -136,6 +158,10 @@ def test_former_duplicators_import_the_canonical_helper():
         "continuity.py": "fmt_ts",
         "handoff.py": "fmt_ts",
         "export.py": "fmt_ts_seconds",
+        # P7: parse_ts was byte-identical in these three adapters
+        "adapters/claude.py": "parse_ts",
+        "adapters/codex.py": "parse_ts",
+        "adapters/grok.py": "parse_ts",
     }
     missing = []
     for mod, fn in expected.items():

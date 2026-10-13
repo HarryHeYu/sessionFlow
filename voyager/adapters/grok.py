@@ -11,26 +11,15 @@ Note: reasoning content is server-encrypted (kept as raw, no text).
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .base import Adapter, finish_session, register
 from ..model import new_event, new_session, text_of
+from ..util import parse_ts
 
 HOME = Path.home()
 SESSIONS_DIR = HOME / ".grok" / "sessions"
-
-
-def parse_ts(iso: Optional[str]) -> Optional[float]:
-    if not iso:
-        return None
-    try:
-        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
 class GrokAdapter(Adapter):
     provider = "grok"
     can_resume = True
