@@ -490,7 +490,7 @@ voyager integrate remove <provider>  # undo every step (skill + mcp + bootstrap 
 
 These commands now **auto-create** config files if they don't exist - no manual setup needed for first-time installation. Re-running is idempotent, and `install` merges rather than overwrites: your own hooks and settings are preserved, and the file is backed up before it is rewritten.
 
-For verification of actual zero-touch startup behavior, see ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) and [claude_continuity_verdict.md](https://github.com/HarryHeYu/sessionFlow/blob/main/claude_continuity_verdict.md).
+For verification of actual zero-touch startup behavior, see ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) and [claude_continuity_verdict.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/archive/root-reports-2026-09/claude_continuity_verdict.md).
 
 ## Supported platforms
 

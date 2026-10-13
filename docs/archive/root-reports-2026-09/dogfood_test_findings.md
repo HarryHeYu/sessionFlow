@@ -7,7 +7,7 @@
 > `test_full_grok_continuity.py`) **no longer exist** — the legacy wrapper was
 > replaced by `claude_session_start.py` and the repo-root scripts were deleted.
 > Current state: **Claude Code = `H`**; **all other providers = `N`**. See
-> [`CHANGELOG.md`](CHANGELOG.md) and
+> [`CHANGELOG.md`](../../../CHANGELOG.md) and
 > [`claude_continuity_verdict.md`](claude_continuity_verdict.md).
 
 ## Executive Summary

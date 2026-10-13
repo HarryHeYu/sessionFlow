@@ -810,7 +810,7 @@ Recorded so the findings are not lost while implementation stays frozen.
   Session ids, the state-transition evidence, and the attribution caveat (that
   "no manual scan ran" is an operator record rather than something the index can
   prove) are in
-  [`grok_continuity_verdict.md`](grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
+  [`grok_continuity_verdict.md`](docs/archive/root-reports-2026-09/grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
 
 ## [0.3.0] — 2026-09-19
 

@@ -560,7 +560,7 @@ startup. It was therefore run by hand on a real machine, where it passed: the
 provider's own `session_id` reached the hook, the transcript was discovered and
 indexed, the pending row resolved, and the native session attached itself to its
 WorkThread with no Voyager command. Evidence table:
-[`docs/DOGFOOD.md`](docs/DOGFOOD.md) → *Live verification (2026-09-24)*.
+[`docs/DOGFOOD.md`](../../DOGFOOD.md) → *Live verification (2026-09-24)*.
 
 > **Unverified explanation.** The earlier revision of this file attributed that
 > EPERM to the sandbox blacklisting `reg.exe`, which Claude Code spawns at

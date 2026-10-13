@@ -15,7 +15,7 @@
 > `SESSIONSTART_TRIGGER_LIVE_VERIFIED` is now `true`. The CLI still prints `H`,
 > because that letter is a static capability reading with no persisted
 > live-evidence state behind it; no provider prints `Y`. Full narrative:
-> [`claude_continuity_verdict.md`](../claude_continuity_verdict.md).
+> [`claude_continuity_verdict.md`](archive/root-reports-2026-09/claude_continuity_verdict.md).
 
 **Status**: Automated tests cover all hermetic verification; real-agent end-to-end flows require manual execution with installed agents.
 
@@ -300,7 +300,7 @@ launched Grok session, and that native Grok session attached itself to the same
 WorkThread with no manual scan. `CONTEXT_INJECTION_LIVE_VERIFIED`,
 `CROSS_PROVIDER_INVISIBLE_CONTINUITY` and `FULL_CONTINUITY_LIVE_VERIFIED` are all
 **true**. Session ids and the state-transition evidence are in
-[`grok_continuity_verdict.md`](../grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
+[`grok_continuity_verdict.md`](archive/root-reports-2026-09/grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
 
 ---
 
@@ -322,4 +322,4 @@ in the Claude WorkThread was recovered by a normally launched Grok session
 together with the prior task state, and that native Grok session attached itself
 to the same WorkThread without a manual scan. Session ids and the state-transition
 evidence are in
-[`grok_continuity_verdict.md`](../grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
+[`grok_continuity_verdict.md`](archive/root-reports-2026-09/grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).

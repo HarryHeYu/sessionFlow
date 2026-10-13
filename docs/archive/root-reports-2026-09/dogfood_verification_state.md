@@ -7,7 +7,7 @@
 > real nested schema; (2) the provider test scripts it references
 > (`test_full_grok_continuity.py`, etc.) were deleted from the repo root. Current
 > state: **Claude Code = `H`** (registered, trigger unverified); **all other
-> providers = `N`**. See [`CHANGELOG.md`](CHANGELOG.md).
+> providers = `N`**. See [`CHANGELOG.md`](../../../CHANGELOG.md).
 
 **Date**: 2026-09-21  
 **Status**: Ongoing investigation, evidence-based classifications

@@ -8,7 +8,7 @@
 > warning about the earlier docs, but its provider labels have since been replaced
 > by the `Y`/`H`/`A`/`N` legend. Current state: **Claude Code = `H`** (registered,
 > live trigger unverified); **all other providers = `N`**. See
-> [`CHANGELOG.md`](CHANGELOG.md).
+> [`CHANGELOG.md`](../../../CHANGELOG.md).
 
 **Date**: 2026-09-21  
 **Classification Framework**: Evidence-based, level-by-level progression

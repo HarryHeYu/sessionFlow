@@ -13,7 +13,7 @@
 > **Claude Code = `H`** (real native `SessionStart` hook registered, live trigger
 > unverified); **all other providers = `N`**. The user-facing legend is now
 > `Y`/`H`/`A`/`N` as printed by `voyager integrate status`. See
-> [`CHANGELOG.md`](CHANGELOG.md) and
+> [`CHANGELOG.md`](../../../CHANGELOG.md) and
 > [`claude_continuity_verdict.md`](claude_continuity_verdict.md).
 
 ---
