@@ -166,6 +166,13 @@ CREATE TABLE IF NOT EXISTS sources (
     missing_since REAL,
     PRIMARY KEY (provider, path, sid)
 );
+-- prune_missing_sessions() looks sources up by (provider, sid) once per
+-- session, on every scan.  The primary key is (provider, path, sid), so that
+-- lookup could only use the ``provider`` prefix and scanned every source row of
+-- the provider each time: 13.2 s for a 10,000-session index, against 0.55 s
+-- with this index (docs/SCAN_CONSISTENCY.md).  ``path`` is in the index so the
+-- lookup is answered from the index alone.
+CREATE INDEX IF NOT EXISTS idx_sources_provider_sid ON sources(provider, sid, path);
 
 CREATE TABLE IF NOT EXISTS thread_pending (
     thread_id  TEXT NOT NULL,
@@ -421,8 +428,19 @@ class Store:
         provider: str,
         source_path: Path,
         extra_sources: Optional[List[Path]] = None,
+        stamp_sources: bool = True,
     ) -> None:
-        """Atomically (re)write one session and mark its source fresh."""
+        """Atomically (re)write one session and mark its source fresh.
+
+        ``stamp_sources=False`` writes the session but *not* its ``sources``
+        row, so the artifact still reads as changed.  That is what the
+        multi-session scan path needs: one SQLite artifact yields many
+        sessions, and stamping each one as it lands makes a half-finished
+        artifact look complete, so the sessions that were never written are
+        never picked up again.  The caller stamps once, after the whole
+        artifact has been written -- see ``stamp_sources`` and
+        ``docs/SCAN_CONSISTENCY.md``.
+        """
         sid = session["id"]
         evs = list(events)
         raw_meta = session.get("raw_metadata") or {}
@@ -523,26 +541,16 @@ class Store:
                     (sid, f.get("path"), f.get("backup"), f.get("versions"),
                      json.dumps(f.get("versions_json") or [], ensure_ascii=False)),
                 )
-            mtime, size = self.source_fingerprint(source_path)
-            # last_seen/missing_since are cleared here: re-ingesting a source is
-            # exactly the "source came back" reconcile, and leaving a stale
-            # missing_since would make doctor report a healthy source as gone.
-            self.con.execute(
-                "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size,"
-                " last_seen, missing_since) VALUES (?,?,?,?,?,?,NULL)",
-                (provider, str(source_path), sid, mtime, size, seen_at),
-            )
-            for p in extra_sources or []:
-                try:
-                    m2, s2 = self.source_fingerprint(p)
-                    self.con.execute(
-                        "INSERT OR REPLACE INTO sources(provider, path, sid, mtime,"
-                        " size, last_seen, missing_since)"
-                        " VALUES (?,?,?,?,?,?,NULL)",
-                        (provider, str(p), sid, m2, s2, seen_at),
-                    )
-                except OSError:
-                    pass
+            if stamp_sources:
+                # last_seen/missing_since are cleared here: re-ingesting a source
+                # is exactly the "source came back" reconcile, and leaving a
+                # stale missing_since would make doctor report a healthy source
+                # as gone.
+                self._write_source_row(provider, source_path, sid, seen_at,
+                                       strict=True)
+                for p in extra_sources or []:
+                    self._write_source_row(provider, p, sid, seen_at,
+                                           strict=False)
             if was_retained:
                 # O3: the session just came back.  Log it inside this
                 # transaction so the marker and the timeline fact cannot
@@ -560,6 +568,68 @@ class Store:
             except sqlite3.Error:
                 pass  # COMMIT itself failed: sqlite already rolled back
             raise
+
+    def _write_source_row(self, provider: str, path: Path, sid: str,
+                          seen_at: float, strict: bool) -> bool:
+        """Register one (provider, path, sid) as fresh, clearing missing_since.
+
+        ``strict`` keeps ``replace_session``'s long-standing behaviour for its
+        anchor source: an OSError there rolls the session back so the whole
+        ingest is retried, rather than leaving a session with no source row.
+        Optional sources never fail the write.  Returns False when the file
+        could not be stat'ed.
+        """
+        try:
+            mtime, size = self.source_fingerprint(path)
+        except OSError:
+            if strict:
+                raise
+            return False
+        self.con.execute(
+            "INSERT OR REPLACE INTO sources(provider, path, sid, mtime, size,"
+            " last_seen, missing_since) VALUES (?,?,?,?,?,?,NULL)",
+            (provider, str(path), sid, mtime, size, seen_at),
+        )
+        return True
+
+    def stamp_sources(self, entries: Iterable[Tuple[str, Path, str,
+                                                    Optional[List[Path]]]]) -> int:
+        """Record freshness for a whole multi-session artifact, in one commit.
+
+        The counterpart of ``replace_session(stamp_sources=False)``.  It runs
+        *after* every session of the artifact has been written, so the artifact
+        only stops looking changed once it really is fully ingested.  A scan
+        that dies part-way leaves the artifact unstamped, and the next plain
+        scan re-reads it and rewrites every session -- the writes are
+        idempotent, so redoing is always safe.  This is the ordering that makes
+        a partial write recoverable without ``--force``
+        (``docs/SCAN_CONSISTENCY.md``, defect D5).
+
+        Returns the number of source files registered.  A file that cannot be
+        stat'ed is skipped rather than stamped, which keeps the artifact
+        "changed" and costs a redo -- never a false "complete".
+        """
+        import time as _time
+        seen_at = _time.time()
+        written = 0
+        self.con.execute("BEGIN")
+        try:
+            for provider, path, sid, extras in entries:
+                if self._write_source_row(provider, path, sid, seen_at,
+                                          strict=False):
+                    written += 1
+                for p in extras or []:
+                    if self._write_source_row(provider, p, sid, seen_at,
+                                              strict=False):
+                        written += 1
+            self.con.execute("COMMIT")
+        except Exception:
+            try:
+                self.con.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        return written
 
     def prune_missing_sessions(self, provider: str, disk_paths: set) -> int:
         """Mark sessions of `provider` whose source files have ALL vanished.

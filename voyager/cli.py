@@ -172,14 +172,30 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
                 skip = len(sources)
             if bundles is not None:
                 anchor = sources[0]
+                # One artifact -> many sessions.  Freshness is recorded only
+                # after the whole artifact has been written (see the
+                # stamp_sources() call below): stamping each session as it
+                # lands would make a half-finished artifact look unchanged, and
+                # the sessions that were never written would never be indexed
+                # again -- source_changed() is satisfied by any single row for
+                # the path.  Deferring costs one extra commit and makes an
+                # interrupted scan recoverable by a plain re-scan
+                # (docs/SCAN_CONSISTENCY.md, defect D5).
+                pending_stamps = []
                 for bundle in bundles:
+                    src_path = Path(bundle.get("source_path") or anchor)
                     store.replace_session(
                         bundle["session"], bundle["events"], ad.provider,
-                        Path(bundle.get("source_path") or anchor),
-                        bundle.get("extra_sources"),
+                        src_path, bundle.get("extra_sources"),
+                        stamp_sources=False,
                     )
+                    pending_stamps.append(
+                        (ad.provider, src_path, bundle["session"]["id"],
+                         bundle.get("extra_sources")))
                     new += 1
                     evt += len(bundle["events"])
+                if pending_stamps:
+                    store.stamp_sources(pending_stamps)
         else:
             for src in sources:
                 try:
