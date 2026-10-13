@@ -271,10 +271,10 @@ def test_a_systemic_write_failure_still_stops_the_scan(
     "scan complete" with nothing written.
     """
     import voyager.adapters.dsh as dsh_mod
-    import voyager.cli as cli_mod
+    import voyager.scanner as scanner_mod
 
-    monkeypatch.setattr(cli_mod, "MAX_WRITE_FAILURES", 2)
-    monkeypatch.setattr(cli_mod, "WRITE_FAILURE_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(scanner_mod, "MAX_WRITE_FAILURES", 2)
+    monkeypatch.setattr(scanner_mod, "WRITE_FAILURE_GRACE_SECONDS", 0.0)
     root = _dsh_tree(tmp_path, 3)
     monkeypatch.setattr(dsh_mod, "SESSIONS_DIR", root)
 
@@ -301,10 +301,10 @@ def test_a_transient_burst_of_write_failures_does_not_abort(
     scan.
     """
     import voyager.adapters.dsh as dsh_mod
-    import voyager.cli as cli_mod
+    import voyager.scanner as scanner_mod
 
-    monkeypatch.setattr(cli_mod, "MAX_WRITE_FAILURES", 2)
-    monkeypatch.setattr(cli_mod, "WRITE_FAILURE_GRACE_SECONDS", 30.0)
+    monkeypatch.setattr(scanner_mod, "MAX_WRITE_FAILURES", 2)
+    monkeypatch.setattr(scanner_mod, "WRITE_FAILURE_GRACE_SECONDS", 30.0)
     root = _dsh_tree(tmp_path, 5)
     monkeypatch.setattr(dsh_mod, "SESSIONS_DIR", root)
 

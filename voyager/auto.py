@@ -374,8 +374,16 @@ def get_continuation_context(store: Optional[Store] = None,
     try:
         if sync and not os.environ.get("VOYAGER_NO_SYNC"):
             # D12: incremental scan before compiling (never --force);
-            # tests set VOYAGER_NO_SYNC to skip real-adapter scanning
-            from .cli import run_scan
+            # tests set VOYAGER_NO_SYNC to skip real-adapter scanning.
+            #
+            # Imported here, not at module scope: this used to be
+            # `from .cli import run_scan`, which made the engine depend on the
+            # command layer for a core operation and needed a function-local
+            # import to dodge the cycle that created.  The scan pipeline now
+            # lives in voyager.scanner, so the layering is right; the import
+            # stays local only because pulling in every adapter at import time
+            # is a real startup cost for callers that never sync.
+            from .scanner import run_scan
             run_scan(store, force=False, quiet=True)
 
         disc = discover_continuity(store, cwd=cwd, provider=provider,
