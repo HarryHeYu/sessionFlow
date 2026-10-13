@@ -15,7 +15,9 @@ name: release
 # * Re-running the workflow is safe.  An existing Release is left exactly as it
 #   is (notes are never rewritten), and an asset that is already attached is
 #   skipped rather than replaced.  That also repairs a partial upload: the
-#   second run attaches only what is missing.
+#   second run attaches only what is missing and then publishes the draft,
+#   provided every asset is present.  A Release that is already published is
+#   never touched.
 # * No asset is ever overwritten.  If an asset name already exists with
 #   different content the run reports it and leaves it alone; deleting it is a
 #   human decision.
@@ -185,10 +187,34 @@ jobs:
             --jq '.assets[] | "\(.name)  \(.size) B  \(.state)"'
 
       - name: Publish the Release
-        if: steps.create.outputs.created == 'true'
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME}"
+          # Publish if it is still a draft, and only then.  Keying this off
+          # "did this run create the Release" meant a retry after a failed
+          # upload attached the missing asset and then stopped, leaving a draft
+          # that nobody would ever publish.  An already-published Release is
+          # still left exactly as it is, so a re-run never rewrites notes or
+          # re-announces anything.
+          IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+          if [ "$IS_DRAFT" != "true" ]; then
+            echo "Release $TAG is already published — leaving it untouched"
+            exit 0
+          fi
+          # Every asset must be attached before anything is announced: this is
+          # the whole point of creating the Release as a draft.
+          MISSING=""
+          for f in "${RUNNER_TEMP}"/dist/*; do
+            name="$(basename "$f")"
+            if ! gh release view "$TAG" --json assets --jq '.assets[].name' \
+                 | grep -Fxq "$name"; then
+              MISSING="${MISSING} ${name}"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "refusing to publish: asset(s) missing:${MISSING}" >&2
+            exit 1
+          fi
           case "$TAG" in
             *rc*|*a*|*b*) gh release edit "$TAG" --draft=false ;;
             *)            gh release edit "$TAG" --draft=false --latest ;;
