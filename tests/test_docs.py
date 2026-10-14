@@ -155,7 +155,6 @@ class TestVocabulary(unittest.TestCase):
     """The glossary names things; the code has to still use those names."""
 
     GLOSSARY = ROOT / "docs" / "GLOSSARY.md"
-    TAXONOMY = ROOT / "docs" / "TAXONOMY.md"
     CONCEPT_MODEL = ROOT / "docs" / "CONCEPT_MODEL.md"
 
     #: Every term the glossary is required to define.
@@ -167,7 +166,7 @@ class TestVocabulary(unittest.TestCase):
     ]
 
     def test_reference_documents_exist(self):
-        for p in (self.GLOSSARY, self.TAXONOMY, self.CONCEPT_MODEL):
+        for p in (self.GLOSSARY, self.CONCEPT_MODEL):
             self.assertTrue(p.exists(), "%s is missing" % p.name)
 
     def test_every_required_term_is_defined(self):
@@ -192,7 +191,7 @@ class TestVocabulary(unittest.TestCase):
         for state in ("ACTIVE_SOURCE", "SOURCE_MISSING", "ARCHIVED_CANONICAL"):
             self.assertTrue(state in store,
                             "%s is named in the docs but not in the schema" % state)
-        for doc in (self.GLOSSARY, self.TAXONOMY):
+        for doc in (self.GLOSSARY, self.CONCEPT_MODEL):
             text = doc.read_text(encoding="utf-8")
             for state in ("ACTIVE_SOURCE", "SOURCE_MISSING", "ARCHIVED_CANONICAL"):
                 self.assertTrue(state in text,
@@ -228,8 +227,8 @@ class TestVocabulary(unittest.TestCase):
                       "UNIT_VERIFIED", "LIVE_VERIFIED", "ZERO_TOUCH_LIVE_VERIFIED"):
             self.assertTrue(level in matrix,
                             "%s is not in the capability matrix" % level)
-            self.assertTrue(level in self.TAXONOMY.read_text(encoding="utf-8"),
-                            "%s is not in docs/TAXONOMY.md" % level)
+            self.assertTrue(level in self.CONCEPT_MODEL.read_text(encoding="utf-8"),
+                            "%s is not in docs/CONCEPT_MODEL.md" % level)
 
 
 class TestInstallInstructions(unittest.TestCase):

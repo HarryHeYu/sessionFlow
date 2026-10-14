@@ -40,7 +40,7 @@ one is a compatibility decision, not an edit.
 | [API.md](API.md) | API_CONTRACT | integrator | maintained |
 | [SCAN_CONSISTENCY.md](SCAN_CONSISTENCY.md) | ARCHITECTURE | maintainer | maintained — the crash-consistency contract; pinned by `tests/test_scan_consistency.py` |
 | [GLOSSARY.md](GLOSSARY.md) | REFERENCE | everyone | maintained — canonical names for the domain vocabulary |
-| [TAXONOMY.md](TAXONOMY.md) | REFERENCE | maintainer | maintained — the classifications, mapped to the code that defines them |
+| [CONCEPT_MODEL.md](CONCEPT_MODEL.md) | ARCHITECTURE | maintainer | maintained — the classifications, the relationships and the invariants, each mapped to the code that owns it |
 
 ## Architecture and decisions
 
