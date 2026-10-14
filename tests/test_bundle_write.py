@@ -83,6 +83,74 @@ def test_a_second_write_replaces_the_first(tmp_path):
     assert list(tmp_path.glob("*.tmp-*")) == []
 
 
+# --- the default name is unique, so no invocation overwrites another ---------
+#
+# Atomic replacement makes a torn read impossible; it does nothing about two
+# invocations choosing the same path.  These two properties are independent and
+# both are needed, so both are pinned separately.
+
+_ROWS = [{"provider": "claude", "native_id": "m2"},
+         {"provider": "codex", "native_id": "m1"}]
+
+
+def test_two_merges_in_the_same_second_get_different_names():
+    """The old name was members + `int(time.time())`, so these collided."""
+    first = cont.default_bundle_name(_ROWS)
+    second = cont.default_bundle_name(_ROWS)
+    assert first != second, (
+        "two merges produced the same path; the second would silently "
+        "overwrite the first")
+    assert first.endswith(".md") and second.endswith(".md")
+
+
+def test_the_default_name_keeps_its_documented_prefix():
+    """`bundle-merged-*.md` is what users glob for; it must keep working."""
+    name = cont.default_bundle_name(_ROWS)
+    assert name.startswith("bundle-merged-2sessions-claude-codex-")
+
+
+def test_a_single_session_name_stays_deterministic():
+    """One session re-exported is meant to land on the same file."""
+    rows = [{"provider": "codex", "native_id": "1111-2222-3333"}]
+    assert (cont.default_bundle_name(rows)
+            == cont.default_bundle_name(rows)
+            == "bundle-codex-1111-2222-3333.md")
+
+
+def test_the_name_is_filesystem_safe():
+    rows = [{"provider": "codex", "native_id": 'a/b\\c:d*e?f"g<h>i|j'},
+            {"provider": "claude", "native_id": "m2"}]
+    name = cont.default_bundle_name(rows)
+    assert not (set(name) & set('/\\:*?"<>|')), name
+
+
+def test_concurrent_writes_of_one_target_do_not_share_a_staging_file(tmp_path):
+    """Two threads of one process must not fight over the temp file."""
+    import threading
+
+    target = tmp_path / "bundle.md"
+    payloads = ["A" * 20000, "B" * 20000]
+    errors = []
+
+    def writer(text):
+        try:
+            for _ in range(20):
+                cont._write_atomic(target, text)
+        except Exception as exc:          # noqa: BLE001 - reported below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(p,)) for p in payloads]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], errors
+    # Whatever won, the file is one complete payload - never a mix, never empty.
+    assert target.read_text(encoding="utf-8") in payloads
+    assert list(tmp_path.glob("*.tmp-*")) == []
+
+
 def test_the_engine_actually_writes_through_the_atomic_path(
         synthetic_trio, tmp_path, monkeypatch):
     """The helper being correct is not enough — the engine has to use it.

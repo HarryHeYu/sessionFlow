@@ -13,6 +13,7 @@ Principles (ROADMAP.md):
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -146,6 +147,9 @@ def get_bundles_dir() -> Path:
     return p
 
 
+_WRITE_SEQ = itertools.count()
+
+
 def _write_atomic(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` so a reader never sees it half-written.
 
@@ -153,18 +157,17 @@ def _write_atomic(path: Path, text: str) -> None:
     the compiled context) and can be read by something else entirely: a
     ``voyager watch`` process, an editor, a test suite.  ``Path.write_text``
     truncates first, so between the truncate and the last write the file is
-    short or empty — and the default bundle name is the member list plus
-    ``int(time.time())``, which means two merges of the same sessions in the
-    same second target the *same* file.  That is not hypothetical: ten parallel
-    test processes doing exactly this produced an empty read once in eighty
-    runs.
+    short or empty.  Writing to a sibling temp file and ``os.replace``-ing it is
+    atomic on POSIX and Windows alike, so a reader sees either the previous
+    complete file or the new complete file, and a failure part-way through
+    leaves the destination untouched rather than truncated.
 
-    Writing to a sibling temp file and ``os.replace``-ing it is atomic on POSIX
-    and Windows alike, so a reader sees either the previous complete file or
-    the new complete file.  A failure part-way through leaves the destination
-    untouched rather than truncated.
+    The temp name carries the pid **and** a per-process sequence number, so two
+    threads of one process writing the same target cannot collide on the staging
+    file.  It is removed on every path, including failure.
     """
-    tmp = path.with_name("{0}.tmp-{1}".format(path.name, os.getpid()))
+    tmp = path.with_name("{0}.tmp-{1}-{2}".format(
+        path.name, os.getpid(), next(_WRITE_SEQ)))
     try:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
@@ -1129,7 +1132,23 @@ def build_tiered_bundle(
 
 
 def default_bundle_name(session_rows: List[Any]) -> str:
-    """Generate a clean, filesystem-safe filename for a bundle."""
+    """Generate a clean, filesystem-safe filename for a bundle.
+
+    A single session keeps a deterministic name: re-exporting the same session
+    is meant to land on the same file.
+
+    A multi-session bundle gets a name that is unique **per invocation**.  It
+    used to be members + ``int(time.time())``, which is one-second granularity —
+    so two merges of the same sessions in the same second targeted the same
+    path, and the second silently replaced the first.  That is not only a test
+    problem: `merge`, `switch` and any two processes doing the same thing at
+    once all share that window, and a reader arriving during the write could see
+    a truncated file (see ``_write_atomic``).  Uniqueness is what makes the
+    overwrite impossible; atomicity is a separate property and neither one
+    substitutes for the other.
+
+    The readable prefix is unchanged, so `bundle-merged-*.md` still globs.
+    """
     if not session_rows:
         return "continuation-bundle.md"
     if len(session_rows) == 1:
@@ -1142,7 +1161,8 @@ def default_bundle_name(session_rows: List[Any]) -> str:
     import time
     ts = int(time.time())
     provs = "-".join(sorted(set(r["provider"] for r in session_rows)))
-    return f"bundle-merged-{len(session_rows)}sessions-{provs}-{ts}.md"
+    uniq = os.urandom(3).hex()
+    return f"bundle-merged-{len(session_rows)}sessions-{provs}-{ts}-{uniq}.md"
 
 
 def bundle_command(target: str, bundle_path: Path) -> Optional[List[str]]:
