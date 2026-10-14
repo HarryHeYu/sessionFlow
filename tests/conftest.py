@@ -76,7 +76,17 @@ PATH_GLOBALS = ("SESSIONS_DIR", "PROJECTS_DIR", "FILE_HISTORY_DIR",
                 # an unredirected adapter would read the developer's own
                 # conversations -- which is precisely what this guard exists to
                 # prevent (a real DSH session was destroyed that way once).
-                "THREAD_HISTORY_DB", "STATE_DB", "CODEX_DEV_DB")
+                "THREAD_HISTORY_DB", "STATE_DB", "CODEX_DEV_DB",
+                # The adapters capture `Path.home()` at import time to derive the
+                # globals above.  Redirecting the derived names is not enough:
+                # `codex._thread_history_dbs()` globs `HOME / ".codex"` at
+                # *runtime*, so with the real `HOME` still in place a scan could
+                # list the developer's own Codex store.  It is reached only when
+                # `THREAD_HISTORY_DB` looks unpatched, which makes the exposure
+                # dependent on a sentinel comparison -- exactly the kind of thing
+                # that breaks silently.  Redirect `HOME` itself and the question
+                # does not arise.  (Found by `tests/test_isolation.py`.)
+                "HOME")
 
 
 def _redirect_adapters(monkeypatch, missing: Path) -> None:
