@@ -215,25 +215,29 @@ every test green.
 
 | Gate | Result |
 |---|---|
-| Core full pytest, local | **1154 passed, 4 skipped, 31 subtests** |
-| the 4 skips | unchanged data/platform gates (scratch root unset, no CJK sessions, Windows `chmod`) |
+| Core full pytest, local | **1154 passed, 4 skipped, 31 subtests** (before the five skill checks were added) |
+| Core full pytest, CI | **1158 passed, 5 skipped, 31 subtests** on `71cd22a` |
+| the 5 skips | 4 unchanged data/platform gates (scratch root unset, no CJK sessions, Windows `chmod`) + the `skills-ref` validator test, which skips where the package is absent |
 | New tests this round | `test_isolation.py` 6, `test_bundle_write.py` 10, `test_docs.py` +5 |
 | Plugin `npm test` | **46/46, 0 skipped** |
 | Plugin `npm pack --dry-run` | 24 files, 27.0 kB |
 | Plugin build | `tsc` clean |
 | Bridge contract | `schema_version` still 1, same keys, six `sessionflow_*` tools unchanged; `api.py` untouched |
-| Linux CI | see §7 |
-| Windows CI | see §7 |
+| Linux CI | 10/10 core jobs include all four Ubuntu Pythons; plugin cold-start green |
+| Windows CI | 4/4 Windows jobs green on `71cd22a` |
 
 ## 7. Git and CI
 
 **Core commits:** `4c5f878` (unique names + atomic write), `a992cd9` (isolation
 guards), `8ce9489` (taxonomy folded in), `4d0b9e9` (isolation guards corrected
-for CI, Windows replace retry).
+for CI, Windows replace retry), `71cd22a` (this report).
 
-**Plugin commits:** `2c2d134` (probe budget, hermetic merge tests),
-`beae5d0` (in-flight probe sharing, suite HOME isolation), plus the stub-deadline
-fix.
+**Plugin commits:** `2c2d134` (probe budget, hermetic merge tests), `beae5d0`
+(in-flight probe sharing, suite HOME isolation), `6d2adef` (the suite's own
+deadlines no longer measure machine load).
+
+Both worktrees are clean and both `origin/main` refs equal their HEADs; no tag
+was moved and nothing was published to PyPI, npm or the VS Code marketplace.
 
 **CI caught what local runs could not.** The first core push failed on **all four
 Windows jobs** while every Ubuntu job passed: pytest's temp root lives *under*
@@ -245,13 +249,17 @@ The same run also exposed the Windows `os.replace` `PermissionError`.
 
 | Run | Commit | Result |
 |---|---|---|
-| [38609644136](https://github.com/HarryHeYu/sessionFlow/actions/runs/38609644136) | core `4d0b9e9` | **10/10 jobs success** (py3.10–3.13 on Ubuntu and Windows, plus the core-only jobs) |
-| [38604197003](https://github.com/HarryHeYu/sessionFlow/actions/runs/38604197003) | core `8ce9489` | failure — 4/4 Windows jobs, 0 Ubuntu jobs (superseded) |
-| [38609700931](https://github.com/HarryHeYu/sessionFlow/actions/runs/38609700931) | plugin `beae5d0` | **success** (cold-start on Linux) |
-| [38615671191](https://github.com/HarryHeYu/sessionFlow/actions/runs/38615671191) | plugin `6d2adef` | see the run page — triggered by the final plugin commit |
+| [38615860180](https://github.com/HarryHeYu/sessionFlow/actions/runs/38615860180) | core `71cd22a` | **10/10 jobs success** — py3.10–3.13 on Ubuntu *and* Windows, plus the core-only jobs; **1158 passed, 5 skipped** |
+| [38609644136](https://github.com/HarryHeYu/sessionFlow/actions/runs/38609644136) | core `4d0b9e9` | **10/10 jobs success** |
+| [38604197003](https://github.com/HarryHeYu/sessionFlow/actions/runs/38604197003) | core `8ce9489` | **failure** — 4 of 4 Windows jobs, 0 Ubuntu jobs (superseded) |
+| [38615671191](https://github.com/HarryHeYu/sessionFlow/actions/runs/38615671191) | plugin `6d2adef` | **3/3 jobs success** (cold-start on Linux) |
+| [38609700931](https://github.com/HarryHeYu/sessionFlow/actions/runs/38609700931) | plugin `beae5d0` | **success** |
 
-The failure is kept in the table rather than only the success, because it is the
-one that found two defects.
+The failing run is kept in the table rather than only the successes, because it
+is the one that found two defects — and because "local is not remote" is exactly
+what it demonstrated. The fifth skip on CI is the reference `skills-ref`
+validator test skipping itself where the package is not installed; the other four
+are the unchanged data and platform gates.
 
 ## 8. The residual condition, and how it was closed
 
