@@ -149,6 +149,11 @@ def get_bundles_dir() -> Path:
 
 _WRITE_SEQ = itertools.count()
 
+#: How many times an atomic replace is retried on Windows before giving up.
+#: Five attempts 50 ms apart is well under a human's patience and covers the
+#: transient "another process has this file open" case.
+_REPLACE_ATTEMPTS = 5
+
 
 def _write_atomic(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` so a reader never sees it half-written.
@@ -170,7 +175,20 @@ def _write_atomic(path: Path, text: str) -> None:
         path.name, os.getpid(), next(_WRITE_SEQ)))
     try:
         tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                # Windows: replacing a file that another process (or a virus
+                # scanner, or the search indexer) currently has open fails with
+                # PermissionError even though nothing is wrong.  Observed on a
+                # CI runner with two writers on one destination.  Retry briefly,
+                # then let it through -- a genuine permission problem must still
+                # be reported rather than swallowed.
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.05)
     finally:
         try:
             if tmp.exists():
