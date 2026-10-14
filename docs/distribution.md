@@ -32,10 +32,13 @@ Status: **not published.** The build is validated (`python -m build`,
 `twine check` PASSED, clean-venv wheel smoke), and a TestPyPI dry-run
 checklist is in [pypi-checklist.md](pypi-checklist.md).
 
-Future command (do not expect it to work yet):
+Future command (do not expect it to work yet). Note that `voyager` on PyPI is an
+**unrelated project**, so a bare `pip install voyager` would install the wrong
+thing — whatever name is finally chosen, the instruction must keep naming this
+repository until the package is actually published:
 
 ```
-pip install voyager          # or the finally chosen name
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git"
 ```
 
 ## Planned — npm
