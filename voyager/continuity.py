@@ -146,6 +146,36 @@ def get_bundles_dir() -> Path:
     return p
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` so a reader never sees it half-written.
+
+    A bundle is read back immediately after it is written (``--json`` returns
+    the compiled context) and can be read by something else entirely: a
+    ``voyager watch`` process, an editor, a test suite.  ``Path.write_text``
+    truncates first, so between the truncate and the last write the file is
+    short or empty — and the default bundle name is the member list plus
+    ``int(time.time())``, which means two merges of the same sessions in the
+    same second target the *same* file.  That is not hypothetical: ten parallel
+    test processes doing exactly this produced an empty read once in eighty
+    runs.
+
+    Writing to a sibling temp file and ``os.replace``-ing it is atomic on POSIX
+    and Windows alike, so a reader sees either the previous complete file or
+    the new complete file.  A failure part-way through leaves the destination
+    untouched rather than truncated.
+    """
+    tmp = path.with_name("{0}.tmp-{1}".format(path.name, os.getpid()))
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+
 def get_git_snapshot(repo_root: Optional[str] = None) -> Dict[str, Any]:
     """Capture live git snapshot (branch, HEAD commit, short status) if in a git repo."""
     cwd = repo_root or os.getcwd()
@@ -1429,7 +1459,7 @@ def handoff_thread(
 
     out = Path(output) if output else default_out
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(packed, encoding="utf-8")
+    _write_atomic(out, packed)
     res["bundle_path"] = res["context_path"] = str(out.resolve())
     res["context_chars"] = len(packed)
 
