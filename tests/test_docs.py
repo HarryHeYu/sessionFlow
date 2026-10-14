@@ -285,5 +285,64 @@ class TestInstallInstructions(unittest.TestCase):
                         "QUICKSTART no longer points at the repository for install")
 
 
+class TestAgentSkill(unittest.TestCase):
+    """The CI skill must be discoverable and well-formed.
+
+    `.agents/skills/<name>/SKILL.md` is the vendor-neutral Agent Skills layout:
+    an agent scanning for skills looks for a directory named after the skill
+    containing a file named exactly `SKILL.md`, with `name` and `description` in
+    YAML frontmatter.  Get any of those wrong and the skill is simply not found
+    -- silently, because nothing errors when a directory does not match.
+
+    Verified against the reference implementation: `skills_ref.validate()`
+    returns an empty list for this skill.  That package is not a test
+    dependency, so the checks below re-implement the structural part rather than
+    requiring it; if it happens to be installed the real validator runs too.
+    """
+
+    SKILL_DIR = ROOT / ".agents" / "skills" / "sessionflow-ci"
+    SKILL = SKILL_DIR / "SKILL.md"
+
+    def test_the_skill_is_where_an_agent_looks_for_it(self):
+        self.assertTrue(self.SKILL.exists(), "%s is missing" % self.SKILL)
+        self.assertEqual(self.SKILL.name, "SKILL.md")
+        self.assertEqual(self.SKILL_DIR.name, "sessionflow-ci")
+
+    def test_the_frontmatter_declares_a_name_and_a_description(self):
+        text = self.SKILL.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("---\n"), "the skill has no YAML frontmatter")
+        front = text.split("---", 2)[1]
+        name = re.search(r"^name:\s*(\S+)\s*$", front, re.M)
+        self.assertIsNotNone(name, "the frontmatter has no `name:`")
+        self.assertEqual(name.group(1), self.SKILL_DIR.name,
+                         "`name` must match the directory or discovery fails")
+        desc = re.search(r"^description:\s*\S", front, re.M)
+        self.assertIsNotNone(desc, "the frontmatter has no `description:`")
+
+    def test_the_project_points_at_the_skill(self):
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn(".agents/skills/sessionflow-ci/SKILL.md", agents,
+                      "AGENTS.md does not reference the CI skill")
+        index = (ROOT / "docs" / "INDEX.md").read_text(encoding="utf-8")
+        self.assertIn("sessionflow-ci", index,
+                      "docs/INDEX.md does not list the CI skill")
+
+    def test_it_names_the_commands_that_actually_run(self):
+        """A skill that tells an agent to run the wrong thing is worse than none."""
+        text = self.SKILL.read_text(encoding="utf-8")
+        for command in ("python -m pytest tests/", "npm run build", "npm test",
+                        "npm pack --dry-run", "gh run watch"):
+            self.assertIn(command, text,
+                          "the CI skill does not mention `%s`" % command)
+
+    def test_the_reference_validator_agrees_when_it_is_available(self):
+        try:
+            from skills_ref import validate
+        except ImportError:
+            self.skipTest("skills-ref is not installed; structural checks above still ran")
+        self.assertEqual(validate(self.SKILL_DIR), [],
+                         "the reference Agent Skills validator rejected the skill")
+
+
 if __name__ == "__main__":
     unittest.main()
