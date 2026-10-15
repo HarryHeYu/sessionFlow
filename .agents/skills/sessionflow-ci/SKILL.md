@@ -64,8 +64,8 @@ Classify first:
 | Touched | Run at minimum |
 |---|---|
 | `voyager/store.py`, schema, migrations | `tests/test_store.py tests/test_retention.py tests/test_scan_consistency.py tests/test_scan_crash.py tests/test_concurrent_open.py` |
-| `voyager/scanner.py` | `tests/test_scan_characterization.py tests/test_scan_consistency.py tests/test_scan_crash.py tests/test_scan_error_isolation.py tests/test_scan_source_change.py tests/test_scan_scope.py` |
-| `voyager/adapters/**` | `tests/test_adapters.py` + the per-provider suite (`test_codex_app_store.py`, `test_zcode.py`, `test_grok_native.py`, …) |
+| `voyager/scanner.py`, `voyager/adapters/**` | `tests/test_scan_streaming.py` **first** — it is the suite for the scan pipeline — then `tests/test_scan_characterization.py tests/test_scan_consistency.py tests/test_scan_crash.py tests/test_scan_error_isolation.py tests/test_scan_source_change.py tests/test_scan_scope.py` |
+| `voyager/adapters/**` (specifically) | `tests/test_adapters.py` + the per-provider suite (`test_codex_app_store.py`, `test_zcode.py`, `test_grok_native.py`, …) |
 | `voyager/continuity.py`, `ranker`, `budget`, `provenance` | `tests/test_continuity.py tests/test_auto.py tests/test_budget.py tests/test_provenance.py` |
 | `voyager/api.py`, `mcp_server.py` | `tests/test_api.py tests/test_mcp.py tests/test_capability_truth.py` |
 | `voyager/capability_matrix.py`, `integrations/capabilities.py` | `tests/test_capability_truth.py tests/test_capability_consistency.py tests/test_doctor.py` |
@@ -105,8 +105,20 @@ The exact command CI uses:
 python -m pytest tests/ -q --tb=short -rf
 ```
 
-The suite is roughly 1,100 tests and takes several minutes; run it in the
+The suite is roughly **1,170 tests** (1,177 collected as of P9); it takes
+several minutes on Windows and under a minute on Ubuntu. Run it in the
 background and read the tail when it finishes rather than polling.
+
+There is no `.agents`-style second interpreter to find: `python` on `PATH` in a
+Git Bash shell here already resolves to an interpreter with pytest installed
+(9.x), and the full isolated venv used for pinned runs is
+`C:\Users\He_Yu_Hao\.workbuddy-ai\binaries\python\envs\voyager-dev\Scripts\python.exe`.
+Both work; do not conclude "pytest is missing" from the base interpreter alone
+without checking which one you got.
+
+`PYTHONPATH=` (empty) matters when measuring or stress-running: WorkBuddy's
+`sitecustomize` shim can turn bulk deletions into `SystemExit`, which fails
+unrelated tests. Use it for full-suite and benchmark runs.
 
 `pyproject.toml` pins `testpaths = ["tests"]`, so a scratch file in the
 repository root is not collected. Do not rely on that — keep scratch out of the
@@ -124,10 +136,19 @@ npm pack --dry-run # confirm the tarball contains what it should
 
 Two things to know:
 
-- The plugin suite must run with `VOYAGER_NO_SYNC=1` set, or a `merge` path will
-  perform a **real scan of the user's session directories**.
+- The suite is **isolated by itself**: `tests/isolate.ts` redirects
+  `HOME`/`USERPROFILE` to a throwaway directory before anything spawns a child,
+  and the `merge` tests pass an explicit `-o`. Verified: `npm test` with no other
+  environment set leaves `~/.voyager/bundles/` at exactly the size it started
+  (189 files) and reports 46/46, 0 skipped. Setting `VOYAGER_NO_SYNC=1` is still
+  the belt-and-braces option — it stops a real index scan from happening at all,
+  which also makes the run faster — but it is no longer what stands between the
+  suite and the developer's data. Do not "fix" an isolation regression by
+  setting the variable here; fix `tests/isolate.ts`.
 - If you change `src/`, rebuild. A suite run against a stale `lib/` is testing
   code that is not in the commit.
+- Use `SESSIONFLOW_TEST_TMPDIR` to put scratch on a fast disk, since the suite
+  otherwise defaults to the OS temp directory.
 
 ## 6. Read the CI result
 
@@ -156,8 +177,18 @@ letters, backslashes), so both ends of the range run on Windows.
   Run the suite on both when you touch path handling, or say that you only
   checked one.
 - `chmod`-based tests skip on Windows by design.
-- Four skips are expected: scratch root unset, no CJK sessions present, and the
-  Windows `chmod` gates. A **new** skip is a finding, not noise.
+- **The expected skip count is not one number.** It depends on the job, because
+  extras-dependent tests skip themselves and the platform gates differ:
+
+  | job | skips |
+  |---|---|
+  | Windows, extras installed | ~5 |
+  | Ubuntu, extras installed | ~22 |
+  | `core install (no extras)` | ~46 |
+
+  So compare a job to **the same job** on the previous run, not to your local
+  count. A jump of 17 skips on Ubuntu is the optional dependencies being absent,
+  not a new finding; one extra skip in the *same* job you were comparing is.
 
 ## 8. Verify the DSH bridge contract
 

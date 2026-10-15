@@ -1,5 +1,41 @@
 # P9 STREAMING SCAN REPORT
 
+## CI Skill dogfood (Phase 9)
+
+`.agents/skills/sessionflow-ci/SKILL.md` was followed for the whole round, and it
+was mostly right: it predicted both the `git commit` non-zero exit (which
+happened, and checking `git log -1` instead of retrying was correct) and the
+"push can fail and still have succeeded" case (which also happened, and the
+fetch-and-compare check resolved it). Its "watch CI to completion, never claim
+green while queued" rule mattered — the first run on `08517ed` **failed** on four
+jobs, and it was CI that found both a Windows/Ubuntu split my local runs could
+not see and the D9 defect.
+
+Four concrete errors were found and fixed, each against evidence rather than
+preference:
+
+1. **The suite size was stale** ("roughly 1,100 tests"). It is 1,177 collected.
+2. **The skip guidance was wrong in a way that would cause a false alarm.** The
+   skill said "four skips are expected", which is the *Windows-with-extras*
+   number. The CI log shows the real spread: Windows ~5, Ubuntu **~22**,
+   `core install (no extras)` **~46** skips, because extras-dependent tests skip
+   themselves. The rule is now "compare a job to the same job previously";
+   an apparent 17-skip jump on Ubuntu is the optional dependencies being absent,
+   not a finding.
+3. **The scope table was missing the primary scan suite.** The
+   `voyager/scanner.py` row did not list `tests/test_scan_streaming.py`, which
+   is now the suite the scan pipeline is protected by.
+4. **The `VOYAGER_NO_SYNC` warning was outdated.** The skill said the plugin
+   suite must run with it set "or a `merge` path will perform a real scan of the
+   user's session directories". Since P8's isolation work that is no longer true:
+   verified by running `npm test` with no other environment set — 46/46, 0
+   skipped, and `~/.voyager/bundles/` unchanged at 189 files. The skill now says
+   the suite is isolated by `tests/isolate.ts`, and that an isolation regression
+   must be fixed there rather than papered over with the variable.
+
+The skill still validates clean against the official `skills_ref` validator
+(zero errors), and `tests/test_docs.py` still guards its structure.
+
 ## Architecture
 
 **Previous materialisation path.** `ad.scan(source_changed)` returned a `list`
@@ -73,18 +109,28 @@ bottleneck rather than a constant cost. No-op incremental scans are unchanged
 | Targeted scan suites | 83 passed |
 | New `test_scan_streaming.py` | **14 tests**, all failing first |
 | Core full pytest, local | **1173 passed, 4 skipped, 31 subtests** |
-| Plugin `npm test` | 46/46, 0 skipped |
+| Plugin `npm test` | 46/46, 0 skipped (also with no `VOYAGER_NO_SYNC` set — see §CI Skill) |
 | Plugin `npm run build` | clean |
 | `npm pack --dry-run` | 24 files, 27.0 kB |
 | Bridge contract | schema v1, same keys, six tools unchanged; `api.py` untouched |
+| CI | **10/10 jobs success** — Windows 1172 passed / 5 skipped, Ubuntu 1155 / 22, core-only 1131 / 46. Runs [38720973922](https://github.com/HarryHeYu/sessionFlow/actions/runs/38720973922) (`8203658`) and [38721769542](https://github.com/HarryHeYu/sessionFlow/actions/runs/38721769542) (`b2f41c4`, final HEAD) |
 
-**Mutation evidence.** Two mutations were run. Setting `scan_streams()` to
+**Mutation evidence.** Three mutations were run. Setting `scan_streams()` to
 always return `False` (reverting to materialising) **escaped** the first eight
 tests — because both paths are semantically correct and the tests compared
 *results*. That is exactly the blind spot that would let the regression return
 unnoticed, so two more tests now pin the mechanism: `run_scan` must pass an
 `emit` callback, and the first bundle must be written before the last is
-parsed. Re-running the mutation now fails exactly those two.
+parsed. Re-running the mutation now fails exactly those two. Setting the setup
+retry count to 1 fails `test_the_setup_retry_actually_retries`.
+
+**A CI failure that was not a defect in the change.** The first push
+(`08517ed`) failed on four jobs — all Windows and the py3.11/3.13 Ubuntu ones —
+because `test_two_concurrent_streaming_scans_converge` was spawning two children
+that were *creating* the index rather than scanning it, so they raced on
+`PRAGMA journal_mode=WAL`. That test was wrong, not the scanner; but diagnosing
+it exposed D9, which is a real defect and is fixed. Both are in the suite now,
+and the final run is green.
 
 ## Git
 
