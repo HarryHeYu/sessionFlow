@@ -578,3 +578,31 @@ Additive, and it keeps one write loop:
   its own read of the source; no lock is taken for that, and the concurrency
   behaviour of §14 is untouched.
 * **`--force`** still bypasses the adapter's own change check by construction.
+
+The 100k/1M acceptance run (Phase 7, `E:/sessionflow-scratch/p19/accept_100k.py`,
+budget decided before running: 45 min wall, 2.5 GB peak RSS cap):
+
+| | value |
+|---|---|
+| sessions / events indexed | **100,000 / 1,000,000** |
+| first durable write | **0.034 s** (was projected ~24 min to first write) |
+| peak RSS | **484.9 MB** (projected ~3.8 GB before) |
+| scan time | 834.6 s |
+| duplicate event groups | **0** |
+| `event_fts` vs `events` | 1,000,000 = 1,000,000 |
+| `PRAGMA integrity_check` | ok |
+| database size | 1.90 GB |
+
+And the crash-recovery case, which is the property this whole section exists to
+protect. The scanner was killed with `os._exit` after 20,000 successful writes:
+
+* **20,000 sessions survived on disk** — partial progress is real and durable,
+  not all-or-nothing;
+* **0 source rows were stamped fresh** — the artifact never claimed to be
+  complete while 80,000 of its sessions were unindexed. This is D5, and it is
+  why the stamp is still taken at the end of the round;
+* a **plain re-scan** (no `--force`) converged to 100,000 sessions, 1,000,000
+  events, 0 duplicates, `fts == events`, integrity ok.
+
+So streaming bought durability *and* memory: progress now lands as it happens,
+and an interruption costs the un-stamped remainder rather than everything.
