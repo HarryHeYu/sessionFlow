@@ -30,6 +30,7 @@ The only code touched: `voyager/adapters/base.py`, `voyager/adapters/codex.py`
 | **D6** | **Unchanged.** A failed write is isolated, and the failed path is withheld from `stamp_sources()` — including a shared path, where one failure withholds the stamp for the whole artifact. |
 | **D7** | **Unchanged and slightly safer.** The pre-read fingerprint snapshot is still taken before any reading, and streaming moves the first write *earlier*, shortening the window rather than lengthening it. |
 | **D8** | **Unchanged.** No new lock; the adapter calls back into the store from inside its own read of the source, and §14's concurrency findings still hold. |
+| **D9 (new)** | Two processes creating the same fresh index could make one fail with `attempt to write a readonly database`. Fixed with a bounded setup retry; see the section below. |
 | **Crash recovery** | The kill test above. Partial writes are durable and the artifact is not falsely marked complete. |
 | **FTS consistency** | 1,000,000 `event_fts` rows = 1,000,000 events, asserted in every scan test and in the acceptance run. |
 | **Duplicate prevention** | Three repeated scans give 0 duplicate event groups; two concurrent child processes converge to 3 sessions, 0 duplicates. |
@@ -70,8 +71,8 @@ bottleneck rather than a constant cost. No-op incremental scans are unchanged
 | | |
 |---|---|
 | Targeted scan suites | 83 passed |
-| New `test_scan_streaming.py` | **12 tests**, all failing first |
-| Core full pytest, local | **1169 passed, 4 skipped, 31 subtests** |
+| New `test_scan_streaming.py` | **14 tests**, all failing first |
+| Core full pytest, local | **1173 passed, 4 skipped, 31 subtests** |
 | Plugin `npm test` | 46/46, 0 skipped |
 | Plugin `npm run build` | clean |
 | `npm pack --dry-run` | 24 files, 27.0 kB |
@@ -105,6 +106,33 @@ recovery evidence and the CI run URL as the acceptance record.
 * `SCAN_MATERIALISE_ALL_BEFORE_WRITE`'s *pre-read fingerprint snapshot* is still
   one dict entry per source; at 100k sources that is tens of MB and is now the
   largest remaining per-source structure.
+
+## A second defect found on the way: D9
+
+Pushing the cursor scanner meant spawning two real processes against one index
+for the concurrency test. On CI both children happened to be *creating* the index
+rather than scanning it, and one died — at `PRAGMA journal_mode=WAL` on Ubuntu
+and `executescript(SCHEMA)` on Windows, with the message `attempt to write a
+readonly database`. The file is writable; what SQLite is actually reporting is
+that WAL mode has to initialise the shared-memory file and it refused one of two
+processes doing that to the same new database at the same instant. The busy
+timeout does not cover it, because SQLite does not classify it as a lock.
+Measured: 1 failure in 20 pairs, so it is rare — but the trigger is ordinary
+(two terminals' first `voyager scan`), and the error is unhelpful.
+
+The setup was already idempotent by construction (IF NOT EXISTS, guarded ALTERs,
+writes that first check there is anything to do), so nothing actually conflicted;
+there was simply no tolerance for the loser of the race. `__init__` now retries a
+bounded number of times around the setup body, which moved to `_setup()`
+unchanged. A failure that still persists raises on the final attempt rather than
+hanging or leaving a half-open connection.
+
+The test evidence is deliberately not "the probe passes now" — a 1-in-20 race
+proves nothing in one run. `test_the_setup_retry_actually_retries` drives the
+mechanism directly by making the first attempts raise exactly that SQLite error
+and checking both that a losing-then-winning setup comes up with a real schema
+and that a permanently failing one still raises; setting the retry count to 1
+fails it.
 
 ## Final
 
