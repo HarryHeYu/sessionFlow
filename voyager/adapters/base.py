@@ -31,6 +31,27 @@ class Adapter:
         """
         raise NotImplementedError
 
+    def scan_streams(self) -> bool:
+        """Does ``scan()`` accept an ``emit`` callback?
+
+        Optional, additive extension for adapters whose ``scan()`` can yield
+        bundles as it goes instead of returning them all at once.  Declaring it
+        here is what keeps old adapters working unchanged: the scanner asks,
+        and only passes ``emit`` to an adapter that takes it (see
+        ``voyager/scanner.py``).
+
+        An adapter that opts in must keep the no-``emit`` contract exactly as
+        it was, because that is still what a caller gets when it does not ask
+        for streaming.  The whole point is that the two styles produce the same
+        index -- ``tests/test_scan_streaming.py`` asserts that.
+        """
+        import inspect
+        try:
+            sig = inspect.signature(self.scan)
+        except (TypeError, ValueError):
+            return False
+        return "emit" in sig.parameters
+
 
 _REGISTRY: Dict[str, Adapter] = {}
 

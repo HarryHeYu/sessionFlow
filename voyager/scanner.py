@@ -187,6 +187,49 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
             # bundles exactly once — never call it inside a per-source loop.
             # If the artifact is temporarily unreadable (locked DB) treat the
             # round as skipped instead of pruning everything it owns.
+            anchor = sources[0]
+            pending_stamps = []
+            failed_paths: set = set()
+
+            def _consume(bundle) -> bool:
+                """Write one bundle and record its freshness bookkeeping.
+
+                Shared by both adapter styles so they cannot drift: a streaming
+                adapter's callback and the old list loop call exactly this.
+                Returns True when the bundle was written.
+                """
+                nonlocal new, evt
+                src_path = Path(bundle.get("source_path") or anchor)
+                try:
+                    store.replace_session(
+                        bundle["session"], bundle["events"], ad.provider,
+                        src_path, bundle.get("extra_sources"),
+                        stamp_sources=False,
+                    )
+                except Exception as e:
+                    failed_paths.add(str(src_path))
+                    _count_write_failure(src_path.name, e)
+                    return False
+                pending_stamps.append(
+                    (ad.provider, src_path, bundle["session"]["id"],
+                     bundle.get("extra_sources")))
+                new += 1
+                evt += len(bundle["events"])
+                return True
+
+            # An adapter that declares `emit` hands its bundles over one at a
+            # time.  This is the whole fix for the materialisation bottleneck:
+            # the write loop now starts on the first bundle instead of waiting
+            # for `scan()` to have built all of them.  Everything below is
+            # identical for both styles -- that is deliberate, and is what makes
+            # the two paths provably equivalent (tests/test_scan_streaming.py).
+            streams = False
+            if hasattr(ad, "scan_streams"):
+                try:
+                    streams = ad.scan_streams()
+                except Exception:
+                    streams = False
+            failure_note = None
             try:
                 # `--force` means "re-read everything", and an adapter's own
                 # per-file fingerprint check is exactly what force is meant to
@@ -194,43 +237,20 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
                 # scan(); the adapter still skipped every unchanged file, so a
                 # session whose source was recorded but never indexed could never
                 # come back.
-                bundles = ad.scan((lambda p, f: True) if force
-                                  else store.source_changed)
+                check = (lambda p, f: True) if force else store.source_changed
+                if streams:
+                    ad.scan(check, emit=_consume)
+                else:
+                    for bundle in ad.scan(check):
+                        _consume(bundle)
             except Exception as e:
-                print(f"  ! {ad.provider}: scan failed ({e}); keeping existing index",
-                      file=sys.stderr)
-                bundles = None
-                skip = len(sources)
-            if bundles is not None:
-                anchor = sources[0]
-                # One artifact -> many sessions.  Freshness is recorded only
-                # after the whole artifact has been written (see the
-                # stamp_sources() call below): stamping each session as it
-                # lands would make a half-finished artifact look unchanged, and
-                # the sessions that were never written would never be indexed
-                # again -- source_changed() is satisfied by any single row for
-                # the path.  Deferring costs one extra commit and makes an
-                # interrupted scan recoverable by a plain re-scan
-                # (docs/SCAN_CONSISTENCY.md, defect D5).
-                pending_stamps = []
-                failed_paths: set = set()
-                for bundle in bundles:
-                    src_path = Path(bundle.get("source_path") or anchor)
-                    try:
-                        store.replace_session(
-                            bundle["session"], bundle["events"], ad.provider,
-                            src_path, bundle.get("extra_sources"),
-                            stamp_sources=False,
-                        )
-                    except Exception as e:
-                        failed_paths.add(str(src_path))
-                        _count_write_failure(src_path.name, e)
-                        continue
-                    pending_stamps.append(
-                        (ad.provider, src_path, bundle["session"]["id"],
-                         bundle.get("extra_sources")))
-                    new += 1
-                    evt += len(bundle["events"])
+                # Keep going: bundles already written are durable, and the
+                # artifact is left unstamped so the next scan re-reads it.
+                failure_note = "%s: scan failed (%s)" % (ad.provider, e)
+                if not quiet:
+                    print(f"  ! {ad.provider}: scan failed ({e}); keeping "
+                          "existing index", file=sys.stderr)
+            if failure_note is None:
                 # A path may only be stamped fresh if every session that claims
                 # it was actually written.  For a shared artifact (Cursor, ZCode,
                 # the Codex store) all sessions claim the same path, so one
@@ -238,6 +258,12 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
                 # next scan re-reads it -- stamping the survivors would make the
                 # artifact look complete and strand the session that failed
                 # (defect D5, one layer up).
+                #
+                # Stamping stays at the END of the round.  That is not laziness:
+                # the scanner cannot know whether a later bundle will still
+                # claim a path, and an artifact that looks fresh while half its
+                # sessions are unindexed is unrecoverable.  The cost is one
+                # re-parse after an interrupted scan, which D5 already priced.
                 to_stamp = []
                 for prov, path, sid, extras in pending_stamps:
                     if str(path) in failed_paths:

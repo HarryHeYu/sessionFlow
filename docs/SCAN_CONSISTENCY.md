@@ -245,8 +245,8 @@ numbers above are reproducible rather than single samples.
 | | A — per-session txn (as-is) | B — bounded batch txn | C — stream the materialised bundles |
 |---|---|---|---|
 | expected gain | — | fewer COMMITs | lower peak RSS |
-| measured gain | — | **≤ 3.5% of the write path** (see below) | none on this dataset (parse is CPU-bound) |
-| integrity | unchanged | batch becomes the atomic unit | unchanged *if* per-session materialisation stays |
+| measured gain | — | **≤ 3.5% of the write path** (see below) | **delivered in §15** (issue #18): RSS and first-write latency |
+| integrity | unchanged | batch becomes the atomic unit | unchanged: per-session materialisation stays, only its *lifecycle* is bounded |
 | max rollback | one session | N sessions | one session |
 | retry / idempotency | re-scan converges | must keep the freshness marker in step with the batch, or it inherits D5 | re-scan converges |
 | memory | O(all sessions) | O(all sessions) | O(one session) |
@@ -515,3 +515,66 @@ having written nothing, and it says so —
 index is consistent and nothing was half-written`. A plain scan afterwards
 indexed all 400. The round is lost, the data is not.
 
+
+## 15. Bounded streaming — removing the materialisation bottleneck
+
+Issue #18. The multi-session path used to build **every** bundle before
+**any** of them was written: `ad.scan()` returned a `list`, and `run_scan`
+started calling `replace_session()` only once the whole provider had been
+parsed.
+
+### What was measured first
+
+`E:/sessionflow-scratch/p19/measure.py`, synthetic codex rollouts, 10 events per
+session, first durable write observed by watching the database files (a
+monkeypatched `Connection.commit` is not usable: `Store` drives its
+transactions with `execute("COMMIT")`, which reported *one* commit for a
+10,000-session scan):
+
+| sessions | scan time | first durable write | peak RSS |
+|---|---|---|---|
+| 1,020 | 7.19 s | 2.56 s (36% in) | 104 MB |
+| 2,020 | 34.64 s | 23.17 s (67% in) | 152 MB |
+| 10,020 | 120.29 s | 52.84 s (44% in) | 445 MB |
+
+The first write moves later as the scale grows, and peak RSS is ~38 KB per
+session — ~3.8 GB at 100,000 sessions, which is the `PERF_O1` signature.
+
+### The shape of the fix
+
+Additive, and it keeps one write loop:
+
+* `Adapter.scan_streams()` (a signature check) answers "does this adapter take
+  an `emit` callback?". The scanner asks before calling, so an adapter that
+  does not is called exactly as before.
+* `scan(source_changed, emit=None)` — with `emit` the adapter hands its bundles
+  over one at a time and returns nothing; with `emit=None` the old
+  return-the-list contract is unchanged.
+* `scanner.py` funnels **both** styles through one local `_consume()`, so a
+  streaming adapter and a list-returning adapter cannot drift apart.
+  `tests/test_scan_streaming.py` asserts the two produce the same index.
+* Only `codex` was migrated — rollouts **and** its app store (which streams
+  through `_scan_one_store` instead of accumulating a list). ZCode and Cursor
+  still use the list path, and the tests prove that path still works.
+
+### What it does not change
+
+* **D5 — stamping stays at the end of the round.** The scanner cannot know
+  whether a later bundle will still claim a path, and an artifact that looks
+  fresh while half its sessions are unindexed is unrecoverable. Partial writes
+  *are* allowed and *are* durable: each `replace_session()` is its own
+  transaction, so sessions 1..k survive even when k+1 fails, and the unchanged
+  end-of-round `stamp_sources()` withholds the stamp so the next plain scan
+  re-reads the artifact and rewrites the rest. Nothing new is needed for that:
+  the writes are idempotent.
+* **D6 — a failed write is still isolated, and the failed path is still
+  withheld from stamping** (including a *shared* path: one failure withholds
+  the stamp for the whole artifact, which is the D5 rule one layer up).
+* **D7 — the pre-read fingerprint snapshot is still taken before any reading**,
+  and it is still what `stamp_sources()` writes. Streaming does not weaken it;
+  it moves the first write earlier, which shortens the window rather than
+  lengthening it.
+* **D8 / §14 — no new lock.** The adapter calls back into the store from inside
+  its own read of the source; no lock is taken for that, and the concurrency
+  behaviour of §14 is untouched.
+* **`--force`** still bypasses the adapter's own change check by construction.

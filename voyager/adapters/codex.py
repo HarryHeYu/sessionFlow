@@ -180,11 +180,20 @@ class CodexAdapter(Adapter):
             return "-".join(tail[-5:])
         return sid
 
-    def scan(self, source_changed) -> List[dict]:
+    def scan(self, source_changed, emit=None) -> List[dict]:
         """Group continuation rollouts by session id and merge each group.
 
         Groups whose files all match their registered fingerprints are
         skipped (their index rows are still alive, so prune keeps them).
+
+        ``emit`` is the additive streaming extension (see
+        ``Adapter.scan_streams``).  Pass a callable and each group is handed
+        over the moment it is complete, instead of every group accumulating in
+        a list first.  That is what lets the scanner start writing while the
+        rest of the provider is still being parsed -- the 10,000-session
+        synthetic set used to hold ~4.4 KB per session before the first durable
+        write.  Return value and behaviour with ``emit=None`` are unchanged,
+        and the two styles produce the same index.
         """
         groups: Dict[str, List[Path]] = {}
         store_paths = set(self._store_paths())
@@ -237,8 +246,18 @@ class CodexAdapter(Adapter):
                                       if e["kind"] == "tool_call")
                 s["updated_at"] = max((e["ts"] for e in merged["events"] if e.get("ts")),
                                       default=s.get("started_at"))
-                out.append(merged)
-        out.extend(self._scan_thread_history(source_changed))
+                if emit is None:
+                    out.append(merged)
+                else:
+                    emit(merged)
+        # The app-store sessions are a different shape (one file -> many
+        # sessions) but the same contract: hand them over one at a time.
+        history = self._scan_thread_history(source_changed)
+        if emit is None:
+            out.extend(history)
+        else:
+            for bundle in history:
+                emit(bundle)
         return out
 
     # -- the app / VS Code extension store ---------------------------------
@@ -389,24 +408,41 @@ class CodexAdapter(Adapter):
             return [patched] if patched.is_file() else []
         return _thread_history_dbs()
 
-    def _scan_thread_history(self, source_changed) -> List[dict]:
+    def _scan_thread_history(self, source_changed, emit=None) -> List[dict]:
         """The app's own conversations, which never appear as rollouts."""
         stores = self._store_paths()
         if not stores:
             return []
         out: List[dict] = []
         seen: set = set()
-        for store_path in stores:
-            for bundle in self._scan_one_store(store_path, source_changed):
-                sid = bundle["session"]["id"]
-                if sid in seen:
-                    continue      # the same session in two stores: first wins
-                seen.add(sid)
+
+        def _take(bundle) -> None:
+            # First store wins for a session that appears twice.  This has to
+            # run on the way *in*, not on a finished list, or dedup would have
+            # to hold every bundle to compare them -- which is the thing being
+            # removed.
+            nonlocal out
+            sid = bundle["session"]["id"]
+            if sid in seen:
+                return
+            seen.add(sid)
+            if emit is None:
                 out.append(bundle)
+            else:
+                emit(bundle)
+
+        for store_path in stores:
+            self._scan_one_store(store_path, source_changed, emit=_take)
         return out
 
-    def _scan_one_store(self, store_path: Path, source_changed) -> List[dict]:
-        """Read one thread-history store. Never writes to it."""
+    def _scan_one_store(self, store_path: Path, source_changed,
+                        emit=None) -> List[dict]:
+        """Read one thread-history store. Never writes to it.
+
+        ``emit`` streams bundles out as they are built; ``None`` keeps the old
+        return-a-list behaviour.  The early exits return ``[]`` exactly as
+        before, so a caller that wants "is there anything?" still works.
+        """
         if not store_path.is_file():
             return []
         try:
@@ -466,10 +502,14 @@ class CodexAdapter(Adapter):
                 session["updated_at"] = max(
                     (e["ts"] for e in events if e.get("ts")),
                     default=session.get("updated_at"))
-                out.append({"session": finish_session(session, git),
-                            "events": events,
-                            "source_path": store_path,
-                            "extra_sources": []})
+                bundle = {"session": finish_session(session, git),
+                          "events": events,
+                          "source_path": store_path,
+                          "extra_sources": []}
+                if emit is None:
+                    out.append(bundle)
+                else:
+                    emit(bundle)
         finally:
             con.close()
         return out
