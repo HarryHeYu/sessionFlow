@@ -989,3 +989,53 @@ class TestL1WorkingContext:
         assert L1_TRUNCATION_MARKER in out   # metadata counted toward the budget
         assert "huge metadata turn" not in out   # the head of the turn is gone
         assert out.endswith("exit_code: 0")      # the metadata tail survives
+
+
+def test_handoff_accepts_session_refs_as_well_as_rows(synthetic_trio, tmp_path):
+    """A public entry point must return `error`, not raise.
+
+    `resolve_handoff_source` documents that it returns `error` rather than
+    raising, and it already accepts a *string* for `source`.  `sessions` took
+    only rows, so a caller holding ids -- an ordinary thing for an API consumer
+    to be -- got `TypeError: string indices must be integers` from inside the
+    WorkThread lookup instead of the documented error dict.
+    """
+    from voyager.continuity import resolve_handoff_source
+
+    store, rows = synthetic_trio
+    ids = [r["id"] for r in rows]
+    assert len(ids) >= 2
+
+    # ids are accepted now, and resolve to the same members as the rows do
+    by_ids = resolve_handoff_source(store, sessions=ids[:2])
+    by_rows = resolve_handoff_source(store, sessions=rows[:2])
+    assert by_ids.get("error") is None, by_ids.get("error")
+    assert [m["id"] for m in by_ids["members"]] == [m["id"] for m in by_rows["members"]]
+
+    # a mix of the two shapes works too
+    mixed = resolve_handoff_source(store, sessions=[rows[0], ids[1]])
+    assert mixed.get("error") is None
+    assert [m["id"] for m in mixed["members"]] == [m["id"] for m in by_rows["members"]]
+
+    # and an unknown ref is an error dict, not a traceback
+    bad = resolve_handoff_source(store, sessions=["codex:no-such-session"])
+    assert bad["error"] is not None
+    assert "not found" in bad["error"]
+    assert bad["members"] == []
+
+
+def test_an_ambiguous_session_ref_is_reported_not_guessed(synthetic_trio):
+    """A prefix matching several sessions must ask, never pick one."""
+    from voyager.continuity import resolve_handoff_source
+
+    store, rows = synthetic_trio
+    providers = {r["id"].split(":")[0] for r in rows}
+    if len(providers) < 2:
+        import pytest
+        pytest.skip("fixture needs two providers to build a shared prefix")
+    res = resolve_handoff_source(store, sessions=["s"])
+    # either nothing matches "s", or several do and it says so -- never a guess
+    if res["error"] is None:
+        assert len(res["members"]) == 1, "a bare prefix must not resolve to many"
+    else:
+        assert ("matches" in res["error"]) or ("not found" in res["error"]), res["error"]

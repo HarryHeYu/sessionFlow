@@ -1277,7 +1277,25 @@ def resolve_handoff_source(
             members = [source]
 
     if sessions:
-        members = list(sessions)
+        # Accept session refs as well as rows, the same way `source` does.  The
+        # CLI and MCP pass rows, but this is a public entry point and a caller
+        # holding ids is an ordinary thing to be; before this, a string entry
+        # crashed with `TypeError: string indices must be integers` from deep
+        # inside the WorkThread lookup, which breaks the one promise this
+        # function makes -- return `error`, never raise.
+        resolved: List[Any] = []
+        for entry in sessions:
+            if isinstance(entry, str):
+                row, ambiguous = store.session(entry)
+                if row is None:
+                    if ambiguous:
+                        return _fail("'{0}' matches {1} sessions — use a longer "
+                                     "prefix".format(entry, len(ambiguous)))
+                    return _fail("session not found: {0}".format(entry))
+                resolved.append(row)
+            else:
+                resolved.append(entry)
+        members = resolved
 
     if thread is not None:
         t = store.thread_get(thread) if isinstance(thread, str) else thread
