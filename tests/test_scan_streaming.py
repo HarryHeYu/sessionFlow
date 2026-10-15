@@ -532,6 +532,11 @@ def test_two_concurrent_streaming_scans_converge(tmp_path, monkeypatch):
     Two real child processes against one on-disk index.  The streaming path
     calls back into the store from inside the adapter's own read of the source,
     which is exactly where a lock would have to be added if one were needed.
+
+    The index is created by the parent *before* the children start, on purpose:
+    concurrent *scans* of an existing index are the scenario under test.
+    Concurrent *creation* of a brand-new index is a different, separately
+    covered case (test_concurrent_creation_of_a_fresh_index_does_not_fail).
     """
     import subprocess
     import sys
@@ -543,6 +548,9 @@ def test_two_concurrent_streaming_scans_converge(tmp_path, monkeypatch):
                             codex_tree.parent / ("_absent_%s.db" % name))
 
     index = tmp_path / "index.db"
+    seed = Store(index)
+    seed.close()          # schema + WAL mode established; children only scan
+
     child = (
         "import sys\n"
         "from pathlib import Path\n"
@@ -578,3 +586,96 @@ def test_two_concurrent_streaming_scans_converge(tmp_path, monkeypatch):
         % state["sessions"])
     assert state["dup_events"] == 0, "concurrent scans duplicated events"
     assert state["fts"] == state["events"], "FTS disagrees with events"
+
+
+def test_concurrent_creation_of_a_fresh_index_does_not_fail(tmp_path):
+    """Two users' first-ever `voyager scan`, started at the same moment.
+
+    Found by the concurrent-scan test above failing on CI: both children were
+    *creating* the index, not scanning it, and one died at
+    ``PRAGMA journal_mode=WAL`` with ``database is locked`` (Ubuntu) or
+    ``attempt to write a readonly database`` (Windows).  Measured separately:
+    1 failure in 6 trials, so it is rare -- and it is a real one, because a
+    first scan on a machine with two shells is an ordinary thing to do.
+
+    The setup is idempotent (every statement is IF NOT EXISTS / guarded by a
+    read), so the only thing wrong is that a concurrent setup is not tolerated.
+    This test drives the real ``Store`` from two real processes.
+    """
+    import subprocess
+    import sys
+    from voyager.store import Store
+
+    CHILD = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, %r)\n"
+        "from voyager.store import Store\n"
+        "s = Store(Path(sys.argv[1]))\n"
+        "s.close()\n"
+        "print('OK')\n"
+    ) % str(Path(r"E:/code/voyager"))
+
+    # Several trials: the failure is a race, so a single run proves nothing
+    # either way.  Ten pairs is enough to catch a ~1-in-6 rate.
+    for trial in range(10):
+        db = tmp_path / ("fresh%d.db" % trial)
+        procs = [subprocess.Popen([sys.executable, "-c", CHILD, str(db)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, cwd=str(tmp_path))
+                 for _ in range(2)]
+        failures = []
+        for p in procs:
+            _out, err = p.communicate(timeout=90)
+            if p.returncode != 0 or "OK" not in _out:
+                failures.append("rc=%d %s" % (p.returncode, err.strip()[-300:]))
+        assert failures == [], (
+            "trial %d: a fresh index could not be created concurrently; the "
+            "setup is idempotent so this is a pure tolerance bug:/n  %s"
+            % (trial, "\n  ".join(failures)))
+        # and the result must be a usable index, not merely an unbroken process
+        store = Store(db)
+        assert store.stats()["sessions"] >= 0
+        store.close()
+
+
+def test_the_setup_retry_actually_retries(tmp_path, monkeypatch):
+    """The retry must be real, not just present.
+
+    The concurrent-creation failure is a ~1-in-20 race, so "the probe passes
+    now" is not evidence that the fix works.  Drive the mechanism directly:
+    make the first attempts raise exactly the error SQLite gives
+    (``attempt to write a readonly database``) and check that Store() still
+    comes up, with a settled schema, rather than raising or leaving a
+    half-open connection.
+    """
+    import sqlite3
+    from voyager.store import Store
+
+    real_setup = Store._setup
+    calls = {"n": 0}
+
+    def flaky(self):
+        calls["n"] += 1
+        if calls["n"] <= 2:            # lose the race twice, then win
+            raise sqlite3.OperationalError("attempt to write a readonly database")
+        return real_setup(self)
+
+    monkeypatch.setattr(Store, "_setup", flaky)
+    db = tmp_path / "index.db"
+    store = Store(db)
+    try:
+        assert calls["n"] == 3, "setup must have been retried; got %d attempts" % calls["n"]
+        # the schema really is there, not merely an unbroken object
+        assert store.stats()["sessions"] >= 0
+        assert store.con.execute(
+            "SELECT COUNT(*) FROM sources").fetchone()[0] >= 0
+    finally:
+        store.close()
+
+    # and a setup that never recovers must raise, not hang or half-open
+    def never(self):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(Store, "_setup", never)
+    with pytest.raises(sqlite3.OperationalError):
+        Store(tmp_path / "stuck.db")

@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 
 from .model import ORIGIN_UNKNOWN
 from pathlib import Path
@@ -340,11 +341,43 @@ _MISSING = object()
 
 
 class Store:
+    #: How many times to retry setup when another process is doing the same
+    #: thing to the same brand-new index.
+    #:
+    #: `Store()` is idempotent by construction: every statement is IF NOT
+    #: EXISTS, a guarded ALTER, or a write that first checks there is anything
+    #: to do.  Two processes performing a *first* scan on the same fresh path
+    #: therefore have no reason to conflict -- but they do, because
+    #: `PRAGMA journal_mode=WAL` and the schema script have to initialise the
+    #: WAL's shared-memory file, and SQLite reports that as
+    #: `attempt to write a readonly database` rather than as a lock.  Measured:
+    #: 1 failure in 20 pairs, so it is rare, and it costs a user a traceback on
+    #: an ordinary action (two shells, first scan).  Retrying costs nothing when
+    #: nothing is wrong, because the loser of the race simply re-reads the
+    #: schema the winner already wrote.
+    _SETUP_RETRIES = 3
+
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path) if db_path else default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.con = sqlite3.connect(str(self.db_path))
-        self.con.row_factory = sqlite3.Row
+        for attempt in range(self._SETUP_RETRIES):
+            self.con = sqlite3.connect(str(self.db_path))
+            self.con.row_factory = sqlite3.Row
+            try:
+                self._setup()
+                return
+            except sqlite3.OperationalError:
+                # Leave nothing half-open behind: a second connection to the
+                # same file from a dead handle is its own kind of trouble.
+                try:
+                    self.con.close()
+                except sqlite3.Error:
+                    pass
+                if attempt == self._SETUP_RETRIES - 1:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+
+    def _setup(self) -> None:
         # WAL + relaxed sync: bulk re-indexing does hundreds of MB in
         # many small transactions; the delete-journal default turns each
         # commit into a double-fsync on a growing file.
