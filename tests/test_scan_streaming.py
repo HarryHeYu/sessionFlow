@@ -580,12 +580,32 @@ def test_two_concurrent_streaming_scans_converge(tmp_path, monkeypatch):
         _out, err = p.communicate(timeout=180)
         assert p.returncode == 0, "a concurrent scan failed: %s" % err[-800:]
 
+    # The contract is *convergence*, not one-round completeness.  Measured under
+    # real contention: in 1 of 8 concurrent pairs one session write is lost to
+    # the write lock (D6 isolates it and withholds the stamp, so the round is
+    # short) -- and in 8 of 8 the follow-up scan recovers it, every time, with
+    # no duplicates.  Asserting "== 3 right now" is asserting more than two
+    # concurrent writers ever promised, which is what made CI's core-only job
+    # see 2 sessions and fail for a reason that was not a defect.
     state = _index_state(index)
-    assert state["sessions"] == 3, (
-        "two concurrent scans must converge on one index; got %d sessions"
-        % state["sessions"])
     assert state["dup_events"] == 0, "concurrent scans duplicated events"
     assert state["fts"] == state["events"], "FTS disagrees with events"
+    assert state["sessions"] <= 3, (
+        "concurrent scans wrote more sessions than exist on disk")
+
+    # One plain scan afterwards must converge -- exactly what a user runs after
+    # a busy round.  This is the property that actually matters, and it is
+    # asserted rather than assumed.
+    store = Store(index)
+    run_scan(store, providers=["codex"], quiet=True)
+    store.close()
+    after = _index_state(index)
+    assert after["sessions"] == 3, (
+        "after two concurrent scans and one follow-up, %d of 3 sessions are "
+        "indexed: an isolated write failure is not being retried"
+        % after["sessions"])
+    assert after["dup_events"] == 0
+    assert after["fts"] == after["events"]
 
 
 def test_concurrent_creation_of_a_fresh_index_does_not_fail(tmp_path):
@@ -679,3 +699,112 @@ def test_the_setup_retry_actually_retries(tmp_path, monkeypatch):
     monkeypatch.setattr(Store, "_setup", never)
     with pytest.raises(sqlite3.OperationalError):
         Store(tmp_path / "stuck.db")
+
+
+class _SharedArtifactAdapter:
+    """Three sessions, ONE shared source path -- the Cursor/ZCode/store shape.
+
+    This is the shape the ``failed_paths`` filter exists for.  With one path per
+    session, a failed write simply never reaches ``pending_stamps`` so it is
+    never stamped, and the filter is decoration.  With a shared path, session 1
+    succeeds and puts the path into ``pending_stamps`` while session 2 fails and
+    puts the *same* path into ``failed_paths`` -- and stamping it would make the
+    artifact look complete and strand session 2 permanently.
+
+    ``artifact`` is a real file: the scanner's discovery loop stats every source
+    and drops the ones it cannot, so a non-existent path means ``scan()`` is
+    never called at all (which is how the first draft of this test silently
+    proved nothing).
+    """
+
+    def __init__(self, artifact: Path):
+        self.artifact = Path(artifact)
+
+    provider = "shared"
+
+    def discover(self):
+        return [self.artifact]
+
+    def parse(self, source):
+        return None
+
+    def scan(self, source_changed, emit=None):
+        for i in range(1, 4):
+            bundle = {
+                "session": {"id": "shared:s%d" % i, "provider": self.provider,
+                            "native_session_id": "s%d" % i,
+                            "started_at": 1757000000000 + i,
+                            "updated_at": 1757000000000 + i,
+                            "raw_metadata": {}},
+                "events": [{"sid": "shared:s%d" % i, "seq": 0, "kind": "user",
+                            "content": "shared session %d" % i}],
+                # every bundle claims the SAME artifact
+                "source_path": self.artifact,
+                "extra_sources": [],
+            }
+            if emit is None:
+                _OUT.append(bundle)
+            else:
+                emit(bundle)
+        return _OUT if emit is None else []
+
+
+_OUT: list = []
+
+
+def test_a_failed_write_on_a_shared_artifact_withholds_the_whole_stamp(
+        tmp_path, monkeypatch):
+    """D5 through D6: one shared path, one failed session, no stamp.
+
+    The `failed_paths` filter is what stops a *shared* artifact from being
+    stamped fresh while some of its sessions were never written.  Per-session
+    paths cannot exercise that -- the failed one never reaches the stamp list at
+    all -- so this uses an adapter whose three bundles all claim one path.
+    """
+    from voyager.adapters.base import register
+    import voyager.scanner as scanner_mod
+
+    artifact = tmp_path / "shared-artifact.db"
+    artifact.write_bytes(b"not a real database; the adapter does not read it")
+    ad = _SharedArtifactAdapter(artifact)
+    register(ad)
+    monkeypatch.setattr(scanner_mod, "enabled_adapters",
+                        lambda names=None: [ad])
+
+    real = Store.replace_session
+    state = {"calls": 0}
+
+    def flaky(self, *a, **kw):
+        state["calls"] += 1
+        if state["calls"] == 2:      # session 2 of 3 fails to write
+            raise sqlite3.OperationalError("database is locked")
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(Store, "replace_session", flaky)
+    index = tmp_path / "index.db"
+    store = Store(index)
+    run_scan(store, providers=["shared"], quiet=True)
+    store.close()
+    monkeypatch.setattr(Store, "replace_session", real)
+    assert state["calls"] == 3, "all three sessions must be attempted"
+
+    con = sqlite3.connect(str(index))
+    try:
+        stamped = con.execute(
+            "SELECT COUNT(*) FROM sources WHERE mtime IS NOT NULL").fetchone()[0]
+        n_ses = con.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    finally:
+        con.close()
+    assert stamped == 0, (
+        "the shared artifact was stamped fresh although session 2 never "
+        "landed (%d rows stamped): it will never be indexed again" % stamped)
+    assert n_ses == 2, "sessions 1 and 3 must have been written; got %d" % n_ses
+
+    # ...and a plain re-scan writes the missing one, because nothing was stamped
+    store = Store(index)
+    run_scan(store, providers=["shared"], quiet=True)
+    n_after = len(store.sessions("shared"))
+    store.close()
+    assert n_after == 3, (
+        "the shared artifact still looked unchanged, so session 2 is stranded;"
+        " got %d of 3" % n_after)
