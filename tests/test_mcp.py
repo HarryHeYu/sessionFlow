@@ -9,6 +9,10 @@ hint — that is the packaging fix (`[mcp]` / `[all]`) made observable.
 
 from __future__ import annotations
 
+import os
+import re
+from pathlib import Path
+
 import pytest
 
 mcp_server = pytest.importorskip("voyager.mcp_server")
@@ -82,3 +86,73 @@ class StoreProxy:
 
     def close(self):
         pass
+
+
+#: The developer's real home, captured during collection — before conftest's
+#: autouse fixture redirects HOME, after which it is no longer discoverable.
+#: Same trick as tests/test_isolation.py and tests/test_bundle_write.py.
+REAL_HOME = Path(os.path.expanduser("~"))
+
+
+def _files_under(root: Path) -> set:
+    if not root.is_dir():
+        return set()
+    return {p for p in root.rglob("*") if p.is_file()}
+
+
+def test_both_writing_tools_honour_the_bundles_dir_and_leave_home_alone(
+        indexed_store, monkeypatch, tmp_path):
+    """The two MCP tools that write must not reach the real home.
+
+    `voyager_handoff` passes an explicit `output` computed from
+    `get_bundles_dir()`, and `voyager_merge` lets the engine default it.  Those
+    are two different code paths to the same place, and neither was covered:
+    the tests above assert on the returned *text*, so a handler changed to a
+    hardcoded `Path.home()` path would still pass them.  This asserts on the
+    filesystem instead.
+    """
+    monkeypatch.setattr(mcp_server, "Store", lambda *a, **kw: StoreProxy(indexed_store))
+    target = tmp_path / "mcp-bundles"
+    monkeypatch.setenv("VOYAGER_BUNDLES_DIR", str(target))
+    real_bundles = REAL_HOME / ".voyager" / "bundles"
+    before = _files_under(real_bundles)
+
+    handoff = mcp_server.voyager_handoff("11111111-2222", target="claude")
+    merged = mcp_server.voyager_merge(["11111111-2222"], target="claude")
+
+    written = _files_under(target)
+    assert len(written) == 2, f"expected two files in the isolated dir: {written}"
+    # The reply is prose ("...written to <path>. Target agent ..."), so pull the
+    # path out with a pattern rather than by splitting on whitespace -- the
+    # sentence period is glued to the filename.
+    for text in (handoff, merged):
+        assert "written to" in text
+        claimed = re.findall(r"([A-Za-z]:[^\s]+\.md)", text)
+        assert claimed, f"no path in the reply: {text}"
+        assert Path(claimed[0]).parent == target, (
+            f"the reply names {claimed[0]}, not the isolated directory")
+        assert Path(claimed[0]).is_file(), "the reply names a file that is not there"
+
+    assert _files_under(real_bundles) == before, (
+        "an MCP write reached the real bundles directory: "
+        f"{sorted(str(p) for p in _files_under(real_bundles) - before)}")
+
+
+def test_an_uncreatable_bundles_dir_makes_the_mcp_tools_say_so(
+        indexed_store, monkeypatch, tmp_path):
+    """No silent fallback: the caller gets an error naming the path."""
+    monkeypatch.setattr(mcp_server, "Store", lambda *a, **kw: StoreProxy(indexed_store))
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("i am a file", encoding="utf-8")
+    monkeypatch.setenv("VOYAGER_BUNDLES_DIR", str(blocker / "bundles"))
+    real_bundles = REAL_HOME / ".voyager" / "bundles"
+    before = _files_under(real_bundles)
+
+    for reply in (mcp_server.voyager_handoff("11111111-2222", target="claude"),
+                  mcp_server.voyager_merge(["11111111-2222"], target="claude")):
+        assert "failed" in reply and "cannot create bundle directory" in reply, reply
+        assert str(blocker) in reply, "the error must name the path it could not use"
+
+    assert _files_under(real_bundles) == before, (
+        "a failed MCP write fell back to the real bundles directory")
+
