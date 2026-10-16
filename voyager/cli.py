@@ -1369,6 +1369,7 @@ def _handoff_via_engine(store: Store, args, kind: str,
         mode=getattr(args, "mode", "bundle"),
         steal=getattr(args, "steal", False),
         output=getattr(args, "output", None) or None,
+        bundles_dir=getattr(args, "bundles_dir", None) or None,
         style=style,
         force_bundle=(kind == "handoff"
                       or getattr(args, "bundle", False)),
@@ -2034,6 +2035,9 @@ def main(argv=None) -> int:
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
     sp.add_argument("--goal", help="rank the evidence against this goal")
     sp.add_argument("--output", "-o", help="package file path (default ~/.voyager/bundles/...)")
+    sp.add_argument("--bundles-dir",
+                    help="directory for the default output instead of "
+                         "~/.voyager/bundles/ (an explicit --output wins)")
     sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the package")
     sp.set_defaults(func=cmd_handoff)
@@ -2045,6 +2049,9 @@ def main(argv=None) -> int:
     sp.add_argument("--goal", help="explicit primary goal for the next agent")
     sp.add_argument("--to", help="target agent (claude, codex, grok)")
     sp.add_argument("--output", "-o", help="bundle file path (default ~/.voyager/bundles/...)")
+    sp.add_argument("--bundles-dir",
+                    help="directory for the default output instead of "
+                         "~/.voyager/bundles/ (an explicit --output wins)")
     sp.add_argument("--launch", action="store_true", help="launch the target agent with the bundle")
     sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.add_argument("--json", action="store_true",
@@ -2077,6 +2084,9 @@ def main(argv=None) -> int:
                     help="print what would be launched instead of launching")
     sp.add_argument("--output", "-o",
                     help="bundle file path (when compiling a continuation)")
+    sp.add_argument("--bundles-dir",
+                    help="directory for the default bundle instead of "
+                         "~/.voyager/bundles/ (an explicit --output wins)")
     sp.set_defaults(func=cmd_switch)
 
     sp = sub.add_parser("thread", help="WorkThread: list/show/create/attach/close/unlock")
@@ -2224,6 +2234,9 @@ def main(argv=None) -> int:
     sp.add_argument("--bundle", action="store_true",
                     help="force a continuation bundle even for same-provider members")
     sp.add_argument("--output", "-o", help="bundle file path (when continuing via handoff/merge)")
+    sp.add_argument("--bundles-dir",
+                    help="directory for the default bundle instead of "
+                         "~/.voyager/bundles/ (an explicit --output wins)")
     sp.add_argument("--budget", help="context budget: compact|balanced|full|auto|Nk|<int>")
     sp.add_argument("--launch", action="store_true", help="launch immediately (default: print)")
     sp.add_argument("--no-launch", action="store_true",

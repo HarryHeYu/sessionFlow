@@ -138,13 +138,41 @@ def _select_assistant(events, extra: int = _EXTRA_ASST_PER_SESSION):
 
 
 def get_bundles_dir() -> Path:
-    """Return ~/.voyager/bundles/ (created if missing)."""
-    p = Path.home() / ".voyager" / "bundles"
+    """Return the default bundle directory, ``~/.voyager/bundles/`` (created).
+
+    Override with ``VOYAGER_BUNDLES_DIR`` — the same convention
+    ``VOYAGER_CONTEXT_DIR`` already uses for the hook spill directory — so a
+    script, a CI job or an MCP server (which has no CLI flags to pass) can be
+    redirected without touching the real home.  The default is unchanged when
+    the variable is unset.
+
+    The override is used verbatim: a relative path resolves against the cwd and
+    ``~`` is expanded.  It is never silently replaced with ``Path.home()``.
+    """
+    override = os.environ.get("VOYAGER_BUNDLES_DIR")
+    if override:
+        p = Path(override).expanduser()
+    else:
+        p = Path.home() / ".voyager" / "bundles"
     try:
         p.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
     return p
+
+
+def _bundle_default_output(name: str, bundles_dir: Optional[Any]) -> Path:
+    """Where a bundle lands when the caller did not name an exact file.
+
+    An explicit ``bundles_dir`` (``--bundles-dir`` / ``bundles_dir=``) wins over
+    the default location.  A caller-supplied path is used as given — expanded,
+    never redirected to HOME — because the whole point of the parameter is that
+    the caller chose it.  Creation is left to the single write path, which
+    reports a real error instead of falling back.
+    """
+    if bundles_dir:
+        return Path(bundles_dir).expanduser() / name
+    return get_bundles_dir() / name
 
 
 _WRITE_SEQ = itertools.count()
@@ -1346,6 +1374,7 @@ def handoff_thread(
     source: Any = None,
     style: str = "continuation",
     force_bundle: bool = False,
+    bundles_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """ONE unified orchestration for handing work to another agent.
 
@@ -1372,6 +1401,11 @@ def handoff_thread(
     --bundle`).  ``action`` ∈ {``refused``, ``invalid``, ``error``,
     ``native-resume``, ``transcript``, ``bundle``}; ``argv`` is ``None`` when
     the target has no direct launch path (the context file is still written).
+
+    ``bundles_dir`` redirects the *default* output directory when ``output`` is
+    not given, so a whole run can be kept out of the real home.  ``output`` (an
+    exact file path, from ``-o``) always wins over ``bundles_dir`` (a
+    directory): naming the file is the more specific request.
     """
     from .budget import apply_budget, parse_budget, resolve_auto_budget
 
@@ -1503,18 +1537,33 @@ def handoff_thread(
         # The CLI's documented default for an export is the *current
         # directory* (a package is something you paste); MCP, which has no
         # meaningful cwd, passes an explicit `output` in the bundles dir.
-        default_out = Path(default_package_name(members[0]))
+        # `bundles_dir` redirects the cwd default too, so one flag isolates a
+        # whole run rather than only its multi-session half.
+        default_out = (_bundle_default_output(default_package_name(members[0]),
+                                              bundles_dir)
+                       if bundles_dir else Path(default_package_name(members[0])))
         res["style"] = "package"
     else:
         text = build_continuation_bundle(store, members, goal=goal, thread=tid)
-        default_out = get_bundles_dir() / default_bundle_name(members)
+        default_out = _bundle_default_output(default_bundle_name(members),
+                                             bundles_dir)
         res["style"] = "continuation"
 
     packed, info = apply_budget(text, tokens, target=target)
     res["budget_info"] = info
 
     out = Path(output) if output else default_out
-    out.parent.mkdir(parents=True, exist_ok=True)
+    # Create the directory first and report a failure: falling back to the real
+    # home here would put a bundle where the caller explicitly did not ask for
+    # it, which is the bug this parameter exists to prevent.
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        res["action"] = "error"
+        res["error"] = "cannot create bundle directory {0}: {1}".format(
+            out.parent, e.strerror or e)
+        res["exit_code"] = 2
+        return res
     _write_atomic(out, packed)
     res["bundle_path"] = res["context_path"] = str(out.resolve())
     res["context_chars"] = len(packed)

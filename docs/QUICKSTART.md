@@ -121,6 +121,15 @@ still failing: strict mode does not raise on unknown keys yet. TODO: raise on un
 Add `--launch` to start the target agent immediately, `--goal "…"` to rank the
 evidence, and `--budget compact|balanced|full` to cap the bundle size.
 
+Bundles land in `~/.voyager/bundles/` unless you name the file with `--output`
+(which wins) or redirect the directory with `--bundles-dir` — useful for keeping
+a scripted or CI run out of your real home:
+
+```sh
+voyager merge <id-a> <id-b> --bundles-dir ./tmp-bundles   # this run only
+VOYAGER_BUNDLES_DIR=./tmp-bundles voyager continue        # or for a whole shell
+```
+
 > **Continuity is not session migration.** The target agent gets the goal, the
 > recent real work and the repository state — not the previous session's hidden
 > tool state or cached reasoning.

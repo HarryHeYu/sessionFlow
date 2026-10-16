@@ -175,7 +175,267 @@ def test_the_engine_actually_writes_through_the_atomic_path(
 
     assert res["context_path"] == str(out.resolve())
     assert seen.get("destination") == "previous bundle", (
-        "handoff_thread wrote the bundle in place: a concurrent reader could "
+        "handoff_thread wrote the bundle in place: a concurrent read could "
         "have seen a partial file")
     assert out.read_text(encoding="utf-8").startswith("# Continuation Bundle")
     assert list(tmp_path.glob("*.tmp-*")) == []
+
+
+# --------------------------------------------------------------------------
+# Output isolation: the bundle directory must be redirectable, and the default
+# must not change.  `--db` scopes the index; it has never scoped the output, and
+# a run pointed entirely at a scratch index still wrote into the real
+# ~/.voyager/bundles/ because get_bundles_dir() is anchored to HOME.  These
+# tests assert on the *real filesystem*, not on the returned path string: a
+# function that reports the right path while writing somewhere else is exactly
+# the failure being guarded against.
+# --------------------------------------------------------------------------
+
+#: The developer's actual home, captured at import time — during collection,
+#: before conftest's autouse fixture redirects HOME.  Same trick as
+#: tests/test_isolation.py, and for the same reason: after the fixture runs,
+#: "the real home" is no longer discoverable from the environment.
+REAL_HOME = Path(os.path.expanduser("~"))
+
+
+def _files_under(root: Path) -> set:
+    if not root.is_dir():
+        return set()
+    return {p for p in root.rglob("*") if p.is_file()}
+
+
+def test_an_explicit_bundles_dir_receives_the_bundle(synthetic_trio, tmp_path):
+    """The flag has to actually move the file, not just the reported path."""
+    store, rows = synthetic_trio
+    target_dir = tmp_path / "isolated-bundles"
+
+    res = cont.handoff_thread(store, sessions=rows, goal="g",
+                              style="continuation",
+                              bundles_dir=str(target_dir))
+
+    assert res["action"] == "bundle", res.get("error")
+    written = Path(res["context_path"])
+    assert written.parent == target_dir.resolve(), (
+        "the bundle did not land in the requested directory")
+    assert written.is_file()
+    assert written.read_text(encoding="utf-8").startswith("# Continuation Bundle")
+    # and nowhere else: the directory holds exactly the one new file
+    assert _files_under(target_dir) == {written}
+
+
+def test_an_explicit_output_still_beats_bundles_dir(synthetic_trio, tmp_path):
+    """Naming the file is more specific than naming the directory."""
+    store, rows = synthetic_trio
+    bundles_dir = tmp_path / "dir-should-lose"
+    exact = tmp_path / "exact-wins.md"
+
+    res = cont.handoff_thread(store, sessions=rows, goal="g",
+                              style="continuation",
+                              output=exact, bundles_dir=str(bundles_dir))
+
+    assert res["context_path"] == str(exact.resolve())
+    assert exact.is_file()
+    assert not bundles_dir.exists(), (
+        "bundles_dir was created even though --output named the file")
+
+
+def test_bundles_dir_applies_to_packages_too(synthetic_trio, tmp_path):
+    """One flag has to isolate a whole run, not only its multi-session half.
+
+    A package's documented default is the *current directory*; without this,
+    `--bundles-dir` would redirect bundles and silently leave packages dropping
+    into whatever cwd the process had.
+    """
+    store, rows = synthetic_trio
+    target_dir = tmp_path / "packages"
+
+    res = cont.handoff_thread(store, sessions=rows[:1], goal="g",
+                              style="package", target="claude",
+                              bundles_dir=str(target_dir))
+
+    assert res["style"] == "package", res.get("error")
+    written = Path(res["context_path"])
+    assert written.parent == target_dir.resolve()
+    assert written.is_file()
+
+
+def test_the_default_location_is_unchanged_when_nothing_is_passed(
+        synthetic_trio, monkeypatch, tmp_path):
+    """Backward compatibility: no flag, no env var, same place as before."""
+    store, rows = synthetic_trio
+    home = tmp_path / "fake-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("VOYAGER_BUNDLES_DIR", raising=False)
+    # get_bundles_dir() reads HOME at call time, so it follows the patch
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    res = cont.handoff_thread(store, sessions=rows, goal="g",
+                              style="continuation")
+
+    written = Path(res["context_path"])
+    assert written.parent == home / ".voyager" / "bundles", (
+        "the default bundle directory moved")
+    assert written.is_file()
+
+
+def test_voyager_bundles_dir_env_redirects_without_any_flag(
+        synthetic_trio, monkeypatch, tmp_path):
+    """The escape hatch for callers that have no CLI flags — MCP, hooks, CI."""
+    store, rows = synthetic_trio
+    env_dir = tmp_path / "from-env"
+    monkeypatch.setenv("VOYAGER_BUNDLES_DIR", str(env_dir))
+
+    res = cont.handoff_thread(store, sessions=rows, goal="g",
+                              style="continuation")
+
+    written = Path(res["context_path"])
+    assert written.parent == env_dir.resolve()
+    assert written.is_file()
+
+
+def test_an_uncreatable_bundles_dir_is_an_error_not_a_fallback(
+        synthetic_trio, tmp_path):
+    """Never silently write somewhere else when the caller's path fails.
+
+    The failure is a *file* where a directory was asked for, which is the
+    realistic version of this: a typo, or a stale path from another tool.
+    """
+    store, rows = synthetic_trio
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("I am a file", encoding="utf-8")
+
+    res = cont.handoff_thread(store, sessions=rows, goal="g",
+                              style="continuation",
+                              bundles_dir=str(blocker / "bundles"))
+
+    assert res["action"] == "error", res
+    assert res["exit_code"] == 2
+    assert "cannot create bundle directory" in (res["error"] or "")
+    assert res["context_path"] is None, (
+        "a failed write still reported a path — it may have written elsewhere")
+
+
+def test_the_real_home_gains_nothing_from_an_isolated_run(
+        synthetic_trio, tmp_path):
+    """The whole point, asserted against the real filesystem.
+
+    This is the regression for the actual incident: a run pointed at a scratch
+    index wrote four bundles into the real ~/.voyager/bundles/ because nothing
+    tied the output directory to the run.
+    """
+    store, rows = synthetic_trio
+    real_bundles = REAL_HOME / ".voyager" / "bundles"
+    before = _files_under(real_bundles)
+
+    res = cont.handoff_thread(store, sessions=rows, goal="g",
+                              style="continuation",
+                              bundles_dir=str(tmp_path / "out"))
+    assert res["action"] == "bundle", res.get("error")
+
+    after = _files_under(real_bundles)
+    assert after == before, (
+        "an isolated run added files to the real bundles directory: "
+        f"{sorted(str(p) for p in after - before)}")
+
+
+def test_two_isolated_runs_in_the_same_second_stay_unique(synthetic_trio, tmp_path):
+    """Same-second uniqueness must survive the redirect.
+
+    The default name carries a per-invocation suffix precisely so two merges in
+    one second do not collide; the redirect must not defeat that by, say,
+    reusing one fixed name.
+    """
+    store, rows = synthetic_trio
+    target_dir = tmp_path / "same-second"
+
+    paths = {cont.handoff_thread(store, sessions=rows, goal="g",
+                                 style="continuation",
+                                 bundles_dir=str(target_dir))["context_path"]
+             for _ in range(5)}
+
+    assert len(paths) == 5, f"same-second runs collided: {paths}"
+    assert len(_files_under(target_dir)) == 5
+
+
+def test_isolated_writes_stay_atomic_and_leave_no_staging_files(
+        synthetic_trio, tmp_path):
+    """The redirect must not bypass _write_atomic."""
+    store, rows = synthetic_trio
+    target_dir = tmp_path / "atomic"
+    target_dir.mkdir()
+    existing = target_dir / cont.default_bundle_name(rows)
+    existing.write_text("previous bundle", encoding="utf-8")
+
+    seen = {}
+    real_replace = os.replace
+
+    def spy(src, dst, *args, **kwargs):
+        seen["destination"] = Path(dst).read_text(encoding="utf-8")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(os, "replace", spy)
+        res = cont.handoff_thread(store, sessions=rows, goal="g",
+                                  style="continuation",
+                                  output=existing)
+    finally:
+        monkeypatch.undo()
+
+    assert res["action"] == "bundle", res.get("error")
+    assert seen.get("destination") == "previous bundle", (
+        "the isolated path wrote in place instead of staging a temp file")
+    assert list(target_dir.glob("*.tmp-*")) == []
+    assert existing.read_text(encoding="utf-8").startswith("# Continuation Bundle")
+
+
+def test_the_cli_forwards_bundles_dir_to_the_engine(synthetic_trio, tmp_path,
+                                                    capsys):
+    """The engine parameter is useless if no entry point passes it.
+
+    Every engine test above calls `handoff_thread` directly, so all of them stay
+    green if `--bundles-dir` is parsed and then dropped on the floor. This is the
+    test that fails in that case, and it asserts on the filesystem rather than on
+    the printed path.
+    """
+    from voyager.cli import main
+
+    db = tmp_path / "continuity_test.db"
+    assert db.is_file(), "synthetic_trio's index moved; fix this path"
+    target_dir = tmp_path / "cli-bundles"
+    real_bundles = REAL_HOME / ".voyager" / "bundles"
+    before = _files_under(real_bundles)
+
+    rc = main(["--db", str(db), "merge", "sess-1", "sess-2",
+               "--bundles-dir", str(target_dir), "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    written = _files_under(target_dir)
+    assert len(written) == 1, f"expected exactly one bundle in the target dir: {written}"
+    assert next(iter(written)).read_text(encoding="utf-8").startswith(
+        "# Continuation Bundle")
+    assert _files_under(real_bundles) == before, (
+        "the CLI parsed --bundles-dir but wrote into the real bundles directory")
+
+
+def test_the_cli_output_flag_still_beats_bundles_dir(synthetic_trio, tmp_path,
+                                                     capsys):
+    """Precedence, through the real entry point rather than the engine."""
+    from voyager.cli import main
+
+    db = tmp_path / "continuity_test.db"
+    exact = tmp_path / "exact-from-cli.md"
+    never = tmp_path / "dir-should-lose"
+
+    rc = main(["--db", str(db), "merge", "sess-1", "sess-2",
+               "--output", str(exact), "--bundles-dir", str(never), "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    assert exact.is_file(), "--output did not win over --bundles-dir"
+    assert not never.exists(), "the losing --bundles-dir was created anyway"
+
+
