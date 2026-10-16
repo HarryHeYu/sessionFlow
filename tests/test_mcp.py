@@ -122,16 +122,21 @@ def test_both_writing_tools_honour_the_bundles_dir_and_leave_home_alone(
 
     written = _files_under(target)
     assert len(written) == 2, f"expected two files in the isolated dir: {written}"
-    # The reply is prose ("...written to <path>. Target agent ..."), so pull the
-    # path out with a pattern rather than by splitting on whitespace -- the
-    # sentence period is glued to the filename.
+    # Pull the path out of the prose without assuming a path shape: an anchored
+    # `[A-Za-z]:` pattern works on Windows and finds nothing on Linux, which is
+    # how this test first passed locally and failed every ubuntu job.  Start from
+    # the resolved directory (the reply carries `str(out.resolve())`) and read to
+    # the end of the ".md" filename.
+    prefix = str(target.resolve())
     for text in (handoff, merged):
         assert "written to" in text
-        claimed = re.findall(r"([A-Za-z]:[^\s]+\.md)", text)
-        assert claimed, f"no path in the reply: {text}"
-        assert Path(claimed[0]).parent == target, (
-            f"the reply names {claimed[0]}, not the isolated directory")
-        assert Path(claimed[0]).is_file(), "the reply names a file that is not there"
+        assert prefix in text, f"the reply does not name the isolated dir: {text}"
+        rest = text.split(prefix, 1)[1]
+        m = re.search(r"\.md\b", rest)
+        assert m, f"no bundle filename after the directory in: {text}"
+        claimed = target / rest[:m.end()].lstrip("/\\")
+        assert claimed.is_file(), f"the reply names a file that is not there: {claimed}"
+        assert claimed in written, f"{claimed} is not one of the written files"
 
     assert _files_under(real_bundles) == before, (
         "an MCP write reached the real bundles directory: "
