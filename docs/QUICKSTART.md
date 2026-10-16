@@ -166,6 +166,23 @@ the goal, files and open items. The six tools:
 | `sessionflow_continue` | "Pick the work back up." |
 | `sessionflow_merge` | "Put these sessions together and let me continue." |
 
+**Phrase it as a lookup, not just an action.** Measured, the model recognises the
+need to search history far more reliably when you say what you are looking *for*
+than when you only say "continue":
+
+> What was I working on before? Continue from there.
+> Continue the unfinished Codex work in this project.
+> Find the previous Claude Code work on this repository.
+
+A bare *"Continue the unfinished work in this project"* is the weakest of these: with
+nothing in the repository marking what is left, the agent may simply read the files and
+start writing. It will not invent history, but it can miss work that only the earlier
+sessions record — which is exactly the case this plugin exists for.
+
+Numbers from one controlled run (one model, one fixture, three attempts each) are in
+[`dsh-sessionflow`'s P13 notes](https://github.com/HarryHeYu/dsh-sessionflow/blob/main/docs/p13-agent-discovery.md);
+treat them as that environment's result, not a published success rate.
+
 DSH needs a working model provider; **this plugin does not supply model access.**
 
 ---
