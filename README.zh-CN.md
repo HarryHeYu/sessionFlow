@@ -117,7 +117,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"   
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # 本 checkout（未装可选 extras）：1092 collected / 1072 passed / 20 skipped
+python -m pytest tests/ -q     # e768c40 上实测：1176 passed / 4 skipped（随用例数变化）
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -155,8 +155,8 @@ voyager repo E:/code/myproj # 一个 repo 的跨 Agent 时间线
 
 `voyager scan` 遍历所有支持的 Agent 的本地存储，在 `~/.voyager/index.db`
 建立索引；它是增量的，只重新读取有变化的部分。想让索引零人工保持最新，
-可以常驻一个 watcher（Windows 下可直接把 `~/.voyager/watch.vbs` 放进
-启动文件夹）：
+可以常驻一个 watcher（用系统自启动配一个自己的启动脚本——voyager 不会替你
+安装），每 5 分钟重扫一次：
 
 ```sh
 voyager watch --interval 300    # 每 5 分钟自动重扫，常驻运行
@@ -372,7 +372,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 本 checkout（未装可选 extras）：1092 collected / 1072 passed / 20 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
+python -m pytest tests/ -q                # e768c40 上实测：1176 passed / 4 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
 python scripts/run_tests_core_only.py     # 模拟 core-only：把可选依赖变成不可导入后重跑，被门禁的用例转为 skipped
 ```
 

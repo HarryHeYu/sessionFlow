@@ -2,8 +2,12 @@
 
 > Continuity Engine core (index → WorkThread → goal rank → budget →
 > skill → lease → switch → API client) is **shipped** as of `311645e`.
-> Everything in this file is explicitly **not started** — it is the
-> next-phase backlog, recorded so nobody has to remember it.
+>
+> This file is a mixed-status backlog, not a list of future work: several items
+> below have since shipped and are struck through with the reason, and others
+> were measured and deliberately **not** done — those stay, because "we decided
+> against this and here is the evidence" is worth more than a blank line.
+> Anything still live below is genuinely **not started**.
 
 ## 1. VS Code Context Composer (issue #8, remainder)
 

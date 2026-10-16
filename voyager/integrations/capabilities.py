@@ -1,8 +1,33 @@
-"""Provider capability audit and zero-touch level classification.
+"""Per-machine provider capability observation. NOT the user-visible answer.
 
-This module audits all supported providers for their native lifecycle surfaces
-and classifies them into deterministic zero-touch levels based on actual
-platform capabilities, not assumptions.
+This module answers one question: **what does *this machine* actually have wired
+for a given provider?** -- is the platform present, is a session-start hook
+registered, has it ever been seen firing.  It is an observation layer.
+
+It deliberately does **not** answer "what does this provider support, and on what
+evidence".  That is :mod:`voyager.capability_matrix`'s job, and that module is the
+canonical source the user reads: `voyager doctor`, `voyager integrate status
+--deep`, `voyager verify --matrix`, the dashboard, `status` and the budget
+resolver all resolve through it.  If a user-facing surface ever needs a
+capability, it must go through the matrix, never through this file.
+
+The two models use similar words for different questions, which is the whole
+hazard:
+
+  * this module's ``has_session_start_hook`` asks whether the *provider
+    platform* exposes a session-start hook at all;
+  * the matrix's ``startup_hook`` dimension asks whether *Voyager's* startup
+    continuity integration is registered **and observed firing**.
+
+So the answers will not line up -- codex can be ``LIVE_VERIFIED`` in the matrix
+while this module reports ``has_session_start_hook = False`` -- and they are not
+supposed to.  Do not "fix" one to match the other; read whichever one answers
+the question you are actually asking.
+
+Nothing user-facing reads this module today.  That is an invariant, not an
+accident: ``tests/test_capability_consistency.py`` fails if a user-facing module
+starts importing it, so the two models get reconciled deliberately rather than by
+drift.  Keep it that way.
 
 Classification hierarchy (strongest to weakest):
   SESSION_START_ZERO_TOUCH > FIRST_TURN_ZERO_TOUCH > LAUNCHER_ZERO_TOUCH >
@@ -79,6 +104,13 @@ class ProviderCapabilities:
     name: str
     
     # Native lifecycle hooks (platform capability)
+    #
+    # `session_start_hook` below answers "does the provider platform expose a
+    # session-start hook at all".  It is NOT the matrix's `startup_hook`
+    # dimension, which asks whether *Voyager's* startup-continuity integration is
+    # registered and observed firing.  The answers differ by design -- codex is
+    # LIVE_VERIFIED in the matrix while reporting False here -- and must not be
+    # reconciled to agree.
     has_session_start_hook: bool = False
     has_agent_spawn_hook: bool = False
     has_prompt_submit_hook: bool = False

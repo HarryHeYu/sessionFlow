@@ -129,7 +129,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 1092 collected, 1072 passed, 20 skipped
+python -m pytest tests/ -q     # 1176 passed, 4 skipped (measured at e768c40, 2026-10-16)
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -177,13 +177,13 @@ voyager repo E:/code/myproj # cross-agent timeline for a repository
 
 `voyager scan` walks every supported agent's local storage and builds the
 index at `~/.voyager/index.db`; it is incremental and only re-reads what
-changed. To keep the index current with zero manual steps, run a watcher
-in the background (OS autostart, or the provided `~/.voyager/watch.vbs`
-in the Windows Startup folder):
+changed. To keep the index current with zero manual steps, run a watcher in
+the background (OS autostart, or your own launcher script — voyager does not
+install one for you), polling every 5 minutes:
 
 ```sh
 voyager watch --interval 300    # re-scan every 5 minutes, forever
-```
+
 voyager export <id> --format md   # or --format json (includes raw events)
 voyager resume <id>         # launches the native agent on that session
 voyager handoff <id> --to codex   # context package for another agent
@@ -490,7 +490,7 @@ voyager integrate remove <provider>  # undo every step (skill + mcp + bootstrap 
 
 These commands now **auto-create** config files if they don't exist - no manual setup needed for first-time installation. Re-running is idempotent, and `install` merges rather than overwrites: your own hooks and settings are preserved, and the file is backed up before it is rewritten.
 
-For verification of actual zero-touch startup behavior, see ](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) and [claude_continuity_verdict.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/archive/root-reports-2026-09/claude_continuity_verdict.md).
+For verification of actual zero-touch startup behavior, see [docs/DOGFOOD.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/DOGFOOD.md) and [claude_continuity_verdict.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/archive/root-reports-2026-09/claude_continuity_verdict.md).
 
 ## Supported platforms
 
@@ -555,7 +555,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 1092 collected, 1072 passed, 20 skipped — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
+python -m pytest tests/ -q                # 1176 passed, 4 skipped at e768c40 — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
 python scripts/run_tests_core_only.py     # core-only simulated: a subset that skips the DB-backed suites
 ```
 
