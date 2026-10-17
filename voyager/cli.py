@@ -23,6 +23,7 @@ from .scanner import (MAX_WRITE_FAILURES,
 from .store import Store, default_db_path, lease_state
 from .integrations.hook import cmd_hook_startup
 from .util import fmt_ts, same_repo_loose, parse_when as _parse_when
+from ._version import get_version
 
 
 # Argument names that carry a filesystem path.  They are expanded once, at the
@@ -1944,6 +1945,12 @@ def main(argv=None) -> int:
         description="Unified local session manager for AI coding agents",
     )
     p.add_argument("--db", help=f"index db path (default {default_db_path()})")
+    # `--version` has to answer without touching the index: it is the first
+    # thing anyone runs after installing, and it must work before `voyager scan`
+    # has ever created a database.  argparse's `version` action exits 0 on its
+    # own, before any Store is opened.
+    p.add_argument("--version", action="version",
+                   version="%(prog)s {0}".format(get_version()))
     # `--db` is accepted on either side of the subcommand: `voyager --db X stats`
     # and `voyager stats --db X` both work. The subparser copy needs
     # default=SUPPRESS, otherwise argparse's sub-namespace would overwrite a
@@ -1951,7 +1958,12 @@ def main(argv=None) -> int:
     # silently redirects the whole command to ~/.voyager/index.db.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--db", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-    sub = p.add_subparsers(dest="cmd", required=True)
+    # Not `required=True`: a bare `voyager` is the most likely first command a
+    # new user types, and answering it with an argparse error plus the full
+    # 30-command usage dump is a poor introduction.  The no-subcommand case is
+    # handled in `main` with a short landing; every other parsing behaviour
+    # (unknown subcommand, bad flag) is unchanged.
+    sub = p.add_subparsers(dest="cmd")
 
     sp = sub.add_parser("scan", help="discover and index agent sessions",
                         parents=[common])
@@ -2443,7 +2455,35 @@ def main(argv=None) -> int:
 
     args = p.parse_args(argv)
     _expand_path_args(args)
+    if not getattr(args, "cmd", None):
+        return _print_onboarding()
     return args.func(args)
+
+
+def _print_onboarding() -> int:
+    """The landing page for a bare `voyager`.
+
+    Deliberately short: a new user needs one command to try right now (the demo
+    needs no agents and no index), then the two that bring in their own history,
+    then the door to everything else.  Not an interactive wizard — this prints
+    and returns.
+    """
+    print("voyager {0} — local session manager for AI coding agents".format(
+        get_version()))
+    print()
+    print("New here? Start with the demo — synthetic data, no agents needed:")
+    print()
+    print("    voyager demo")
+    print()
+    print("Then index your own history and see what was found:")
+    print()
+    print("    voyager scan")
+    print("    voyager doctor")
+    print()
+    print("All commands:")
+    print()
+    print("    voyager --help")
+    return 0
 
 
 if __name__ == "__main__":

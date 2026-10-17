@@ -141,3 +141,51 @@ def test_a_real_bundle_write_cannot_reach_the_real_profile(synthetic_trio):
         "the bundle landed inside real agent data: %s" % written)
     assert snapshot() == before, (
         "a bundle was written into the real ~/.voyager/bundles/")
+
+
+def test_the_appdata_adapter_cannot_reach_real_kiro_sessions(
+        _isolated_from_the_real_machine):
+    """Kiro is the one adapter that reads %APPDATA% instead of deriving from HOME.
+
+    Redirecting HOME and USERPROFILE alone does not move it, because `APPDATA` is
+    an independent Windows variable.  A manual CLI run that redirects only HOME
+    therefore still indexes the developer's real Kiro sessions — that happened
+    during an audit, where `voyager scan` found seven real sessions in an
+    otherwise "isolated" sandbox.  The autouse fixture redirects APPDATA as well,
+    which is what closes it; this test pins that line, because deleting it would
+    reintroduce the leak without failing anything else.
+
+    It also documents why the fix is here and not in the adapter: for a real
+    user, reading their own Kiro data is correct.  Only the isolation harness
+    needs it moved.
+    """
+    from voyager.adapters.kiro import kiro_agent_dir
+
+    assert kiro_agent_dir() is None, (
+        "kiro discovery can reach real sessions under the isolation fixture: "
+        "the fixture no longer redirects APPDATA")
+
+
+def test_no_adapter_discovers_anything_under_the_isolation_fixture(
+        _isolated_from_the_real_machine):
+    """The whole point, stated once, over every adapter.
+
+    `_isolated_from_the_real_machine` redirects HOME, USERPROFILE, APPDATA and
+    every module-level path global.  After that, a full discovery pass must find
+    nothing — otherwise a test that forgets to redirect could index real data.
+    """
+    from voyager.adapters import load_all
+    from voyager.adapters.base import enabled_adapters
+
+    load_all()
+    found = {}
+    for ad in enabled_adapters():
+        try:
+            sources = ad.discover()
+        except Exception as exc:            # noqa: BLE001 - reported below
+            found[ad.provider] = "raised {0}".format(exc)
+            continue
+        if sources:
+            found[ad.provider] = len(sources)
+    assert not found, (
+        "these adapters still discover real sources under isolation: %s" % found)

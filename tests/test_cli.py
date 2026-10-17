@@ -848,3 +848,82 @@ def test_provider_launches_go_through_the_resolving_helper():
     assert source.count("subprocess.call(") == 1, (
         "a provider launch site bypasses _launch()")
     assert "return subprocess.call(_spawn_argv(argv))" in source
+
+
+# --- version & first-run landing -------------------------------------------
+#
+# Both are the first two things a new user meets: `voyager --version` to confirm
+# what they installed, and a bare `voyager` when they have not read the README
+# yet.  Neither may depend on the index existing.
+
+def test_version_reports_the_installed_distribution(capsys):
+    """`--version` answers from distribution metadata, not a literal constant.
+
+    The expected value is read from the same metadata a bug report would use, so
+    this cannot pass by two constants happening to match.
+    """
+    from importlib.metadata import version
+
+    with pytest.raises(SystemExit) as e:
+        main(["--version"])
+    assert e.value.code == 0, "--version must exit 0"
+
+    out = capsys.readouterr().out.strip()
+    assert out == "voyager {0}".format(version("voyager")), out
+
+
+def test_version_works_without_an_index(tmp_path, capsys):
+    """No database may be required: this runs before `voyager scan` ever does."""
+    db = tmp_path / "does-not-exist.db"
+    with pytest.raises(SystemExit) as e:
+        main(["--db", str(db), "--version"])
+    assert e.value.code == 0
+    assert not db.exists(), "--version created an index"
+
+
+def test_dunder_version_agrees_with_the_distribution():
+    """If `voyager.__version__` exists it must be the same number."""
+    import voyager
+    from importlib.metadata import version
+
+    assert voyager.__version__ == version("voyager")
+
+
+def test_bare_voyager_prints_a_landing_page(capsys):
+    """No subcommand is a first-run moment, not a usage error."""
+    rc = main([])
+    out = capsys.readouterr().out
+
+    assert rc == 0, "a bare `voyager` is not an error"
+    assert "arguments are required" not in out
+    for hint in ("voyager demo", "voyager scan", "voyager doctor",
+                 "voyager --help"):
+        assert hint in out, "the landing page does not mention {0!r}".format(hint)
+    # short by design: the full usage dump is what this replaced
+    assert len(out.splitlines()) < 20, "the landing page grew into a usage dump"
+
+
+def test_an_unknown_subcommand_is_still_an_error(capsys):
+    """The landing page must not swallow real mistakes."""
+    with pytest.raises(SystemExit) as e:
+        main(["nosuchcommand"])
+    assert e.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_version_falls_back_to_pyproject_without_metadata(monkeypatch):
+    """A checkout that was never installed has no distribution metadata.
+
+    That is the normal state of a fresh clone: `*.egg-info/` is gitignored, so
+    `importlib.metadata` has nothing to read.  The fallback reads pyproject.toml
+    -- the same file the build reads -- so there is still exactly one source of
+    truth and no second version constant to drift.
+    """
+    from voyager import _version
+
+    monkeypatch.setattr(_version, "_from_metadata", lambda: None)
+    from_pyproject = _version._from_pyproject()
+
+    assert from_pyproject, "pyproject.toml is not readable from the package"
+    assert _version.get_version() == from_pyproject
+    assert _version.get_version() != _version.UNKNOWN
