@@ -13,14 +13,16 @@ below is exercised against v1.1.0; nothing here is aspirational.
 ## 1. Install the core (1 min)
 
 ```sh
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
 ```
 
 `[all]` pulls in the DSH (`zstandard`) and MCP (`mcp`) extras. Drop it for a bare
-install. No `pipx`? Use pip:
+install. The `@f2a6445` pins a known-good commit so a reinstall reproduces the
+same build; drop it to follow `main`. No `pipx`? Use pip — `python -m pip` on
+Windows, where `pip` is often not on `PATH`:
 
 ```sh
-pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
 ```
 
 **Not on PyPI.** The `voyager` name there is an unrelated library, so a bare

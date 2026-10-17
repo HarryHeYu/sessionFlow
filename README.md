@@ -104,16 +104,24 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
 
-# or with pip (user-level)
-pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
+# or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
 nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
+
+The `@f2a6445` pins a known-good commit, which is what makes a reinstall
+reproducible and is what the DSH plugin's own error messages recommend. Drop
+the `@<commit>` to follow `main` instead. Check the installed version with:
+
+```sh
+voyager --version
+```
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
