@@ -927,3 +927,57 @@ def test_version_falls_back_to_pyproject_without_metadata(monkeypatch):
     assert from_pyproject, "pyproject.toml is not readable from the package"
     assert _version.get_version() == from_pyproject
     assert _version.get_version() != _version.UNKNOWN
+
+
+def test_a_stale_install_elsewhere_does_not_own_this_module(tmp_path):
+    """A distribution in another location must not claim this file.
+
+    Regression: ownership matched on the RECORD suffix alone, so an old install
+    of this project in another interpreter's site-packages also had
+    `voyager/_version.py` in its RECORD and claimed the checkout's file.  Then
+    `voyager --version` reported that install's number for code it was not
+    running -- observed for real as "0.1.0" from a 1.1.0 checkout.
+    """
+    from voyager import _version
+
+    class FakeDist:
+        version = "0.1.0"
+
+        def __init__(self, root):
+            self._root = Path(root)
+            self.files = [Path("voyager") / "_version.py"]
+
+        def locate_file(self, entry):
+            return self._root / entry
+
+    stale = FakeDist(tmp_path / "some_other_interpreter" / "site-packages")
+    assert _version._owns_this_module(stale) is False, (
+        "a dist that records voyager/_version.py somewhere else is not the owner"
+    )
+
+    # The same shape, located at the file actually being imported, is the owner.
+    here = Path(_version.__file__).resolve()
+    real = FakeDist(here.parent.parent)
+    assert _version._owns_this_module(real) is True
+
+
+def test_a_checkout_does_not_adopt_another_installs_version(monkeypatch):
+    """The name fallback must not answer when the running code is a checkout.
+
+    Otherwise a checkout silently adopts the version of an unrelated install of
+    the same name, which is how a current tree ends up reporting a number that
+    describes nothing.
+    """
+    import importlib.metadata as md
+
+    from voyager import _version
+
+    monkeypatch.setattr(_version, "_module_is_installed", lambda: False)
+    monkeypatch.setattr(md, "distributions", lambda: [])
+    monkeypatch.setattr(md, "version", lambda name: "0.1.0")
+
+    assert _version._from_metadata() is None, (
+        "a checkout must not answer with another install's version"
+    )
+    # So the checkout describes itself, from the file the build reads.
+    assert _version.get_version() == _version._from_pyproject()

@@ -1000,11 +1000,33 @@ def build_continuation_bundle(
         L.append("")
 
     # ---- 6. Commands executed -------------------------------------------
+    # A command's outcome lives on its *result* event, not on the call, so the
+    # two have to be joined by call id.  Codex records `function_call_output`
+    # as `tool_result` carrying `exit_code`; the call itself never has one.
+    # Reading `exit_code` off the call therefore yielded None for every codex
+    # command, so the bundle printed "pytest -q" with no status and
+    # "Errors encountered" never fired -- a failed command was in the index and
+    # invisible in the bundle, which is exactly where a claim like "all tests
+    # pass" needs contradicting.
+    outcome: Dict[str, Tuple[Any, str]] = {}
+    for r in sorted_rows:
+        for ev in sess_events[r["id"]]:
+            if ev["kind"] == "tool_result" and ev["tool_call_id"]:
+                outcome[str(ev["tool_call_id"])] = (
+                    ev["exit_code"], ev["tool_output"] or "")
+
+    def _outcome_of(ev: Any) -> Tuple[Any, str]:
+        """(exit_code, output) for a tool_call, from its own row or its result."""
+        rc = ev["exit_code"]
+        if rc is None and ev["tool_call_id"]:
+            return outcome.get(str(ev["tool_call_id"]), (None, ""))
+        return rc, ""
+
     all_cmds: List[Tuple[Any, str, Any]] = []
     for r in sorted_rows:
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "tool_call" and ev["command"]:
-                all_cmds.append((ev["ts"], ev["command"], ev["exit_code"]))
+                all_cmds.append((ev["ts"], ev["command"], _outcome_of(ev)[0]))
 
     if all_cmds:
         L.append("## Commands executed")
@@ -1039,13 +1061,21 @@ def build_continuation_bundle(
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "error" and ev["content"]:
                 all_errs.append(f"[{fmt_ts(ev['ts'])}] {ev['content'][:250]}")
-            elif (
-                ev["kind"] == "tool_call"
-                and (ev["exit_code"] or 0) not in (0, None)
-                and ev["command"]
-            ):
+            elif ev["kind"] == "tool_call" and ev["command"]:
+                rc, out = _outcome_of(ev)
+                if rc in (0, None):
+                    continue
                 cmd_short = " ".join(str(ev["command"]).split())[:200]
-                all_errs.append(f"[{fmt_ts(ev['ts'])}] exit {ev['exit_code']}: `{cmd_short}`")
+                # One line of what the command actually printed, so the failure
+                # is legible without opening the session.  Bounded: the point is
+                # to contradict or confirm a claim, not to paste a log.
+                tail = ""
+                if out:
+                    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+                    if lines:
+                        tail = " -- " + lines[-1][:120]
+                all_errs.append(
+                    f"[{fmt_ts(ev['ts'])}] exit {rc}: `{cmd_short}`{tail}")
 
     if all_errs:
         L.append("## Errors encountered")

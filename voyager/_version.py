@@ -33,20 +33,61 @@ UNKNOWN = "unknown"
 
 
 def _owns_this_module(dist: object) -> bool:
-    """True when `dist` is the distribution that installed `voyager/_version.py`.
+    """True when `dist` installed *this* `voyager/_version.py`.
 
     This is the reliable way to identify ourselves.  Looking the version up by
     *name* is not: a different, unrelated package called `voyager` exists on
     PyPI, so `version("voyager")` can answer for the wrong project when both are
     installed — and it answers for nobody once this one is renamed.
+
+    Ownership has to be checked by **location**, not by the file's name in the
+    RECORD.  A stale install of this project in another interpreter's
+    site-packages also has a `voyager/_version.py` in its RECORD, so matching on
+    the suffix alone lets it claim the file being imported and report *its*
+    version for *this* code.  That is how a current checkout ends up answering
+    `voyager --version` with the number of an install it is not running.
     """
+    here = Path(__file__).resolve()
     try:
         files = dist.files or ()
     except Exception:  # noqa: BLE001 - a broken RECORD should not crash --version
         return False
     for entry in files:
-        if str(entry).replace("\\", "/").endswith("voyager/_version.py"):
-            return True
+        if not str(entry).replace("\\", "/").endswith("voyager/_version.py"):
+            continue
+        try:
+            if Path(dist.locate_file(entry)).resolve() == here:
+                return True
+        except Exception:  # noqa: BLE001 - an unresolvable entry is simply not ours
+            continue
+    return False
+
+
+def _module_is_installed() -> bool:
+    """True when the running `voyager` lives inside an installed distribution.
+
+    A source checkout is not installed even when some other interpreter has a
+    distribution of the same name on its path.  Telling those apart is what keeps
+    the name fallback below from answering for a checkout.
+    """
+    here = Path(__file__).resolve()
+    try:
+        from importlib.metadata import distributions
+    except ImportError:  # pragma: no cover - Python < 3.8
+        return False
+    try:
+        for dist in distributions():
+            try:
+                base = Path(str(dist.locate_file(""))).resolve()
+            except Exception:  # noqa: BLE001
+                continue
+            try:
+                here.relative_to(base)
+                return True
+            except ValueError:
+                continue
+    except Exception:  # noqa: BLE001
+        return False
     return False
 
 
@@ -70,6 +111,15 @@ def _from_metadata() -> Optional[str]:
 
     # 2. Fall back to the declared name.  Needed for installs that do not record
     #    their files (some editable installs), where step 1 cannot answer.
+    #
+    #    Only when this module is actually inside an installed distribution: if
+    #    the code being run is a checkout, the name lookup would answer with some
+    #    *other* install's version, which is worse than not answering at all.  In
+    #    that case `get_version` falls through to pyproject.toml, which describes
+    #    the code that is running.
+    if not _module_is_installed():
+        return None
+
     for name in DIST_NAMES:
         try:
             found = version(name)

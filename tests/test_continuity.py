@@ -1039,3 +1039,72 @@ def test_an_ambiguous_session_ref_is_reported_not_guessed(synthetic_trio):
         assert len(res["members"]) == 1, "a bare prefix must not resolve to many"
     else:
         assert ("matches" in res["error"]) or ("not found" in res["error"]), res["error"]
+
+
+# --- a command's outcome must reach the bundle ------------------------------
+# Codex records the exit status on the *result* event (`function_call_output`),
+# never on the call.  The bundle used to read `exit_code` off the call only, so
+# for codex every command printed with no status and "Errors encountered" never
+# fired: a failed command sat in the index, invisible in the bundle.  That is the
+# exact spot where a claim like "all 42 tests pass" needs contradicting.
+
+
+def _session_with_command(tmp_path, *, exit_code, tool_output):
+    store = Store(tmp_path / "cmd.db")
+    src = tmp_path / "src.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    sid = "codex:sess-cmd"
+    s = new_session(
+        id=sid, provider="codex", native_session_id="sess-cmd",
+        title="Run the suite", started_at=1000.0, updated_at=1100.0,
+        repo_root=str(tmp_path), cwd=str(tmp_path),
+    )
+    evs = [
+        new_event(sid=sid, seq=1, kind="user", ts=1000.0,
+                  content="Run the test suite and tell me if it is green."),
+        new_event(sid=sid, seq=2, kind="tool_call", ts=1010.0,
+                  tool_name="exec", command="pytest -q", tool_call_id="c1"),
+        new_event(sid=sid, seq=3, kind="tool_result", ts=1020.0,
+                  role="tool", tool_call_id="c1", exit_code=exit_code,
+                  tool_output=tool_output),
+        new_event(sid=sid, seq=4, kind="assistant", ts=1100.0,
+                  content="All 42 tests pass. The suite is green."),
+    ]
+    store.replace_session(s, evs, "codex", src)
+    return store, [store.session("sess-cmd")[0]]
+
+
+def test_a_failed_command_shows_its_exit_status_and_output(tmp_path):
+    """The observation has to sit next to the claim, or the claim reads as fact."""
+    store, rows = _session_with_command(
+        tmp_path, exit_code=1, tool_output="3 failed, 39 passed\nFAILED tests/test_csv.py::test_bom")
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+
+    cmds = bundle.split("## Commands executed")[1].split("##")[0]
+    assert "pytest -q" in cmds
+    assert "# exit 1" in cmds, (
+        "the exit code lives on the tool_result; it must be joined onto the call"
+    )
+
+    assert "## Errors encountered" in bundle, (
+        "a non-zero command must appear as an error, not only as a command"
+    )
+    errs = bundle.split("## Errors encountered")[1].split("##")[0]
+    assert "exit 1" in errs
+    assert "pytest -q" in errs
+    assert "FAILED tests/test_csv.py::test_bom" in errs, (
+        "one line of what the command printed makes the failure legible"
+    )
+
+
+def test_a_successful_command_is_not_reported_as_an_error(tmp_path):
+    """The join must not turn every command into a failure."""
+    store, rows = _session_with_command(
+        tmp_path, exit_code=0, tool_output="42 passed in 3.1s")
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+
+    cmds = bundle.split("## Commands executed")[1].split("##")[0]
+    assert "# exit 0" in cmds
+    assert "## Errors encountered" not in bundle, (
+        "exit 0 is not an error; the section must stay absent"
+    )
