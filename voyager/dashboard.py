@@ -30,6 +30,10 @@ RECENT_TURNS = 60
 #: How many threads are listed per project.
 THREADS_PER_PROJECT = 12
 
+#: How many threads per project get a continuation preview.  Bounded so the page
+#cost is what it displays, not what the index holds.
+PREVIEW_THREADS_PER_PROJECT = 6
+
 #: O3: how many timeline events the page carries.  A timeline is a
 #: lifecycle/milestone view, not a transcript dump -- the newest events are
 #: the first screen, and the rest is one `voyager thread timeline` away.
@@ -120,11 +124,57 @@ def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
     checkpoints = _q(store, "SELECT id, thread_id, goal, phase, created_at "
                             "FROM checkpoints ORDER BY created_at DESC LIMIT 20")
 
+    # --- continuation preview, for every project's threads ---------------
+    # One read-only `api.continue_context` call per thread.  Never a target: no
+    # lease, no pending attach, no bundle written.  This is exactly what the Core
+    # compiles for `voyager continue --thread <id> --json`, so the page cannot
+    # disagree with the command about what the next agent would receive.
+    #
+    # Salary-cap bounded: a project can show at most THREADS_PER_PROJECT threads,
+    # and the page already truncates there, so the number of calls is bounded by
+    # what is on screen rather than by the size of the index.
+    from .api import continue_context as _continue_context
+
+    previews: Dict[str, Dict[str, Any]] = {}
+    for p in projects.values():
+        for t in p["threads"][:PREVIEW_THREADS_PER_PROJECT]:
+            try:
+                res = _continue_context(db=store.db_path, thread_id=t["id"])
+            except Exception:
+                res = {}
+            previews[t["id"]] = {
+                "selected": res.get("scope") or [],
+                "selected_ids": res.get("selected_session_ids") or [],
+                "reason": res.get("selection_reason") or "",
+                "scope": res.get("selection_scope") or "thread",
+                "ambiguous": bool(res.get("thread_ambiguous")),
+                "candidates": res.get("thread_candidates") or [],
+                "excluded": res.get("excluded_session_count"),
+                "tokens": res.get("estimated_tokens"),
+                "dropped": res.get("dropped") or [],
+                "bundle": res.get("bundle") or "",
+                "error": res.get("error"),
+            }
+
+    # --- which WorkThreads in this repo are actually in contention -------
+    # A repo with several active threads is the case where picking one silently
+    # is worst, so the page states it rather than letting the first row act as
+    # an implied choice.
+    ambiguous_threads: List[Dict[str, Any]] = []
+    for p in projects.values():
+        active = [t for t in p["threads"] if t["status"] == "active"]
+        if len(active) > 1:
+            ambiguous_threads.append({
+                "repo_root": p["repo_root"], "threads": active,
+            })
+
     return {
         "generated_at": time.time(),
         "focus_thread": focus,
         "focus": focus_data,
         "focus_timeline": focus_timeline,
+        "previews": previews,
+        "ambiguous_threads": ambiguous_threads,
         "projects": sorted(projects.values(),
                            key=lambda p: -(p["last_activity"] or 0)),
         "recent": recent,
@@ -300,6 +350,8 @@ def render_html(data: Dict[str, Any]) -> str:
     a("</table></div>")
 
     # --- projects -----------------------------------------------------------
+    previews = data.get("previews") or {}
+    ambiguous = {a["repo_root"] for a in (data.get("ambiguous_threads") or [])}
     a("<div class='panel'><h2>Projects</h2>")
     if not data.get("projects"):
         a("<div class='empty'>no projects indexed yet</div>")
@@ -307,6 +359,14 @@ def render_html(data: Dict[str, Any]) -> str:
         a("<div style='margin-bottom:10px'>")
         a("<div><code>%s</code> <span class='pill'>%d active</span></div>"
           % (_e(p["repo_root"]), p["active"]))
+        if p["repo_root"] in ambiguous:
+            # More than one active task in this repo.  Say so, and say that
+            # nothing here picks one: a list that looks like a default is how a
+            # user ends up continuing the wrong task.
+            a("<div class='warn' style='font-size:12px;margin:4px 0'>"
+              "%d active WorkThreads &middot; nothing is selected for you &mdash; "
+              "choose one in <a href='#continue'>Continuation preview</a></div>"
+              % p["active"])
         a("<table>")
         for t in p["threads"]:
             cls = "ok" if t["status"] == "active" else "muted"
@@ -315,6 +375,54 @@ def render_html(data: Dict[str, Any]) -> str:
               % (_e(t["id"]), _e(_short(t["title"], 60)), cls, _e(t["status"]),
                  "members %s" % _e(t["members"]), _e(_when(t["updated_at"]))))
         a("</table></div>")
+    a("</div>")
+
+    # --- continuation preview ---------------------------------------------
+    # The Core already compiles this.  The page only shows what it would send,
+    # so nothing here takes a lease, writes a bundle or starts an agent.
+    a("<div class='panel' id='continue'><h2>Continuation preview</h2>")
+    if not previews:
+        a("<div class='empty'>no WorkThread to preview</div>")
+    else:
+        for p in data["projects"]:
+            for t in p["threads"]:
+                pv = previews.get(t["id"])
+                if not pv:
+                    continue
+                a("<div class='panel' style='margin:0 0 10px'>")
+                a("<div><code>%s</code> %s <span class='pill'>%s</span></div>"
+                  % (_e(t["id"]), _e(_short(t["title"], 70)), _e(t["status"])))
+                if pv.get("goal_hint"):
+                    a("<div class='muted'>%s</div>" % _e(pv["goal_hint"]))
+                if pv.get("error"):
+                    a("<div class='bad'>%s</div>" % _e(pv["error"]))
+                else:
+                    a("<table style='margin-top:6px'>")
+                    a("<tr><th>scope</th><td>%s</td></tr>"
+                      % _e(pv.get("scope")))
+                    a("<tr><th>sessions</th><td class='mono'>%s</td></tr>"
+                      % _e(", ".join(pv.get("selected_ids") or []) or "-"))
+                    if pv.get("reason"):
+                        a("<tr><th>why</th><td class='muted'>%s</td></tr>"
+                          % _e(_short(pv["reason"], 200)))
+                    if pv.get("tokens"):
+                        a("<tr><th>context</th><td>~%s tokens</td></tr>"
+                          % _e(pv.get("tokens")))
+                    if pv.get("dropped"):
+                        a("<tr><th>dropped</th><td class='warn'>%s</td></tr>"
+                          % _e(", ".join(str(d) for d in pv["dropped"][:3])))
+                    a("</table>")
+                    if pv.get("bundle"):
+                        # Rendered as text, not HTML: the bundle quotes what an
+                        # agent said, so its author is not trusted here either.
+                        a("<pre style='max-height:220px;overflow:auto;"
+                          "white-space:pre-wrap;font-size:11px'>%s</pre>"
+                          % _e(_short(pv["bundle"], 4000)))
+                    a("<div class='muted' style='font-size:11px'>"
+                      "To continue this task:<br>"
+                      "<code>voyager continue --thread %s</code></div>"
+                      % _e(t["id"]))
+                a("</div>")
     a("</div>")
 
     # --- focus thread -------------------------------------------------------
