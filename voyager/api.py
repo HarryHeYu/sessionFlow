@@ -294,6 +294,39 @@ def _newest_session_for_repo(store: Store, repo: Optional[str]):
     return rows[0] if rows else None
 
 
+#: How many sessions a repo-scope continuation may compile from when nothing
+#: links them.  Bounded because "the whole repo" is not a task: a repo with 100
+#: sessions must not produce a 100-session bundle, and the reader still has to
+#: fit the result in a context window.
+MAX_REPO_SCOPE_SESSIONS = 5
+
+
+def _sessions_for_repo_scope(store: Store, repo: Optional[str]):
+    """The bounded session set a repo-scoped continuation compiles from.
+
+    Returns ``(selected, considered)``.  ``considered`` is how many sessions the
+    repo actually has, so the caller can say what it left out instead of
+    silently narrowing.
+
+    Selection is **the newest few**, and that is a default, not a task match:
+    two sessions sharing a repo path are not necessarily the same piece of work.
+    Recency is used because it is deterministic, explainable and cheap; the reply
+    reports that it is a default so a caller can ask for something better rather
+    than inherit a guess.
+
+    Why more than one: cross-agent continuity is the point.  A task routinely
+    runs Codex → Claude → another agent, and picking only the newest session
+    drops the earlier agents' open items and the evidence that contradicts the
+    latest claim.  One session per task is not the same as one session per repo.
+    """
+    rows = list(store.sessions())
+    if repo:
+        rows = [r for r in rows
+                if same_repo_loose(r["repo_root"] or r["cwd"] or "", repo)]
+    rows.sort(key=lambda r: r["updated_at"] or 0, reverse=True)
+    return rows[:MAX_REPO_SCOPE_SESSIONS], len(rows)
+
+
 def current_work(db: Optional[Path] = None, repo: Optional[str] = None,
                  goal: Optional[str] = None, budget: Optional[str] = None,
                  target: Optional[str] = None,
@@ -394,6 +427,9 @@ def continue_context(db: Optional[Path] = None,
     """
     store = Store(db)
     resolved: Optional[Dict[str, Any]] = None
+    # Set only when the fallback had to pick sessions itself; stays None when the
+    # caller named a thread or explicit refs, where no default was invented.
+    repo_scope: Optional[Dict[str, Any]] = None
     try:
         refs = list(session_refs or [])
         if not refs:
@@ -405,9 +441,26 @@ def continue_context(db: Optional[Path] = None,
             if thread:
                 refs = [m["id"] for m in store.thread_members(thread["id"])]
         if not refs:
-            row = _newest_session_for_repo(store, repo)
-            if row is not None:
-                refs = [row["id"]]
+            # No thread links these sessions, so nothing establishes that they
+            # are the same piece of work.  Compile from the newest few instead of
+            # the newest one -- a cross-agent task is routinely several sessions,
+            # and taking only the latest drops earlier open items and the
+            # evidence that contradicts the latest claim -- but say plainly that
+            # recency is a default, and how much was left out.
+            picked, considered = _sessions_for_repo_scope(store, repo)
+            if picked:
+                refs = [r["id"] for r in picked]
+                repo_scope = {
+                    "selection_scope": "repo_recent",
+                    "selected_session_ids": list(refs),
+                    "selection_reason": (
+                        "no WorkThread links these sessions; the newest {0} of {1} "
+                        "session(s) in this repo were compiled, so recency is a "
+                        "default rather than a task match".format(len(refs), considered)
+                    ),
+                    "scope_ambiguous": considered > len(refs),
+                    "excluded_session_count": max(considered - len(refs), 0),
+                }
         if not refs:
             return {"error": "no sessions to continue from"}
     finally:
@@ -416,6 +469,10 @@ def continue_context(db: Optional[Path] = None,
                          target=target)
     if isinstance(out, dict):
         out.setdefault("scope", refs)
+        if repo_scope is not None:
+            # Additive only: existing callers read `scope`, new ones can explain
+            # the choice.  Nothing already present changes meaning.
+            out.update(repo_scope)
         if resolved is not None:
             if resolved["explicit"]:
                 out["thread_requested"] = thread_id
