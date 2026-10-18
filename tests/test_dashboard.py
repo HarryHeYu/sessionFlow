@@ -266,3 +266,147 @@ def test_many_sessions_do_not_grow_the_page(tmp_path):
     assert len(html) < 200_000, "a 120-session index should not become a huge page"
     assert html.count("<div class='panel'") >= 1
     store.close()
+
+
+# --- Session Explorer (P22) -------------------------------------------------
+
+@pytest.fixture
+def detail_world(tmp_path):
+    """A session with tool calls, an empty one, a hostile one, a long one."""
+    path = tmp_path / "d.db"
+    store = Store(path)
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    repo = "E:/repo/detail"
+    XSS = "<img src=x onerror=alert(1)><script>alert(2)</script>"
+    LONG = "y" * 9000
+
+    def put(prov, tag, title, ts, evs):
+        sid = "%s:%s" % (prov, tag)
+        store.replace_session(
+            new_session(id=sid, provider=prov, native_session_id=tag, title=title,
+                        started_at=ts, updated_at=ts, repo_root=repo, cwd=repo,
+                        message_count=len(evs), can_resume=True), evs, prov, src)
+        return sid
+
+    full = put("codex", "full", "Fix quoting", 1000, [
+        new_event(sid="codex:full", ts=1000, seq=0, kind="user",
+                  content="修复 CSV 引号"),
+        new_event(sid="codex:full", ts=1001, seq=1, kind="assistant",
+                  content="checking"),
+        new_event(sid="codex:full", ts=1002, seq=2, kind="tool_call",
+                  tool_name="exec", command="pytest -q", tool_call_id="t1"),
+        new_event(sid="codex:full", ts=1003, seq=3, kind="tool_result",
+                  role="tool", tool_call_id="t1", exit_code=1,
+                  tool_output="1 failed"),
+    ])
+    empty = put("dsh", "empty", "no content", 2000, [])
+    evil = put("claude", "evil", XSS, 3000, [
+        new_event(sid="claude:evil", ts=3000, seq=0, kind="user", content=XSS),
+        new_event(sid="claude:evil", ts=3001, seq=1, kind="assistant", content=LONG),
+    ])
+    tid = store.thread_create(repo_root=repo, title="T", goal="g")
+    store.thread_attach(tid, full)
+    store.thread_attach(tid, evil)
+    yield store, repo, {"full": full, "empty": empty, "evil": evil, "tid": tid}
+    store.close()
+
+
+def test_every_session_is_reachable_even_an_empty_one(detail_world):
+    """An empty session has no user/assistant text, so the recent panel omits it
+    -- which used to make it unreachable from the page entirely."""
+    store, repo, ids = detail_world
+    data = dash.build(store, repo=repo)
+    assert set(data["details"]) >= set(ids.values()) - {ids["tid"]}, (
+        "the empty session must still be openable"
+    )
+
+
+def test_detail_carries_the_whole_conversation(detail_world):
+    store, repo, ids = detail_world
+    data = dash.build(store, repo=repo)
+    d = data["details"][ids["full"]]
+    assert [t["kind"] for t in d["turns"]] == ["user", "assistant"]
+    assert d["turns"][0]["text"] == "修复 CSV 引号", "non-ASCII intact"
+    assert d["provider"] == "codex"
+    assert d["repo"] == "E:/repo/detail"
+    assert d["threads"] == [ids["tid"]]
+
+
+def test_tool_results_are_joined_to_their_calls(detail_world):
+    """The exit code must be shown next to the command, or a failed call reads
+    as a successful one."""
+    store, repo, ids = detail_world
+    data = dash.build(store, repo=repo)
+    tools = data["details"][ids["full"]]["tools"]
+    assert len(tools) == 1
+    assert tools[0]["command"] == "pytest -q"
+    assert tools[0]["exit_code"] == 1, "exit code joined by call id"
+    assert tools[0]["output"] == "1 failed"
+
+
+def test_long_bodies_are_truncated_and_flagged(detail_world):
+    store, repo, ids = detail_world
+    data = dash.build(store, repo=repo)
+    turns = data["details"][ids["evil"]]["turns"]
+    long_one = [t for t in turns if t["text"].startswith("yyy")]
+    assert long_one and long_one[0]["truncated"], "must say it is truncated"
+    assert len(long_one[0]["text"]) <= dash.DETAIL_BODY + 1
+
+
+def test_session_detail_escapes_everything(detail_world):
+    store, repo, ids = detail_world
+    html = dash.render_html(dash.build(store, repo=repo))
+    assert "<img src=x onerror" not in html
+    assert "<script>alert" not in html
+    assert "&lt;img" in html
+
+
+def test_commands_are_not_rendered_as_controls(detail_world):
+    """A tool call shown as a button would be remote code in a local file."""
+    store, repo, ids = detail_world
+    html = dash.render_html(dash.build(store, repo=repo))
+    assert "<button" not in html
+    assert "javascript:" not in html
+    assert "onclick" not in html
+
+
+def test_search_states_its_own_scope(detail_world):
+    store, repo, ids = detail_world
+    html = dash.render_html(dash.build(store, repo=repo))
+    # a snapshot filter must not be described as whole-index search
+    assert "snapshot" in html
+    assert "voyager search &lt;term&gt;" in html
+    assert "id='qnote'" in html, "a place for the no-result explanation"
+
+
+def test_session_id_is_queryable_and_turns_link_to_detail(detail_world):
+    store, repo, ids = detail_world
+    html = dash.render_html(dash.build(store, repo=repo))
+    assert "data-sid=" in html
+    assert "href='#s-%s'" % ids["full"] in html
+    assert "id='s-%s'" % ids["full"] in html
+
+
+def test_page_size_is_flat_as_the_index_grows(tmp_path):
+    """1000 sessions must not become a 1000-session page."""
+    store = Store(tmp_path / "big.db")
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    repo = str(tmp_path / "proj")
+    for i in range(300):
+        sid = "codex:b%d" % i
+        store.replace_session(
+            new_session(id=sid, provider="codex", native_session_id="b%d" % i,
+                        title="s%d" % i, started_at=1000 + i,
+                        updated_at=1000 + i, repo_root=repo, cwd=repo,
+                        message_count=2, can_resume=True),
+            [new_event(sid=sid, ts=1000 + i, seq=0, kind="user",
+                       content="task %d" % i),
+             new_event(sid=sid, ts=1000 + i, seq=1, kind="assistant",
+                       content="done %d" % i)],
+            "codex", src)
+    html = dash.render_html(dash.build(store, repo=repo))
+    assert len(html) < 400_000, "page should stay a single small file"
+    assert html.count("<div class='panel'") >= 1
+    store.close()

@@ -27,6 +27,15 @@ from typing import Any, Dict, List, Optional
 #: How many recent turns the activity panel shows.
 RECENT_TURNS = 60
 
+#: How much of one message or tool output the detail panel shows.  Truncated
+#rather than unlimited: a page that embeds a whole 100k-token log is a page that
+#cannot be opened, and the full text lives in the index and the source transcript.
+DETAIL_BODY = 1200
+
+#: How many *additional* sessions a --repo view pulls into the explorer, so a
+#: session with no message text is reachable too.
+EXTRA_DETAIL_SESSIONS = 20
+
 #: How many threads are listed per project.
 THREADS_PER_PROJECT = 12
 
@@ -51,6 +60,78 @@ def _short(text: Optional[str], n: int = 220) -> str:
     if not text:
         return ""
     return " ".join(str(text).split())[:n]
+
+
+def _session_detail(store, sid: str) -> Dict[str, Any]:
+    """One session, whole, for the detail panel.
+
+    Everything here is untrusted text: session content is whatever an agent
+    said, and a tool's output is whatever a tool printed.  Neither is ever
+    treated as HTML -- `render_html` escapes on output, and that is the only
+    place it is turned into one.
+
+    Sessions that no longer exist in the store (retained history whose source
+    rotated away) are marked, not dropped: D15 marks, never hides.
+    """
+    srow = store.con.execute(
+        "SELECT id, provider, native_id, title, repo_root, cwd, started_at, "
+        "updated_at, source_state FROM sessions WHERE id = ?", (sid,)).fetchone()
+    evs = _q(store, "SELECT seq, ts, kind, role, tool_name, tool_call_id, "
+                    "command, tool_output, exit_code, content, origin "
+                    "FROM events WHERE sid = ? ORDER BY seq", (sid,))
+
+    turns = []
+    tools = []
+    for ev in evs:
+        kind = ev["kind"]
+        if kind in ("user", "assistant", "reasoning") and ev["content"]:
+            turns.append({
+                "kind": kind, "when": _when(ev["ts"]),
+                "text": _short(ev["content"], DETAIL_BODY),
+                "truncated": len(ev["content"]) > DETAIL_BODY,
+            })
+        elif kind == "tool_call" and (ev["command"] or ev["tool_name"]):
+            tools.append({
+                "when": _when(ev["ts"]),
+                "name": ev["tool_name"] or "tool",
+                "command": _short(ev["command"], DETAIL_BODY),
+                "call_id": ev["tool_call_id"],
+                "exit_code": None,
+                "output": "",
+            })
+        elif kind == "tool_result":
+            # The result matches its call by call id: that join is what lets the
+            # page show `pytest -q  # exit 1` instead of a bare command.
+            for t in tools:
+                if t["call_id"] and t["call_id"] == ev["tool_call_id"]:
+                    t["exit_code"] = ev["exit_code"]
+                    t["output"] = _short(ev["tool_output"], DETAIL_BODY)
+                    break
+            else:
+                tools.append({
+                    "when": _when(ev["ts"]), "name": "tool",
+                    "command": "", "call_id": ev["tool_call_id"],
+                    "exit_code": ev["exit_code"],
+                    "output": _short(ev["tool_output"], DETAIL_BODY),
+                })
+
+    threads = [row["thread_id"] for row in _q(
+        store, "SELECT thread_id FROM thread_sessions WHERE session_id = ?", (sid,))]
+
+    return {
+        "sid": sid,
+        "provider": (srow["provider"] if srow else None) or "?",
+        "native_id": (srow["native_id"] if srow else None) or "",
+        "title": (srow["title"] if srow else None) or "",
+        "repo": (srow["repo_root"] or srow["cwd"]) if srow else "",
+        "started_at": _when(srow["started_at"]) if srow else "-",
+        "updated_at": _when(srow["updated_at"]) if srow else "-",
+        "source_state": (srow["source_state"] if srow else "SOURCE_MISSING"),
+        "threads": threads,
+        "turns": turns,
+        "tools": tools,
+        "origin": (evs[0]["origin"] if evs else None),
+    }
 
 
 def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
@@ -124,6 +205,46 @@ def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
     checkpoints = _q(store, "SELECT id, thread_id, goal, phase, created_at "
                             "FROM checkpoints ORDER BY created_at DESC LIMIT 20")
 
+    # --- session detail ----------------------------------------------------
+    # One entry per session shown in the recent panel, so a reader can open one
+    # and see the whole conversation -- tool calls and their exit codes
+    # included, because that is where a claim and the evidence that contradicts
+    # it sit side by side.
+    #
+    # Bounded on purpose: a page that embeds every session is a page nobody can
+    # open.  The details carried are the ones the current page omits; the recent
+    # panel stays the summary view.
+    # `recent` only carries sessions with user/assistant text, so an empty
+    # session would otherwise be unreachable from the page.  Include the ones
+    # this repo owns as well, capped, so the explorer is complete for what is
+    # shown rather than silently skipping the odd case.
+    seen = {r["sid"] for r in recent}
+    extra: List[str] = []
+    if repo:
+        for row in _q(store, "SELECT s.id FROM sessions s WHERE "
+                             "COALESCE(s.repo_root, s.cwd) = ? "
+                             "ORDER BY s.updated_at DESC LIMIT ?",
+                      (repo, EXTRA_DETAIL_SESSIONS)):
+            if row["id"] not in seen:
+                extra.append(row["id"])
+    details: Dict[str, Dict[str, Any]] = {}
+    for sid in [r["sid"] for r in recent] + extra:
+        if sid in details:
+            continue
+        details[sid] = _session_detail(store, sid)
+
+    # --- searchable snapshot ---------------------------------------------
+    # Searched client-side over the turns the page already has.  It is a snapshot
+    # of the recent window, NOT a live FTS query over the whole index: the
+    # placeholder and the footer both say so, because implying more than it is
+    # would be the kind of lie that makes a tool untrustworthy.
+    search_corpus = [
+        {"sid": r["sid"], "provider": r["provider"], "kind": r["kind"],
+         "when": _when(r["ts"]), "text": r["text"],
+         "title": details.get(r["sid"], {}).get("title") or ""}
+        for r in recent
+    ]
+
     # --- continuation preview, for every project's threads ---------------
     # One read-only `api.continue_context` call per thread.  Never a target: no
     # lease, no pending attach, no bundle written.  This is exactly what the Core
@@ -178,6 +299,8 @@ def build(store, repo: Optional[str] = None) -> Dict[str, Any]:
         "projects": sorted(projects.values(),
                            key=lambda p: -(p["last_activity"] or 0)),
         "recent": recent,
+        "details": details,
+        "search_corpus": search_corpus,
         "checkpoints": [dict(c) for c in checkpoints],
         "health": {
             "store": health.get("store"),
@@ -246,9 +369,24 @@ _JS = """
 function filterTurns() {
   var q = document.getElementById('q').value.toLowerCase();
   var rows = document.querySelectorAll('#turns .turn');
+  var shown = 0;
   for (var i = 0; i < rows.length; i++) {
     var t = rows[i].getAttribute('data-text') || '';
-    rows[i].style.display = (q === '' || t.indexOf(q) >= 0) ? '' : 'none';
+    // the session id is searchable too, so a copied id finds its own turns
+    var sid = rows[i].getAttribute('data-sid') || '';
+    var ok = (q === '' || t.indexOf(q) >= 0 || sid.indexOf(q) >= 0);
+    rows[i].style.display = ok ? '' : 'none';
+    if (ok) { shown++; }
+  }
+  var note = document.getElementById('qnote');
+  if (note) {
+    if (q !== '' && shown === 0) {
+      note.textContent = 'no match in the recent window — '
+        + 'this page only holds a snapshot; '
+        + 'voyager search "' + q + '" searches the whole index';
+    } else {
+      note.textContent = '';
+    }
   }
 }
 
@@ -497,16 +635,84 @@ def render_html(data: Dict[str, Any]) -> str:
     # --- recent activity (with a client-side filter) ------------------------
     a("<div class='panel'><h2>Recent activity</h2>")
     a("<input id='q' type='search' placeholder='filter these turns "
-      "(the CLI does full-text search: voyager search)' oninput='filterTurns()'>")
+      "(snapshot of the recent window; the CLI does full-text search: "
+      "voyager search)' oninput='filterTurns()'>")
     a("<div id='turns' style='margin-top:8px'>")
     if not data.get("recent"):
         a("<div class='empty'>nothing recent</div>")
+    details = data.get("details") or {}
     for r in data["recent"]:
-        a("<div class='turn' data-text='%s'><span class='when'>%s</span> "
-          "<span class='pill'>%s</span> <span class='mono'>%s</span><br>%s</div>"
-          % (_e(r["text"].lower()), _e(_when(r["ts"])), _e(r["kind"]),
-             _e(r["provider"]), _e(r["text"])))
+        # The session id is the anchor into the detail panel, so a reader can get
+        # from any turn to the whole conversation in one click.
+        a("<div class='turn' data-text='%s' data-sid='%s'>"
+          "<span class='when'>%s</span> "
+          "<span class='pill'>%s</span> <span class='pill'>%s</span> "
+          "<a href='#s-%s' class='mono'>%s</a><br>%s</div>"
+          % (_e(r["text"].lower()), _e(r["sid"]), _e(_when(r["ts"])),
+             _e(r["kind"]), _e(r["provider"]), _e(r["sid"]), _e(r["sid"]),
+             _e(r["text"])))
     a("</div></div>")
+
+    # A place for the "no match" note, and a line stating the scope rather than
+    # letting a search box imply it holds the whole index.
+    a("<div id='qnote' class='warn' style='font-size:12px;margin:4px 0'></div>")
+    a("<div class='muted' style='font-size:11px;margin:2px 0 8px'>"
+      "The filter above searches only the recent window shown here — it is a "
+      "snapshot, not the whole index. Full-text search over every indexed "
+      "session: <code>voyager search &lt;term&gt;</code></div>")
+
+    # --- session explorer ---------------------------------------------------
+    # Each turn above links here.  The whole conversation, with tool calls and
+    # their exit codes, escaped and truncated.
+    a("<div class='panel' id='sessions'><h2>Sessions</h2>")
+    if not details:
+        a("<div class='empty'>no sessions to open</div>")
+    for sid, sdet in details.items():
+        a("<div class='panel' id='s-%s' style='margin:0 0 10px'>" % _e(sid))
+        a("<div><code>%s</code> <span class='pill'>%s</span></div>"
+          % (_e(sid), _e(sdet["provider"])))
+        a("<table style='margin-top:6px'>")
+        a("<tr><th>title</th><td>%s</td></tr>" % _e(_short(sdet["title"], 80)))
+        a("<tr><th>repo</th><td class='mono'>%s</td></tr>" % _e(sdet["repo"]))
+        a("<tr><th>window</th><td>%s &rarr; %s</td></tr>"
+          % (_e(sdet["started_at"]), _e(sdet["updated_at"])))
+        if sdet["threads"]:
+            a("<tr><th>WorkThread</th><td class='mono'>%s</td></tr>"
+              % _e(", ".join(sdet["threads"])))
+        else:
+            a("<tr><th>WorkThread</th><td class='muted'>none &mdash; "
+              "no task links this session</td></tr>")
+        a("<tr><th>origin</th><td class='muted'>%s</td></tr>" % _e(sdet["origin"]))
+        if sdet["source_state"] and sdet["source_state"] != "SOURCE_OK":
+            a("<tr><th>source</th><td class='warn'>%s</td></tr>"
+              % _e(sdet["source_state"]))
+        a("</table>")
+
+        # Committed to text, not markup: a tool call shown as an executable
+        # button would be a remote-code hole in a local file.
+        if sdet["tools"]:
+            a("<h2>Tool calls</h2>")
+            a("<table><tr><th>when</th><th>tool</th><th>command</th>"
+              "<th>exit</th><th>output</th></tr>")
+            for t in sdet["tools"]:
+                ec = t["exit_code"]
+                ecls = "bad" if ec not in (0, None) else "muted"
+                a("<tr><td class='when'>%s</td><td>%s</td>"
+                  "<td class='mono'>%s</td><td class='%s'>%s</td>"
+                  "<td class='muted'>%s</td></tr>"
+                  % (_e(t["when"]), _e(t["name"]), _e(t["command"]), ecls,
+                     _e(ec if ec is not None else "-"), _e(t["output"])))
+            a("</table>")
+
+        a("<h2>Conversation</h2>")
+        for t in sdet["turns"]:
+            note = (" <span class='warn'>(truncated)</span>"
+                    if t.get("truncated") else "")
+            a("<div class='turn'><span class='when'>%s</span> "
+              "<span class='pill'>%s</span> %s%s</div>"
+              % (_e(t["when"]), _e(t["kind"]), _e(t["text"]), note))
+        a("</div>")
+    a("</div>")
 
     # --- checkpoints --------------------------------------------------------
     a("<div class='panel'><h2>Checkpoints</h2>")
