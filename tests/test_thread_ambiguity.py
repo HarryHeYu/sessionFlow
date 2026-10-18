@@ -458,3 +458,113 @@ def test_mcp_switch_single_thread_still_works(one, monkeypatch, tmp_path):
     r = mcp_server.voyager_switch(target="codex", cwd=REPO)
     assert "pass thread_id" not in r
     assert "nothing to switch" not in r
+
+
+
+def _seed_loose(db_path: Path, sessions) -> None:
+    """Sessions with no WorkThread -- the state P18's repo fallback covers."""
+    store = Store(db_path)
+    src = db_path.parent / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    for suffix, title, repo, updated in sessions:
+        sid = "codex:{0}".format(suffix)
+        store.replace_session(
+            new_session(id=sid, provider="codex", native_session_id=suffix,
+                        title=title, started_at=updated - 100, updated_at=updated,
+                        cwd=repo, repo_root=repo, message_count=2, can_resume=True),
+            [new_event(sid=sid, ts=updated - 100, seq=0, kind="user",
+                       content="work on " + title),
+             new_event(sid=sid, ts=updated - 50, seq=1, kind="assistant",
+                       content=title + ": still open")],
+            "codex", src)
+    store.close()
+
+# --- voyager_continue: the same selection, on the MCP surface ---------------
+# It used to expose no `thread_id`, so a caller that was told to "pick one" had
+# no way to -- and with no WorkThread at all it answered "nothing to continue"
+# while `voyager continue` compiled a bundle from the very same index.
+
+def test_mcp_continue_names_candidates_and_how_to_pick_one(two, monkeypatch, tmp_path):
+    from voyager import mcp_server
+
+    _aim_default_store(monkeypatch, two, tmp_path)
+    r = mcp_server.voyager_continue(cwd=REPO)
+    assert "nothing was chosen" in r
+    assert "thread_id" in r, "naming the parameter is what makes it choosable"
+    store = Store(two)
+    try:
+        ids = [row["id"] for row in
+               store.con.execute("select id from threads").fetchall()]
+    finally:
+        store.close()
+    assert all(tid in r for tid in ids), "every candidate must be named"
+
+
+def test_mcp_continue_with_thread_id_uses_only_that_thread(two, monkeypatch, tmp_path):
+    from voyager import mcp_server
+
+    _aim_default_store(monkeypatch, two, tmp_path)
+    store = Store(two)
+    try:
+        tid = store.con.execute(
+            "select id from threads order by updated_at desc limit 1").fetchone()[0]
+    finally:
+        store.close()
+
+    r = mcp_server.voyager_continue(cwd=REPO, thread_id=tid)
+    assert "nothing was chosen" not in r
+    assert "pass thread_id" not in r
+    # One thread's members only: the bundle exists and is about that work.
+    assert "# Continuation Bundle" in r or "# Context" in r
+
+
+def test_mcp_continue_rejects_an_unknown_thread_by_name(two, monkeypatch, tmp_path):
+    from voyager import mcp_server
+
+    _aim_default_store(monkeypatch, two, tmp_path)
+    r = mcp_server.voyager_continue(cwd=REPO, thread_id="thr_nope")
+    assert r == "no such WorkThread: thr_nope"
+    # Not a silent fall back to the most recent one.
+    assert "Continuation Bundle" not in r
+
+
+def test_mcp_continue_falls_back_to_repo_scope_like_the_cli(
+        tmp_path, monkeypatch):
+    """With no WorkThread anywhere, MCP and the CLI must not disagree.
+
+    `voyager continue` compiled from the newest sessions; this path answered
+    "nothing to continue" on the same index.  It now shares that selection and
+    says in the text that recency is a default.
+    """
+    from voyager import mcp_server
+
+    db = tmp_path / "loose.db"
+    _seed_loose(db, [("l1", "Loose one", REPO, 1000.0),
+                     ("l2", "Loose two", REPO, 2000.0)])
+    _aim_default_store(monkeypatch, db, tmp_path)
+
+    r = mcp_server.voyager_continue(cwd=REPO)
+    assert "nothing to continue" not in r, (
+        "the CLI produces a bundle from this index; MCP must not report a vacuum"
+    )
+    assert "selection:" in r
+    assert "recency is a default" in r
+
+
+def test_mcp_context_thread_id_is_accepted_too(tmp_path, monkeypatch):
+    from voyager import mcp_server
+
+    db = tmp_path / "loose.db"
+    _seed(db, [("l1", "Loose one", REPO, 1000.0)])
+    _aim_default_store(monkeypatch, db, tmp_path)
+    store = Store(db)
+    try:
+        tid = store.thread_create(repo_root=REPO, title="Loose one")
+        store.thread_attach(tid, "codex:l1")
+    finally:
+        store.close()
+
+    r = mcp_server.voyager_context(cwd=REPO, thread_id=tid)
+    assert "# Continuation Bundle" in r or "# Context" in r
+    r2 = mcp_server.voyager_context(cwd=REPO, thread_id="thr_nope")
+    assert r2 == "no such WorkThread: thr_nope"

@@ -362,21 +362,35 @@ def voyager_current(cwd: str = "", provider: str = "",
 @mcp.tool()
 def voyager_context(cwd: str = "", provider: str = "",
                     native_session_id: str = "", goal: str = "",
-                    budget: str = "") -> str:
+                    budget: str = "", thread_id: str = "") -> str:
     """Compile a ready-to-use continuation context (goal, state, decisions,
     failures, next steps) for the active WorkThread. Returns the bundle
     text — read it and continue the work.
+
+    Pass ``thread_id`` when the repo has more than one active WorkThread;
+    without it an ambiguous repo lists the candidates rather than picking one.
 
     This is the read-only *context* facet of continuity: it compiles and
     returns text, and never leases, records a pending attach or launches. The
     *handoff* facet — one WorkThread changing hands between agents — is
     `voyager_switch` / `voyager_handoff`, which share one engine with the CLI
     (`continuity.handoff_thread`)."""
+    from .api import continue_context as api_continue_context
+    from .store import default_db_path
     from .auto import get_continuation_context
     store = Store()
+
+    if thread_id:
+        # A named thread that does not exist is an error, not a cue to pick
+        # another one: the caller asked for a specific piece of work.
+        if store.thread_get(thread_id) is None:
+            store.close()
+            return "no such WorkThread: {0}".format(thread_id)
+
     res = get_continuation_context(store=store, cwd=cwd or None,
                                    provider=provider or None,
                                    native_session_id=native_session_id or None,
+                                   thread_id=thread_id or None,
                                    goal=goal or None, budget=budget or None)
     # `get_continuation_context` reports the discovery under `discovery` and has
     # no top-level status; ambiguity arrives as continuity_available=False.
@@ -393,19 +407,49 @@ def voyager_context(cwd: str = "", provider: str = "",
         if cands:
             lines.append("(The most recently active is {0}, but activity time "
                          "is not a decision anyone made.)".format(cands[0]["id"]))
+            lines.append("Pick one by passing its id as thread_id.")
+        store.close()
         return "\n".join(lines)
+
     if not res["continuity_available"]:
-        return "no active WorkThread — nothing to continue"
+        # No WorkThread anywhere near this repo.  Fall through to the *same*
+        # repo-scope selection the CLI and the JSON API use (bounded to the
+        # newest few sessions), rather than answering "nothing to continue" --
+        # that was the contradiction: `voyager continue` produced a bundle from
+        # the same index this path called empty.  The selection metadata comes
+        # along in the text so the caller can see it is a default.
+        store.close()
+        if thread_id:
+            return "no active WorkThread: {0}".format(thread_id)
+        out = api_continue_context(db=default_db_path(), repo=cwd or None,
+                                   goal=goal or None, budget=budget or None)
+        if out.get("error"):
+            return out["error"]
+        head = []
+        if out.get("selection_reason"):
+            head.append("selection: {0}".format(out["selection_reason"]))
+            if out.get("scope_ambiguous"):
+                head.append("scope_ambiguous: {0} session(s) in this repo were "
+                            "excluded, so this is a subset".format(
+                                out.get("excluded_session_count")))
+            if out.get("candidate_session_ids"):
+                head.append("candidates: {0}".format(
+                    ", ".join(out["candidate_session_ids"])))
+        text = "\n".join(head)
+        return (text + "\n\n" + out["bundle"]) if text else out["bundle"]
+
+    store.close()
     return res["context"]
 
 
 @mcp.tool()
-def voyager_continue(cwd: str = "", goal: str = "", budget: str = "") -> str:
+def voyager_continue(cwd: str = "", goal: str = "", budget: str = "",
+                     thread_id: str = "") -> str:
     """Discover the active WorkThread for the current repo, compile a
     continuation bundle, and return it. Same as voyager_context but with
     automatic session discovery — no manual session ids needed."""
     return voyager_context(cwd=cwd, provider="", native_session_id="",
-                           goal=goal, budget=budget)
+                           goal=goal, budget=budget, thread_id=thread_id)
 
 
 @mcp.tool()
