@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 from .budget import apply_budget, parse_budget, resolve_auto_budget
 from .continuity import build_continuation_bundle
 from .ranker import extract_candidate_facts, rank_candidates
-from .store import Store, default_db_path
+from .store import default_db_path, open_read, Store
 from .util import parse_when, same_repo_loose
 
 
@@ -50,7 +50,7 @@ def overview(db: Optional[Path] = None, repo: Optional[str] = None,
     """Everything a sidebar needs on one screen: index stats, active
     threads, recent sessions."""
     import time
-    store = Store(db)
+    store = open_read(db)
     stats = store.stats()
     threads = [
         {k: t[k] for k in ("id", "title", "repo_root", "status", "members",
@@ -98,7 +98,7 @@ def overview(db: Optional[Path] = None, repo: Optional[str] = None,
 def thread_detail(db: Optional[Path] = None, thread_id: str = "") -> Dict[str, Any]:
     """Thread + members + lease + pending attaches for the detail view."""
     from .store import lease_state
-    store = Store(db)
+    store = open_read(db)
     t = store.thread_get(thread_id)
     if not t:
         store.close()
@@ -124,7 +124,7 @@ def thread_detail(db: Optional[Path] = None, thread_id: str = "") -> Dict[str, A
 
 def sessions(db: Optional[Path] = None, repo: Optional[str] = None,
              platform: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-    store = Store(db)
+    store = open_read(db)
     rows = store.sessions(platform)
     if repo:
         rows = [r for r in rows
@@ -141,7 +141,7 @@ def bundle_preview(db: Optional[Path] = None,
                    target: Optional[str] = None) -> Dict[str, Any]:
     """Render a Continuation Bundle in memory (Phase 3 ranker + Phase 4
     budget) and return it with the token estimate. Writes nothing."""
-    store = Store(db)
+    store = open_read(db)
     rows: List[Any] = []
     for ref in session_refs or []:
         row, ambiguous = store.session(ref)
@@ -187,7 +187,7 @@ def thread_timeline(db: Optional[Path] = None, thread_id: str = "",
     invisible.  Read-only: it opens no transaction and writes nothing.
     """
     from .timeline import build_thread_timeline
-    store = Store(db)
+    store = open_read(db)
     try:
         return build_thread_timeline(store, thread_id, limit=limit,
                                      kinds=kinds, provider=provider,
@@ -248,7 +248,7 @@ def search(db: Optional[Path] = None, query: str = "", provider: Optional[str] =
     cannot return different rows for one query.  ``provider`` is a comma list;
     ``since`` / ``until`` accept ``2026-09-30`` or ``7d``.
     """
-    store = Store(db)
+    store = open_read(db)
     try:
         providers = [p.strip() for p in (provider or "").split(",") if p.strip()]
         rows = store.search(query, limit=int(limit or 20), filters={
@@ -351,7 +351,7 @@ def current_work(db: Optional[Path] = None, repo: Optional[str] = None,
 
     All of those fields are additive; ``schema_version`` stays 1.
     """
-    store = Store(db)
+    store = open_read(db)
     try:
         resolved = _resolve_thread(store, repo=repo, thread_id=thread_id)
         thread = resolved["thread"]
@@ -425,7 +425,7 @@ def continue_context(db: Optional[Path] = None,
     compiled (this is a read), but the reply says so -- ``thread_ambiguous``
     plus ``thread_candidates`` -- and labels the one it used as a default.
     """
-    store = Store(db)
+    store = open_read(db)
     resolved: Optional[Dict[str, Any]] = None
     # Set only when the fallback had to pick sessions itself; stays None when the
     # caller named a thread or explicit refs, where no default was invented.

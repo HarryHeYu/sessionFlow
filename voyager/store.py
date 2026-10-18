@@ -253,6 +253,32 @@ def default_db_path() -> Path:
     return Path.home() / ".voyager" / "index.db"
 
 
+def open_read(db_path: Optional[Path] = None) -> "Store":
+    """Open the index for a read, without creating one that is not there.
+
+    ``sqlite3.connect`` creates the file when it is absent.  That made a read
+    against a path with no index leave a stray empty database behind -- and
+    answer "0 results", which reads as *"you have no data"* rather than *"there
+    is no index yet"*.  The second is what happened, and the first is what the
+    user concludes, so the wrong file gets deleted or the wrong problem gets
+    debugged.
+
+    When the path does not exist the caller gets an empty in-memory index
+    instead: the same (empty) results as before, and nothing written to disk.
+    ``doctor`` already refuses to create a missing index and says so; this is the
+    same rule for the read paths.
+
+    Not a read-only connection: SQLite cannot enforce that here (an op may
+    legitimately need a lease or a cache row), and forcing it would break paths
+    that do write.  The guarantee is narrower and honest -- a read does not
+    *create* a database.
+    """
+    path = Path(db_path) if db_path else default_db_path()
+    if not path.exists():
+        return Store(":memory:")
+    return Store(path)
+
+
 def _pid_alive(pid) -> bool:
     """Is a process with this pid running right now?
 

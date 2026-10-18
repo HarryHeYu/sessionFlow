@@ -20,7 +20,7 @@ from .adapters.base import enabled_adapters, git_info
 from .auto import resolve_work_thread
 from .scanner import (MAX_WRITE_FAILURES,
                       WRITE_FAILURE_GRACE_SECONDS, run_scan)
-from .store import Store, default_db_path, lease_state
+from .store import Store, default_db_path, lease_state, open_read
 from .integrations.hook import cmd_hook_startup
 from .util import fmt_ts, same_repo_loose, parse_when as _parse_when
 from ._version import get_version
@@ -262,7 +262,7 @@ def _short_ts(ts):
 
 
 def cmd_list(args) -> int:
-    store = Store(args.db)
+    store = open_read(args.db)
     rows = store.sessions(args.platform)
     if args.repo:
         rows = [r for r in rows if _repo_match(r, args.repo)]
@@ -322,7 +322,7 @@ def _resolve(store: Store, ref: str):
 
 
 def cmd_show(args) -> int:
-    store = Store(args.db)
+    store = open_read(args.db)
     row = _resolve(store, args.session)
     events = store.events(row["id"])
     if args.json:
@@ -393,7 +393,7 @@ def _search_filters(args) -> dict:
 
 
 def cmd_search(args) -> int:
-    store = Store(args.db)
+    store = open_read(args.db)
     try:
         rows = store.search(args.query, limit=args.limit,
                             filters=_search_filters(args))
@@ -422,7 +422,7 @@ def cmd_search(args) -> int:
 
 
 def cmd_repo(args) -> int:
-    store = Store(args.db)
+    store = open_read(args.db)
     rows = [r for r in store.sessions() if _repo_match(r, args.repo)]
     if not rows:
         print(f"no sessions matched repo pattern: {args.repo}")
@@ -449,7 +449,7 @@ def cmd_repo(args) -> int:
 
 def cmd_export(args) -> int:
     from .export import write_export
-    store = Store(args.db)
+    store = open_read(args.db)
     row = _resolve(store, args.session)
     fmt = args.format
     out = args.output or f"{row['provider']}-{row['native_id'][:20]}.{fmt}"
@@ -866,7 +866,7 @@ def _continuity_status_enum(disc: dict) -> str:
 def cmd_status(args) -> int:
     """Phase I: show the automatic-continuity state for the current repo."""
     import json as _json
-    store = Store(args.db)
+    store = open_read(args.db)
     from .auto import discover_continuity
     disc = discover_continuity(store, cwd=os.getcwd(),
                                repo=getattr(args, "repo", None))
@@ -904,7 +904,7 @@ def cmd_status(args) -> int:
 
 
 def cmd_stats(args) -> int:
-    store = Store(args.db)
+    store = open_read(args.db)
     stats = store.stats()
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     return 0
@@ -928,7 +928,7 @@ def cmd_hook_grok_context(args) -> int:
     from .integrations.grok_native import write_context_rules
 
     home = Path(args.home) if getattr(args, "home", None) else None
-    store = Store(args.db) if getattr(args, "db", None) else None
+    store = open_read(args.db) if getattr(args, "db", None) else None
     try:
         result = write_context_rules(cwd=args.cwd, home=home, store=store)
     finally:

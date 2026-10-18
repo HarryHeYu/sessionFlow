@@ -391,3 +391,70 @@ def test_mcp_context_reports_ambiguity_not_absence(two, monkeypatch):
     assert "no active WorkThread" not in out
     assert "2 active WorkThreads" in out
     assert "Work A" in out and "Work B" in out
+
+
+# --- the MCP handoff surface ------------------------------------------------
+# `voyager_switch` takes a lease and records a pending attach, so it must not
+# pick a thread on the caller's behalf.  It used to answer "no active
+# WorkThread — nothing to switch" for a repo that has two, because
+# `continuity_available` is False for both states -- and it had no way to name
+# one, so the ambiguity was a dead end rather than a choice.
+
+def _aim_default_store(monkeypatch, db, tmp_path):
+    """voyager_switch opens the default index; point it at the fixture.
+
+    The bundle directory is redirected too: a handoff writes a bundle, and a test
+    must never drop one into the real ~/.voyager/bundles.
+    """
+    import voyager.store as store_mod
+
+    monkeypatch.setattr(store_mod, "default_db_path", lambda: db)
+    monkeypatch.setenv("VOYAGER_BUNDLES_DIR", str(tmp_path / "bundles"))
+
+
+def test_mcp_switch_names_candidates_instead_of_denying_them(two, monkeypatch, tmp_path):
+    from voyager import mcp_server
+
+    _aim_default_store(monkeypatch, two, tmp_path)
+    r = mcp_server.voyager_switch(target="codex", cwd=REPO)
+
+    assert "nothing to switch" not in r, (
+        "the repo has two threads; saying there is nothing is false: %r" % r
+    )
+    assert "pass thread_id" in r
+    assert r.count("thr_") == 2, "both candidates must be named: %r" % r
+    assert "Work A" in r and "Work B" in r
+
+
+def test_mcp_switch_with_explicit_thread_proceeds(two, monkeypatch, tmp_path):
+    from voyager import mcp_server
+
+    _aim_default_store(monkeypatch, two, tmp_path)
+    store = Store(two)
+    try:
+        tid = store.con.execute(
+            "select id from threads order by updated_at desc limit 1").fetchone()[0]
+    finally:
+        store.close()
+
+    r = mcp_server.voyager_switch(target="claude", cwd=REPO, thread_id=tid)
+    assert "pass thread_id" not in r, "an explicit choice must not be asked again"
+    assert "no such WorkThread" not in r
+
+
+def test_mcp_switch_unknown_thread_is_named(two, monkeypatch, tmp_path):
+    from voyager import mcp_server
+
+    _aim_default_store(monkeypatch, two, tmp_path)
+    r = mcp_server.voyager_switch(target="claude", cwd=REPO, thread_id="thr_nope")
+    assert "no such WorkThread: thr_nope" in r
+
+
+def test_mcp_switch_single_thread_still_works(one, monkeypatch, tmp_path):
+    """The guard must not fire when there is exactly one obvious thread."""
+    from voyager import mcp_server
+
+    _aim_default_store(monkeypatch, one, tmp_path)
+    r = mcp_server.voyager_switch(target="codex", cwd=REPO)
+    assert "pass thread_id" not in r
+    assert "nothing to switch" not in r

@@ -411,10 +411,15 @@ def voyager_continue(cwd: str = "", goal: str = "", budget: str = "") -> str:
 @mcp.tool()
 def voyager_switch(target: str, cwd: str = "", goal: str = "",
                    budget: str = "", steal: bool = False,
-                   force_bundle: bool = False) -> str:
+                   force_bundle: bool = False, thread_id: str = "") -> str:
     """Switch the active WorkThread to another agent. Compiles the
     continuation bundle (or native resume if same provider). Returns
     instructions for the target agent.
+
+    Pass ``thread_id`` when the repo has more than one active WorkThread.
+    Without it, an ambiguous repo refuses and lists the candidates instead of
+    choosing: this call takes a lease and records a pending attach, so picking
+    the most recently active thread would be deciding on the caller's behalf.
 
     Uses the same engine as the CLI (`continuity.handoff_thread`): lease →
     same-provider native resume → continuation bundle + pending attach."""
@@ -422,11 +427,29 @@ def voyager_switch(target: str, cwd: str = "", goal: str = "",
     from .continuity import handoff_thread
     store = Store()
     disc = discover_continuity(store, cwd=cwd or None)
-    if not disc["continuity_available"]:
+
+    if thread_id:
+        t = store.thread_get(thread_id)
+        if t is None:
+            store.close()
+            return "no such WorkThread: {0}".format(thread_id)
+    elif not disc["continuity_available"]:
+        # `continuity_available` is False for *two* different states: no thread
+        # at all, and several with no way to tell them apart.  Reporting the
+        # second as "nothing to switch" is false -- the caller has two -- and
+        # this call has side effects, so it must not pick one silently.
+        cands = disc.get("candidate_threads") or []
+        ambiguous = disc.get("status") == "ambiguous"
         store.close()
+        if ambiguous and cands:
+            lines = ["{0} active WorkThreads for this repo — pass thread_id to "
+                     "say which one:".format(len(cands))]
+            for c in cands:
+                lines.append("  {0}  {1}".format(c["id"], (c["title"] or "")[:70]))
+            return "\n".join(lines)
         return "no active WorkThread — nothing to switch"
-    tid = disc["active_thread"]["id"]
-    t = store.thread_get(tid)
+    else:
+        t = store.thread_get(disc["active_thread"]["id"])
 
     res = handoff_thread(
         store=store,
