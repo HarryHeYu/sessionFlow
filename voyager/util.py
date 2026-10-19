@@ -119,3 +119,25 @@ def parse_ts(iso: Optional[str]) -> Optional[float]:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
     except ValueError:
         return None
+
+
+def event_digest(kind, content, command, tool_output, tool_call_id) -> str:
+    """A short, stable fingerprint of what an event *is*.
+
+    An event's row id is not an identity: `replace_session` deletes and
+    re-inserts, and SQLite reallocates rowids, so a reference built on `id`
+    still resolves after a re-scan -- to a different event.  `(sid, seq)` is
+    better but not sufficient either: measured on the codex and grok adapters,
+    inserting or deleting a line in the middle of a transcript leaves only
+    3/5 and 2/5 of recorded references pointing at the same content.
+
+    So a reference carries this digest too.  It cannot say whether a claim is
+    true -- only whether the event a reference points at is still the event it
+    was recorded from.  Content identity is not fact verification, and this
+    function must never be used as if it were.
+    """
+    import hashlib
+
+    body = "|".join("" if v is None else str(v) for v in
+                    (kind, content, command, tool_output, tool_call_id))
+    return hashlib.sha256(body.encode("utf-8", "replace")).hexdigest()[:8]

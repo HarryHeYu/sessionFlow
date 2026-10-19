@@ -346,9 +346,20 @@ def cmd_show(args) -> int:
     if row["resume_cmd"]:
         print(f"  resume  : {row['resume_cmd']}")
     print()
+    from .util import event_digest as _digest
+
     for ev in events:
         t = _short_ts(ev["ts"])
         kind = ev["kind"]
+        # A Continuation Bundle cites events as `seq N · #digest`.  Printing the
+        # seq here is what makes that reference resolvable: without it a reader
+        # holding "seq 3" has no way to find which line it means.  The digest
+        # rides along so a stale reference can be spotted rather than trusted.
+        ref = ""
+        if ev["seq"] is not None:
+            dg = _digest(ev["kind"], ev["content"], ev["command"],
+                         ev["tool_output"], ev["tool_call_id"])
+            ref = "#%s/%s " % (ev["seq"], dg)
         label = {"user": "USER", "assistant": "ASST", "reasoning": "think",
                  "tool_call": "TOOL>", "tool_result": "  out", "error": "ERR!",
                  "usage": "usage", "snapshot": "files", "file": "file",
@@ -371,10 +382,7 @@ def cmd_show(args) -> int:
             except json.JSONDecodeError:
                 snap_files = []
             body = ", ".join(snap_files[:3])
-        if kind in ("user", "assistant", "tool_call"):
-            print(f"[{t}] {label:<5} {body}")
-        else:
-            print(f"[{t}] {label:<5} {body}" + ("" if kind == "reasoning" else ""))
+        print(f"[{t}] {ref}{label:<5} {body}")
     return 0
 
 

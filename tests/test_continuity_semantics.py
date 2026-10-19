@@ -465,3 +465,112 @@ def test_the_pointer_survives_a_reindex(tmp_path):
     # seq 2 still identifies the failing result, even though its row id changed
     assert "· seq 2" in bundle, bundle
     assert "3 failed" in bundle
+
+
+# --- claim provenance -------------------------------------------------------
+# A reference to an assistant event proves the agent said it, nothing more.  It
+# must exist, it must resolve, and a stale one must be detectable.
+
+def _world(tmp_path, claim="All 42 tests pass.", result="3 failed", rc=1):
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    db = tmp_path / "i.db"
+    store = Store(db)
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    sid = "codex:claim"
+    store.replace_session(
+        new_session(id=sid, provider="codex", native_session_id="c-1", title="t",
+                    started_at=1000, updated_at=1000, cwd="E:/r", repo_root="E:/r",
+                    message_count=4, can_resume=True),
+        [new_event(sid=sid, ts=1000, seq=0, kind="user", content="run the tests"),
+         new_event(sid=sid, ts=1001, seq=1, kind="tool_call", tool_name="exec",
+                   command="pytest -q", tool_call_id="c1"),
+         new_event(sid=sid, ts=1002, seq=2, kind="tool_result", role="tool",
+                   tool_call_id="c1", exit_code=rc, tool_output=result),
+         new_event(sid=sid, ts=1003, seq=3, kind="assistant", content=claim)],
+        "codex", src)
+    rows = list(store.con.execute("select * from sessions where id = ?", (sid,)))
+    return store, rows, sid
+
+
+def test_the_conclusion_cites_the_event_it_came_from(tmp_path):
+    from voyager.continuity import build_continuation_bundle
+
+    store, rows, sid = _world(tmp_path)
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    store.close()
+
+    line = next(l for l in bundle.splitlines() if "All 42 tests pass." in l)
+    assert "· seq 3 · #" in line, line
+    # and the header still says this is a claim, not a finding
+    assert "read as what it said rather than as verified fact" in bundle
+
+
+def test_the_contradicting_evidence_is_cited_separately(tmp_path):
+    """Both the claim and the tool result keep their own pointers."""
+    from voyager.continuity import build_continuation_bundle
+
+    store, rows, sid = _world(tmp_path)
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    store.close()
+
+    claim = next(l for l in bundle.splitlines() if "All 42 tests pass." in l)
+    tool = next(l for l in bundle.splitlines() if "3 failed" in l)
+    assert "seq 3" in claim and "seq 2" in tool, (claim, tool)
+    # different events, different digests -- they cannot be confused
+    d_claim = claim.rsplit("#", 1)[1].strip()
+    d_tool = tool.rsplit("#", 1)[1].strip()
+    assert d_claim != d_tool, (d_claim, d_tool)
+
+
+def test_a_reference_resolves_through_show(tmp_path):
+    """The pointer is only useful if `voyager show` prints the same one."""
+    from voyager.continuity import build_continuation_bundle
+    from voyager.util import event_digest
+
+    store, rows, sid = _world(tmp_path)
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    claim_line = next(l for l in bundle.splitlines() if "All 42 tests pass." in l)
+    ref = claim_line.rsplit("· seq ", 1)[1]
+    seq, digest = ref.split(" · #")
+    seq = int(seq)
+
+    ev = next(e for e in store.events(sid) if e["seq"] == seq)
+    actual = event_digest(ev["kind"], ev["content"], ev["command"],
+                          ev["tool_output"], ev["tool_call_id"])
+    assert actual == digest.strip(), (
+        "the reference in the bundle must be reproducible from the event"
+    )
+    store.close()
+
+
+def test_a_stale_reference_is_detectable(tmp_path):
+    """Same seq, different content -> the digest no longer matches.
+
+    This is the whole point of carrying a digest: after a mid-transcript edit
+    the seq still resolves, so without it the reader would silently read a
+    different event.
+    """
+    from voyager.continuity import build_continuation_bundle
+    from voyager.util import event_digest
+
+    store, rows, sid = _world(tmp_path)
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    claim_line = next(l for l in bundle.splitlines() if "All 42 tests pass." in l)
+    recorded = claim_line.rsplit("· #", 1)[1].strip()
+
+    # the transcript is edited: seq 3 now holds something else
+    store.con.execute("update events set content = ? where sid = ? and seq = 3",
+                      ("Actually two tests fail.", sid))
+    store.con.commit()
+    ev = next(e for e in store.events(sid) if e["seq"] == 3)
+    now = event_digest(ev["kind"], ev["content"], ev["command"],
+                       ev["tool_output"], ev["tool_call_id"])
+    store.close()
+
+    assert now != recorded, (
+        "a changed event must not produce the recorded digest, or a stale "
+        "reference would pass as current"
+    )

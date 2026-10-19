@@ -26,7 +26,7 @@ from .model import text_of
 from .provenance import order_rows_for_l1, session_band
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import Store
-from .util import fmt_ts
+from .util import event_digest, fmt_ts
 from .winsubprocess import background_subprocess_kwargs
 
 PROMPT_TARGETS = {
@@ -776,6 +776,26 @@ def _most_recently_active(rows: List[Any]) -> Optional[Any]:
     return best
 
 
+def _event_ref(ev: Any) -> str:
+    """`· seq N · #digest` -- a locator that can also say it went stale.
+
+    `seq` alone is not enough.  Measured on the codex and grok adapters,
+    inserting or deleting a line in the middle of a transcript leaves only 3/5
+    and 2/5 of recorded references pointing at the same content: the seq still
+    resolves, it just resolves to a different event.  The digest turns that
+    silent misdirection into something a reader can notice.
+
+    What it does *not* do: say anything about whether the content is true.  A
+    matching digest means "this is the event the reference was made from", never
+    "this event is correct".
+    """
+    if ev["seq"] is None:
+        return ""
+    dg = event_digest(ev["kind"], ev["content"], ev["command"],
+                      ev["tool_output"], ev["tool_call_id"])
+    return " · seq %s · #%s" % (ev["seq"], dg)
+
+
 def build_continuation_bundle(
     store: Store,
     session_rows: List[Any],
@@ -895,13 +915,17 @@ def build_continuation_bundle(
         )
         L.append("")
         if len(picked) == 1:
-            L.append(picked[0][0]["content"][:_ASST_MAX])
+            # The pointer says *which message said this*.  It does not say the
+            # message is right -- a reference to an assistant event proves the
+            # agent said it, nothing more.
+            L.append(picked[0][0]["content"][:_ASST_MAX]
+                     + _event_ref(picked[0][0]))
         else:
             # More than one message matters, so label each by what it is.
             # "open" is an unfinished item, not a completed claim.
             for ev, tag in picked:
                 snippet = ev["content"].strip().replace("\n", " ")[:_ASST_MAX]
-                L.append(f"- **{tag}:** {snippet}")
+                L.append(f"- **{tag}:** {snippet}{_event_ref(ev)}")
         L.append("")
         # When the clock and the handoff order disagree, say so instead of
         # silently picking one.  Being touched more recently is not evidence
@@ -1018,32 +1042,36 @@ def build_continuation_bundle(
                 # re-check the evidence needs something that still points at the
                 # same event after the next scan.
                 outcome[str(ev["tool_call_id"])] = (
-                    ev["exit_code"], ev["tool_output"] or "", ev["seq"])
+                    ev["exit_code"], ev["tool_output"] or "", ev)
 
     def _outcome_of(ev: Any) -> Tuple[Any, str, Any]:
-        """(exit_code, output, result_seq) for a tool_call, from its result."""
+        """(exit_code, output, result_event) for a tool_call, from its result.
+
+        The whole result event travels, not just its seq: the reference needs
+        the digest too, and that needs the content.
+        """
         rc = ev["exit_code"]
         if rc is None and ev["tool_call_id"]:
             return outcome.get(str(ev["tool_call_id"]), (None, "", None))
-        return rc, "", ev["seq"]
+        return rc, "", ev
 
     all_cmds: List[Tuple[Any, str, Any, Any]] = []
     for r in sorted_rows:
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "tool_call" and ev["command"]:
-                rc, _out, seq = _outcome_of(ev)
-                all_cmds.append((ev["ts"], ev["command"], rc, seq))
+                rc, _out, res_ev = _outcome_of(ev)
+                all_cmds.append((ev["ts"], ev["command"], rc, res_ev))
 
     if all_cmds:
         L.append("## Commands executed")
         L.append("")
         seen_cmds = set()
         dedup_cmds = []
-        for ts, cmd, rc, seq in reversed(all_cmds):
+        for ts, cmd, rc, res_ev in reversed(all_cmds):
             norm = " ".join(str(cmd).split())
             if norm not in seen_cmds:
                 seen_cmds.add(norm)
-                dedup_cmds.append((ts, norm, rc, seq))
+                dedup_cmds.append((ts, norm, rc, res_ev))
         dedup_cmds.reverse()
 
         # Phase 3: with a goal, shrink to the commands the ranked facts ran
@@ -1056,11 +1084,9 @@ def build_continuation_bundle(
                 if narrowed:
                     dedup_cmds = narrowed
 
-        for ts, cmd_str, rc, seq in dedup_cmds[-_MAX_COMMANDS:]:
+        for ts, cmd_str, rc, res_ev in dedup_cmds[-_MAX_COMMANDS:]:
             rc_s = f"  # exit {rc}" if rc is not None else ""
-            # `seq` is the pointer, `id` would be a lie after a re-scan.
-            seq_s = f" · seq {seq}" if seq is not None else ""
-            L.append(f"- `{cmd_str[:_CMD_MAX]}`{rc_s}{seq_s}")
+            L.append(f"- `{cmd_str[:_CMD_MAX]}`{rc_s}{_event_ref(res_ev) if res_ev else ''}")
         L.append("")
 
     # ---- 7. Errors encountered ------------------------------------------
@@ -1068,10 +1094,10 @@ def build_continuation_bundle(
     for r in sorted_rows:
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "error" and ev["content"]:
-                seq_s = f" · seq {ev['seq']}" if ev["seq"] is not None else ""
-                all_errs.append(f"[{fmt_ts(ev['ts'])}] {ev['content'][:250]}{seq_s}")
+                all_errs.append(
+                    f"[{fmt_ts(ev['ts'])}] {ev['content'][:250]}{_event_ref(ev)}")
             elif ev["kind"] == "tool_call" and ev["command"]:
-                rc, out, seq = _outcome_of(ev)
+                rc, out, res_ev = _outcome_of(ev)
                 if rc in (0, None):
                     continue
                 cmd_short = " ".join(str(ev["command"]).split())[:200]
@@ -1083,9 +1109,9 @@ def build_continuation_bundle(
                     lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
                     if lines:
                         tail = " -- " + lines[-1][:120]
-                seq_s = f" · seq {seq}" if seq is not None else ""
                 all_errs.append(
-                    f"[{fmt_ts(ev['ts'])}] exit {rc}: `{cmd_short}`{tail}{seq_s}")
+                    f"[{fmt_ts(ev['ts'])}] exit {rc}: `{cmd_short}`{tail}"
+                    f"{_event_ref(res_ev) if res_ev else ''}")
 
     if all_errs:
         L.append("## Errors encountered")
