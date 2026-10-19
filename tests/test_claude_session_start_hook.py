@@ -22,6 +22,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -190,16 +191,35 @@ class TestPayloadLengthSemantics(HookTestCase):
         self.assertIsNotNone(spilled, "an over-budget bundle must be spilled")
 
     def test_emoji_payload_round_trips_through_the_hook_json(self):
+        """The payload is capped; the *full* context survives in the spill file.
+
+        This used to call `_spill_context` itself and compare the emitted payload
+        against that first result byte for byte.  The spill filename embeds
+        `int(time.time())`, so the two calls produced the same name only when
+        both landed inside the same second -- and the test failed whenever the
+        clock ticked between them, on CI roughly once in a while and never
+        locally.  Asserting the property instead of the byte string checks what
+        the behaviour is actually for.
+        """
         context = "\U0001F600" * (hook.MAX_ADDITIONAL_CONTEXT_CHARS * 2)
-        payload, _ = hook._spill_context(context)
         _, out, _ = self._capture(
             lambda: hook.emit_claude_hook_output(
                 {"status": "context_ready", "context": context}))
         decoded = json.loads(out)
         emitted = decoded["hookSpecificOutput"]["additionalContext"]
-        self.assertEqual(emitted, payload)
+
+        # 1. the payload respects the cap the harness measures in
         self.assertLessEqual(hook._payload_len(emitted),
                              hook.MAX_ADDITIONAL_CONTEXT_CHARS)
+
+        # 2. it names the spill file, and that file holds the whole context --
+        #    emoji intact, so the round trip through disk is verified rather than
+        #    the round trip through a filename that happens to match.
+        match = re.search(r"claude-sessionstart-\d+-\d+\.md", emitted)
+        self.assertIsNotNone(match, "a capped payload must name its spill file")
+        spilled = hook._spill_dir() / match.group(0)
+        self.assertTrue(spilled.exists(), "the spill file it names must exist")
+        self.assertEqual(spilled.read_text(encoding="utf-8"), context)
 
 
 class TestAppendJsonlRotation(HookTestCase):
