@@ -77,7 +77,7 @@ timeline and doctor models untouched.
 
 ## [Unreleased]
 
-## [1.2.0rc1] — 2026-10-19
+## [1.2.0] — 2026-10-19
 
 > Headline: **a read no longer writes, and the page can finally show you what it
 > was going to send.** Two themes. First, the surfaces stopped claiming things
