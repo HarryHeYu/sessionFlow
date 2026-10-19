@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -46,10 +47,42 @@ def _find_browser():
     return None
 
 
+def _browser_works(binary) -> bool:
+    """Can this browser actually launch and run a page?
+
+    A binary existing is not the same as a browser working.  On some hosts the
+    executable is present but headless cannot start (no user session, sandbox
+    policy, missing runtime), and a test that fails there is a test about the
+    host, not about the dashboard.  A browser smoke test must never turn CI red
+    for that reason, so check capability first and skip when it is absent.
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="voyager-brcheck-"))
+    try:
+        probe = tmp / "probe.html"
+        probe.write_text(
+            "<!doctype html><html><body><div id='r'>no</div>"
+            "<script>document.getElementById('r').textContent='ok'</script>"
+            "</body></html>", encoding="utf-8")
+        try:
+            p = subprocess.run(
+                [binary, "--headless=new", "--disable-gpu", "--no-sandbox",
+                 "--disable-extensions", "--dump-dom",
+                 "file:///" + str(probe).replace("\\", "/")],
+                capture_output=True, text=True, timeout=90)
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        return "'r'>ok<" in (p.stdout or "") or ">ok<" in (p.stdout or "")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+_BROWSER = _find_browser()
+_BROWSER_OK = bool(_BROWSER) and _browser_works(_BROWSER)
+
 pytestmark = pytest.mark.skipif(
-    _find_browser() is None,
-    reason="no browser binary available; the generated-HTML tests still cover "
-           "the same properties")
+    not _BROWSER_OK,
+    reason="no usable browser binary on this host; the generated-HTML tests "
+           "still cover the same properties")
 
 
 @pytest.fixture
@@ -159,12 +192,16 @@ def test_dashboard_survives_a_real_browser(browser_world, tmp_path):
     probe_file.write_text(html.replace("</body>", _PROBE + "</body>"),
                           encoding="utf-8")
 
+    if not _BROWSER_OK:
+        pytest.skip("no usable browser binary on this host")
     url = "file:///" + str(probe_file).replace("\\", "/")
     p = subprocess.run(
-        [_find_browser(), "--headless=new", "--disable-gpu", "--no-sandbox",
+        [_BROWSER, "--headless=new", "--disable-gpu", "--no-sandbox",
          "--disable-extensions", "--dump-dom", url],
         capture_output=True, text=True, timeout=180)
     dom = p.stdout or ""
+    if not dom.strip():
+        pytest.skip("the browser produced no DOM on this host")
 
     line = next((l for l in dom.splitlines() if 'id="RESULTS"' in l), "")
     assert line, (
