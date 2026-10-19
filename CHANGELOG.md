@@ -130,6 +130,12 @@ timeline and doctor models untouched.
   "0 results", which reads as "you have no data".
 - The dashboard's session view was a 60-turn summary with no tool calls, no exit
   codes and no way to open a session.
+- **A bundle did not say when its evidence could no longer be re-checked.** A
+  session whose transcript had rotated away (`SOURCE_MISSING`) looked exactly
+  like one still on disk, so an unreachable claim read as a re-checkable one.
+  Provenance now states the source state inline. Provenance remains
+  session-level: a claim can be traced to the session that produced it, not yet
+  to the specific event.
 
 ### Known limitations
 
