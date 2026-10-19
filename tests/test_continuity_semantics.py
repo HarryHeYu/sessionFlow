@@ -299,3 +299,70 @@ def test_issue14_does_not_dump_the_transcript(issue14):
     # and no rendered line carries a whole raw message
     for line in codex_lines:
         assert len(line) <= 300, f"a line is not truncated: {len(line)} chars"
+
+
+# --- the evidence trust boundary -------------------------------------------
+# "This came from session X" and "session X is still readable" are different
+# statements.  A bundle that only makes the first one cannot tell a reader
+# whether the claim can still be re-checked against its source.
+
+def test_a_missing_source_is_stated_in_provenance(tmp_path):
+    from voyager.continuity import build_continuation_bundle
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    db = tmp_path / "i.db"
+    store = Store(db)
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    sid = "codex:gone"
+    store.replace_session(
+        new_session(id=sid, provider="codex", native_session_id="gone-1",
+                    title="rotated work", started_at=1000, updated_at=1000,
+                    cwd="E:/r", repo_root="E:/r", message_count=2, can_resume=True),
+        [new_event(sid=sid, ts=1000, seq=0, kind="user", content="do work"),
+         new_event(sid=sid, ts=1001, seq=1, kind="assistant",
+                   content="All tests pass.")],
+        "codex", src)
+
+    rows = list(store.con.execute("select * from sessions where id = ?", (sid,)))
+    # a source that rotated away is marked, not deleted (D15)
+    store.con.execute("update sessions set source_state = 'SOURCE_MISSING' "
+                      "where id = ?", (sid,))
+    store.con.commit()
+    rows = list(store.con.execute("select * from sessions where id = ?", (sid,)))
+
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    prov = bundle.split("## Evidence & Provenance")[-1]
+
+    assert "source not available" in prov, (
+        "a reader must be able to tell the evidence cannot be re-checked:/n" + prov
+    )
+    assert "SOURCE_MISSING" in prov
+    assert "not verified" in prov
+    # and the claim itself is still there, still hedged
+    assert "All tests pass." in bundle
+    store.close()
+
+
+def test_an_active_source_gets_no_warning(tmp_path):
+    """The note must be about the source, not sprayed on every bundle."""
+    from voyager.continuity import build_continuation_bundle
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    db = tmp_path / "i.db"
+    store = Store(db)
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    sid = "codex:ok"
+    store.replace_session(
+        new_session(id=sid, provider="codex", native_session_id="ok-1",
+                    title="fine", started_at=1000, updated_at=1000,
+                    cwd="E:/r", repo_root="E:/r", message_count=1, can_resume=True),
+        [new_event(sid=sid, ts=1000, seq=0, kind="user", content="hello")],
+        "codex", src)
+    rows = list(store.con.execute("select * from sessions where id = ?", (sid,)))
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    assert "source not available" not in bundle
+    store.close()

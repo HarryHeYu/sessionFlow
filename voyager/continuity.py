@@ -1098,7 +1098,21 @@ def build_continuation_bundle(
         title = r["title"] or "(no title)"
         counts = f"{r['message_count']} msgs / {r['tool_count']} tools"
         repo = f" repo=`{r['repo_root'] or r['cwd'] or '?'}`"
-        L.append(f"- **{prov}** `{nid}`: {title} ({counts}, {t_span}{repo})")
+        # Whether the evidence can still be re-checked is part of provenance,
+        # not a detail: "this came from session X" and "session X is still
+        # readable" are different statements, and a reader who cannot tell them
+        # apart will treat an unreachable claim as a re-checkable one.
+        state = None
+        try:
+            state = r["source_state"]
+        except (IndexError, KeyError):
+            state = None
+        note = ""
+        if state and state != "ACTIVE_SOURCE":
+            note = (f" — **source not available** (`{state}`): the original "
+                    f"transcript can no longer be re-checked, so these claims "
+                    f"stay as reported, not verified")
+        L.append(f"- **{prov}** `{nid}`: {title} ({counts}, {t_span}{repo}){note}")
     L.append("")
 
     return "\n".join(L)
