@@ -77,6 +77,71 @@ timeline and doctor models untouched.
 
 ## [Unreleased]
 
+## [1.2.0rc1] — 2026-10-19
+
+> Headline: **a read no longer writes, and the page can finally show you what it
+> was going to send.** Two themes. First, the surfaces stopped claiming things
+> that were not true: a bundle now carries the exit status of the command it
+> quotes, a handoff refuses to say "nothing to switch" when there are two
+> threads, and a read against a missing index no longer creates one and answers
+> "no matches". Second, continuity became something you can *look at* before you
+> act on it — a local page that shows the exact context a next agent would
+> receive, which sessions it came from, and why that scope was chosen.
+
+### Added
+
+- **Evidence-aware continuation.** A tool result's exit code is joined to the
+  command that produced it by call id, so a failed command can no longer sit in
+  a bundle looking exactly like a successful one. A claim an assistant made is
+  labelled as a claim rather than as a verified fact.
+- **Multi-session repo scope.** With no WorkThread, the repo fallback compiles
+  from the newest bounded set of sessions instead of a single one, and reports
+  `selection_scope` / `selection_reason` / `scope_ambiguous` /
+  `excluded_session_count` so a recency default is visible as a default.
+- **Dashboard continuation preview.** One read-only `continue_context` per shown
+  WorkThread, rendered with the selected sessions, the context budget, the bundle
+  and the exact `voyager continue --thread <id>` to run. No lease, no pending
+  attach, no bundle written.
+- **Dashboard session explorer.** Every session in scope opens to its whole
+  conversation: tool calls with their exit codes, origin, source state, and the
+  WorkThread it belongs to. Empty sessions are reachable too.
+- **`thread_id` on `voyager_continue` / `voyager_context`.** The MCP surfaces
+  could tell a caller to pick a thread but gave them no way to; `voyager_switch`
+  already had it.
+- **Browser-level verification.** A real-browser smoke test (Edge/Chromium,
+  `--dump-dom`, no framework) covering filtering, session navigation, the
+  ambiguity statement, the preview, and hostile-content escaping. It probes the
+  browser first and skips cleanly where headless cannot start.
+
+### Changed
+
+- A read against a path with no index returns empty results **without creating
+  the database** (`store.open_read`). `scan` still creates.
+- `voyager_switch` names the candidate WorkThreads and asks for `thread_id`
+  instead of reporting "no active WorkThread" for a repo that has several.
+- `voyager_continue` falls back to the same repo-scope selection the CLI and the
+  JSON API use, rather than answering "nothing to continue" where the CLI
+  produced a bundle.
+- The READMEs pin `8d36757` and state plainly that `main` is ahead of v1.1.0.
+
+### Fixed
+
+- Reading a missing index created a stray empty database and answered
+  "0 results", which reads as "you have no data".
+- The dashboard's session view was a 60-turn summary with no tool calls, no exit
+  codes and no way to open a session.
+
+### Known limitations
+
+- **Native resume is not verified end to end.** The adapters know each
+  platform's resume command; no real cross-agent resume has been run.
+- Model-driven tool selection in DSH is **not verified** — that needs a paid
+  model, which these rounds deliberately avoid.
+- The dashboard filter searches only the snapshot on the page, not the whole
+  index. Whole-index search is `voyager search`.
+- `--version` reports the version in the metadata; a working copy that still has
+  a stale `*.egg-info/` from an earlier build will report that instead.
+
 ## [1.1.0] — 2026-10-11
 
 > Headline: **the continuation bundle no longer lets a clock decide what the
