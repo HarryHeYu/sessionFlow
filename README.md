@@ -23,7 +23,8 @@ is one client of it, and the core is a general-purpose local tool.)
 | **Why use it** | Your history is split across eight formats. sessionFlow makes it one thing you can search, summarize, export and continue. |
 | **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
-| **Current release** | [v1.1.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.1.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **Current release** | [v1.1.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.1.0) · Python ≥ 3.10 · Windows / macOS / Linux · `main` is ahead of it — see the note under [Install](#install) |
+| **Community** | Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7226) |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 
 Your AI coding history is fragmented:
@@ -104,10 +105,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@8d36757"
 
 # or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@8d36757"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
@@ -115,9 +116,22 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@f2a6445` pins a known-good commit, which is what makes a reinstall
+The `@8d36757` pins a known-good commit, which is what makes a reinstall
 reproducible and is what the DSH plugin's own error messages recommend. Drop
 the `@<commit>` to follow `main` instead. Check the installed version with:
+
+```sh
+voyager --version
+```
+
+> **Read this before you upgrade.** The last GitHub release is **v1.1.0**
+> (2026-10-11). `main` is ahead of it, and the pin above is a commit from that
+> unreleased work — so `--version` prints `1.1.0` for code that is newer than
+> the v1.1.0 release. The local Dashboard (session explorer, continuation
+> preview, WorkThread panel) exists only in the pinned build, **not** in the
+> v1.1.0 release. If you installed before October 2026 and your
+> `~/.voyager/dashboard.html` has no **Sessions** panel, you are on the old code
+> — reinstall with the command above.
 
 ```sh
 voyager --version
