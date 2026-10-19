@@ -438,7 +438,12 @@ class TestTieredBundle:
         """Formal invariant 1: the tiered work left the flat builder's document
         byte-identical.  Timestamps render through the same fmt_ts call
         (pinned here to a fixed token) and tmp paths are masked; everything
-        else must match byte for byte."""
+        else must match byte for byte.
+
+        The `· seq N` on the command line is the one deliberate addition since
+        that invariant was written: an event's row id is reallocated when a
+        session is re-indexed, so `(session, seq)` is the only stable pointer a
+        reader can use to re-check the evidence."""
         store, thread, members, rows = self._fixture(tmp_path)
         monkeypatch.setattr("voyager.continuity.fmt_ts", lambda ts: "TS")
         out = build_continuation_bundle(store, rows, live_git=False)
@@ -462,11 +467,11 @@ class TestTieredBundle:
             "\n"
             "## Commands executed\n"
             "\n"
-            "- `pytest -q`\n"
+            "- `pytest -q` · seq 2\n"
             "\n"
             "## Errors encountered\n"
             "\n"
-            "- [TS] boom: TypeError\n"
+            "- [TS] boom: TypeError · seq 3\n"
             "\n"
             "## Evidence & Provenance\n"
             "\n"

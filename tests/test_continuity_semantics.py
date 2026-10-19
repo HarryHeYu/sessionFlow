@@ -366,3 +366,102 @@ def test_an_active_source_gets_no_warning(tmp_path):
     bundle = build_continuation_bundle(store, rows, live_git=False)
     assert "source not available" not in bundle
     store.close()
+
+
+# --- event-level evidence pointers -----------------------------------------
+# A bundle cites `seq` rather than the event row id.  The row id is a rowid: it
+# is reallocated when a session is re-indexed, so a pointer built on it silently
+# stops pointing at the event it was meant to identify.  (sid, seq) survives.
+
+def test_the_command_evidence_cites_a_stable_seq(tmp_path):
+    from voyager.continuity import build_continuation_bundle
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    db = tmp_path / "i.db"
+    store = Store(db)
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+    sid = "codex:ev"
+    store.replace_session(
+        new_session(id=sid, provider="codex", native_session_id="ev-1",
+                    title="t", started_at=1000, updated_at=1000,
+                    cwd="E:/r", repo_root="E:/r", message_count=3, can_resume=True),
+        [new_event(sid=sid, ts=1000, seq=0, kind="user", content="run the tests"),
+         new_event(sid=sid, ts=1001, seq=1, kind="tool_call", tool_name="exec",
+                   command="pytest -q", tool_call_id="c1"),
+         new_event(sid=sid, ts=1002, seq=2, kind="tool_result", role="tool",
+                   tool_call_id="c1", exit_code=1, tool_output="3 failed")],
+        "codex", src)
+
+    rows = list(store.con.execute("select * from sessions where id = ?", (sid,)))
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+
+    # the failing command is cited with its exit status and its event pointer
+    assert "`pytest -q`  # exit 1 · seq 2" in bundle, bundle
+    assert "seq 2" in bundle.split("## Commands executed")[1]
+    store.close()
+
+
+def test_the_pointer_survives_a_reindex(tmp_path):
+    """The whole reason for citing seq: the row id does not survive one."""
+    import sqlite3
+
+    from voyager.continuity import build_continuation_bundle
+    from voyager.model import new_event, new_session
+    from voyager.store import Store
+
+    db = tmp_path / "i.db"
+    src = tmp_path / "s.jsonl"
+    src.write_text("{}", encoding="utf-8")
+
+    def scan(n):
+        store = Store(db)
+        evs = [new_event(sid="codex:ev", ts=1000 + i, seq=i, kind="user",
+                         content="turn %d" % i) for i in range(n)]
+        evs[1] = new_event(sid="codex:ev", ts=1001, seq=1, kind="tool_call",
+                           tool_name="exec", command="pytest -q", tool_call_id="c1")
+        if n >= 3:
+            evs[2] = new_event(sid="codex:ev", ts=1002, seq=2, kind="tool_result",
+                               role="tool", tool_call_id="c1", exit_code=1,
+                               tool_output="3 failed")
+        store.replace_session(
+            new_session(id="codex:ev", provider="codex", native_session_id="ev-1",
+                        title="t", started_at=1000, updated_at=1000, cwd="E:/r",
+                        repo_root="E:/r", message_count=n, can_resume=True),
+            evs, "codex", src)
+        store.close()
+
+    scan(3)
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    first = dict(con.execute("select seq, id from events where sid='codex:ev'"))
+    con.close()
+
+    # another session is scanned in between, which is what reallocates rowids
+    store = Store(db)
+    store.replace_session(
+        new_session(id="codex:other", provider="codex", native_session_id="o-1",
+                    title="o", started_at=2000, updated_at=2000, cwd="E:/r",
+                    repo_root="E:/r", message_count=1, can_resume=True),
+        [new_event(sid="codex:other", ts=2000, seq=0, kind="user", content="x")],
+        "codex", src)
+    store.close()
+    scan(5)   # and the first session grows
+
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    after = dict(con.execute("select seq, id from events where sid='codex:ev'"))
+    con.close()
+
+    assert first != after, (
+        "this fixture is only meaningful if the row ids actually moved; "
+        "if they stopped moving, the premise of citing seq has changed"
+    )
+
+    store = Store(db)
+    rows = list(store.con.execute("select * from sessions where id = 'codex:ev'"))
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    store.close()
+
+    # seq 2 still identifies the failing result, even though its row id changed
+    assert "· seq 2" in bundle, bundle
+    assert "3 failed" in bundle

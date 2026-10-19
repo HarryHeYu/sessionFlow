@@ -1008,36 +1008,42 @@ def build_continuation_bundle(
     # "Errors encountered" never fired -- a failed command was in the index and
     # invisible in the bundle, which is exactly where a claim like "all tests
     # pass" needs contradicting.
-    outcome: Dict[str, Tuple[Any, str]] = {}
+    outcome: Dict[str, Tuple[Any, str, Any]] = {}
     for r in sorted_rows:
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "tool_result" and ev["tool_call_id"]:
+                # The result's `seq` travels with its exit code: a row id is not
+                # a stable identity (it is a rowid, reallocated when a session is
+                # re-indexed), but (session, seq) is.  A reader who wants to
+                # re-check the evidence needs something that still points at the
+                # same event after the next scan.
                 outcome[str(ev["tool_call_id"])] = (
-                    ev["exit_code"], ev["tool_output"] or "")
+                    ev["exit_code"], ev["tool_output"] or "", ev["seq"])
 
-    def _outcome_of(ev: Any) -> Tuple[Any, str]:
-        """(exit_code, output) for a tool_call, from its own row or its result."""
+    def _outcome_of(ev: Any) -> Tuple[Any, str, Any]:
+        """(exit_code, output, result_seq) for a tool_call, from its result."""
         rc = ev["exit_code"]
         if rc is None and ev["tool_call_id"]:
-            return outcome.get(str(ev["tool_call_id"]), (None, ""))
-        return rc, ""
+            return outcome.get(str(ev["tool_call_id"]), (None, "", None))
+        return rc, "", ev["seq"]
 
-    all_cmds: List[Tuple[Any, str, Any]] = []
+    all_cmds: List[Tuple[Any, str, Any, Any]] = []
     for r in sorted_rows:
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "tool_call" and ev["command"]:
-                all_cmds.append((ev["ts"], ev["command"], _outcome_of(ev)[0]))
+                rc, _out, seq = _outcome_of(ev)
+                all_cmds.append((ev["ts"], ev["command"], rc, seq))
 
     if all_cmds:
         L.append("## Commands executed")
         L.append("")
         seen_cmds = set()
         dedup_cmds = []
-        for ts, cmd, rc in reversed(all_cmds):
+        for ts, cmd, rc, seq in reversed(all_cmds):
             norm = " ".join(str(cmd).split())
             if norm not in seen_cmds:
                 seen_cmds.add(norm)
-                dedup_cmds.append((ts, norm, rc))
+                dedup_cmds.append((ts, norm, rc, seq))
         dedup_cmds.reverse()
 
         # Phase 3: with a goal, shrink to the commands the ranked facts ran
@@ -1050,9 +1056,11 @@ def build_continuation_bundle(
                 if narrowed:
                     dedup_cmds = narrowed
 
-        for ts, cmd_str, rc in dedup_cmds[-_MAX_COMMANDS:]:
+        for ts, cmd_str, rc, seq in dedup_cmds[-_MAX_COMMANDS:]:
             rc_s = f"  # exit {rc}" if rc is not None else ""
-            L.append(f"- `{cmd_str[:_CMD_MAX]}`{rc_s}")
+            # `seq` is the pointer, `id` would be a lie after a re-scan.
+            seq_s = f" · seq {seq}" if seq is not None else ""
+            L.append(f"- `{cmd_str[:_CMD_MAX]}`{rc_s}{seq_s}")
         L.append("")
 
     # ---- 7. Errors encountered ------------------------------------------
@@ -1060,9 +1068,10 @@ def build_continuation_bundle(
     for r in sorted_rows:
         for ev in sess_events[r["id"]]:
             if ev["kind"] == "error" and ev["content"]:
-                all_errs.append(f"[{fmt_ts(ev['ts'])}] {ev['content'][:250]}")
+                seq_s = f" · seq {ev['seq']}" if ev["seq"] is not None else ""
+                all_errs.append(f"[{fmt_ts(ev['ts'])}] {ev['content'][:250]}{seq_s}")
             elif ev["kind"] == "tool_call" and ev["command"]:
-                rc, out = _outcome_of(ev)
+                rc, out, seq = _outcome_of(ev)
                 if rc in (0, None):
                     continue
                 cmd_short = " ".join(str(ev["command"]).split())[:200]
@@ -1074,8 +1083,9 @@ def build_continuation_bundle(
                     lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
                     if lines:
                         tail = " -- " + lines[-1][:120]
+                seq_s = f" · seq {seq}" if seq is not None else ""
                 all_errs.append(
-                    f"[{fmt_ts(ev['ts'])}] exit {rc}: `{cmd_short}`{tail}")
+                    f"[{fmt_ts(ev['ts'])}] exit {rc}: `{cmd_short}`{tail}{seq_s}")
 
     if all_errs:
         L.append("## Errors encountered")
