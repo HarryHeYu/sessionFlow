@@ -21,9 +21,9 @@ is one client of it, and the core is a general-purpose local tool.)
 |---|---|
 | **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
 | **Why use it** | Your history is split across eight formats. sessionFlow makes it one thing you can search, summarize, export and continue. |
-| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"` — [details](#install) |
+| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.2.0"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
-| **Current release** | [v1.1.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.1.0) · Python ≥ 3.10 · Windows / macOS / Linux · `main` is ahead of it — see the note under [Install](#install) |
+| **Current release** | [v1.2.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.2.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Community** | Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7226) |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 
@@ -105,10 +105,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@8d36757"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.2.0"
 
 # or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@8d36757"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.2.0"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
@@ -116,22 +116,18 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@8d36757` pins a known-good commit, which is what makes a reinstall
-reproducible and is what the DSH plugin's own error messages recommend. Drop
-the `@<commit>` to follow `main` instead. Check the installed version with:
+The `@v1.2.0` pins a release tag, which is what makes a reinstall reproducible
+and is what the DSH plugin's own error messages recommend. Drop the `@v1.2.0`
+to follow `main` instead. Check the installed version with:
 
 ```sh
-voyager --version
+voyager --version        # must print 1.2.0
 ```
 
-> **Read this before you upgrade.** The last GitHub release is **v1.1.0**
-> (2026-10-11). `main` is ahead of it, and the pin above is a commit from that
-> unreleased work — so `--version` prints `1.1.0` for code that is newer than
-> the v1.1.0 release. The local Dashboard (session explorer, continuation
-> preview, WorkThread panel) exists only in the pinned build, **not** in the
-> v1.1.0 release. If you installed before October 2026 and your
-> `~/.voyager/dashboard.html` has no **Sessions** panel, you are on the old code
-> — reinstall with the command above.
+> **Upgrading from v1.1.0 needs no migration.** Your index is read as-is: no
+> rows change, and the only difference is one index the new version adds for its
+> own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
+> the same database and ignores the extra index.
 
 ```sh
 voyager --version
