@@ -101,9 +101,13 @@ def test_a_deeply_missing_chain_inside_a_root_is_refused(fake_protected):
 
 def test_dot_dot_that_stays_inside_the_root_is_refused(fake_protected):
     profile, _ = fake_protected
-    inside = str(profile / ".codex") + "\\sessions\\..\\x.jsonl"
+    # built with the platform's own separator: a hardcoded "\\" is a separator
+    # on Windows and an ordinary filename character on POSIX, so a test that
+    # hardcodes one passes here and fails on the Linux runner for a reason
+    # that has nothing to do with the guard.
+    inside = os.path.join(str(profile / ".codex"), "sessions", "..", "x.jsonl")
     assert iso_guard.is_inside_real_data(inside), (
-        "`\\sessions\\..\\x.jsonl` normalizes back inside `.codex`")
+        "`sessions/../x.jsonl` normalizes back inside `.codex`")
 
 
 def test_dot_dot_escaping_the_root_is_not_refused(fake_protected):
@@ -113,7 +117,8 @@ def test_dot_dot_escaping_the_root_is_not_refused(fake_protected):
     simply refuses anything containing ``..``.
     """
     profile, _ = fake_protected
-    outside = str(profile / ".codex") + "\\sessions\\..\\..\\elsewhere\\x.jsonl"
+    outside = os.path.join(str(profile / ".codex"), "sessions", "..", "..",
+                           "elsewhere", "x.jsonl")
     assert not iso_guard.is_inside_real_data(outside), (
         "this path leaves every data root; refusing it would be a false "
         "positive, and a guard that cries wolf gets switched off")
@@ -126,6 +131,40 @@ def test_a_relative_path_is_resolved_before_judged(fake_protected, tmp_path,
     # relative, escaping and re-entering -- must land inside the root
     rel = os.path.join(".codex", "sessions")
     assert iso_guard.is_inside_real_data(rel)
+
+
+@pytest.mark.skipif(os.name != "nt",
+                    reason="only true where the filesystem is "
+                           "case-insensitive; the POSIX half is its own test")
+def test_case_differences_do_not_smuggle_a_root_past_on_windows(
+        fake_protected):
+    """``C:\\\\USERS\\\\ME\\\\.CODEX`` is the same directory as its lowercase.
+
+    Two halves, because the two platforms genuinely differ -- and a test that
+    asserts the Windows rule everywhere fails on Linux for a reason that has
+    nothing to do with the guard, which is exactly how this round's first CI
+    failure happened (there it was a hardcoded backslash separator).
+    """
+    profile, _ = fake_protected
+    shouted = str(profile / ".codex" / "sessions").upper()
+    assert iso_guard.is_inside_real_data(shouted), (
+        "a Windows path is case-insensitive; the guard must be too")
+
+
+def test_on_posix_a_different_casing_is_a_different_directory(
+        fake_protected):
+    """The honest counterpart, and a false-positive guard.
+
+    On a case-sensitive filesystem ``.CODEX`` is not ``.codex``.  A guard that
+    "helpfully" case-folded on POSIX would refuse paths unrelated to the real
+    profile -- and a guard that cries wolf gets switched off.
+    """
+    if os.name == "nt":
+        pytest.skip("Windows is case-insensitive; covered by its own test")
+    profile, _ = fake_protected
+    shouted = str(profile / ".codex" / "sessions").upper()
+    assert not iso_guard.is_inside_real_data(shouted), (
+        "on a case-sensitive filesystem, casing creates a different directory")
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"),
