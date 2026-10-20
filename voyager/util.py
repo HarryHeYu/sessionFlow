@@ -121,7 +121,8 @@ def parse_ts(iso: Optional[str]) -> Optional[float]:
         return None
 
 
-def event_digest(kind, content, command, tool_output, tool_call_id) -> str:
+def event_digest(kind, content, command, tool_output, tool_call_id,
+                 exit_code=None) -> str:
     """A short, stable fingerprint of what an event *is*.
 
     An event's row id is not an identity: `replace_session` deletes and
@@ -135,9 +136,37 @@ def event_digest(kind, content, command, tool_output, tool_call_id) -> str:
     true -- only whether the event a reference points at is still the event it
     was recorded from.  Content identity is not fact verification, and this
     function must never be used as if it were.
+
+    Fields, and why each is here:
+
+    ``kind``       -- user / assistant / tool_call / tool_result / error.  A
+                      reference to the wrong *kind* of event is a broken lead.
+    ``content``    -- the message body, for the kinds that have one.
+    ``command``    -- what a tool call ran.
+    ``tool_output``-- what it printed.
+    ``tool_call_id`` -- binds a result to its call, so the pair is cited
+                      together rather than as two loose rows.
+    ``exit_code``  -- **why the tool failed or passed.**  Without it a result
+                      that flipped from `1` to `0` with unchanged output would
+                      keep the same digest, so the one change most likely to
+                      turn a failure into a claimed success would be invisible.
+
+    Deliberately *not* fields: provider, session id and timestamp.  The digest
+    describes an event's content, and the reference's other parts already say
+    where it lives; folding the location in would make the same event hash
+    differently per index, which is the opposite of what a reader comparing two
+    spellings of one event needs.
+
+    Not a security primitive.  It is 8 hex characters (32 bits) of SHA-256,
+    truncated for display.  It is compared *pairwise* -- the event a reference
+    names against the event sitting at that spot now -- so the bound that
+    matters is 2^-32 per comparison, not the birthday bound across an index.
+    Anyone who can rewrite the transcript can recompute it: this detects
+    accidental drift, never a determined forger.
     """
     import hashlib
 
     body = "|".join("" if v is None else str(v) for v in
-                    (kind, content, command, tool_output, tool_call_id))
+                    (kind, content, command, tool_output, tool_call_id,
+                     exit_code))
     return hashlib.sha256(body.encode("utf-8", "replace")).hexdigest()[:8]

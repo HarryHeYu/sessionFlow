@@ -440,10 +440,17 @@ class TestTieredBundle:
         (pinned here to a fixed token) and tmp paths are masked; everything
         else must match byte for byte.
 
-        The `· seq N` on the command line is the one deliberate addition since
-        that invariant was written: an event's row id is reallocated when a
-        session is re-indexed, so `(session, seq)` is the only stable pointer a
-        reader can use to re-check the evidence."""
+        The `· seq N · #digest` on the evidence lines are the one deliberate
+        addition since that invariant was written: an event's row id is
+        reallocated when a session is re-indexed, so `(session, seq)` is the
+        only stable pointer a reader can use to re-check the evidence -- and the
+        digest is what says whether it still points at the same content.
+
+        The hex value changed again when `exit_code` joined the digest's input
+        fields: a tool result that flipped from 1 to 0 with the same output used
+        to hash identically, which would hide exactly the change a reader is
+        looking for.  No released bundle carries a digest -- v1.2.0 predates the
+        feature -- so there was no consumer to break."""
         store, thread, members, rows = self._fixture(tmp_path)
         monkeypatch.setattr("voyager.continuity.fmt_ts", lambda ts: "TS")
         out = build_continuation_bundle(store, rows, live_git=False)
@@ -467,11 +474,11 @@ class TestTieredBundle:
             "\n"
             "## Commands executed\n"
             "\n"
-            "- `pytest -q` · seq 2 · #360405db\n"
+            "- `pytest -q` · seq 2 · #1e4098b5\n"
             "\n"
             "## Errors encountered\n"
             "\n"
-            "- [TS] boom: TypeError · seq 3 · #95399eef\n"
+            "- [TS] boom: TypeError · seq 3 · #106ae3a5\n"
             "\n"
             "## Evidence & Provenance\n"
             "\n"

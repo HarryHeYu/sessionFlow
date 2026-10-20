@@ -20,6 +20,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 #: Captured at import time, which happens during collection — before the
 #: autouse fixture has run.  This is the developer's actual home.
 REAL_HOME = Path(os.path.expanduser("~"))
@@ -189,3 +191,38 @@ def test_no_adapter_discovers_anything_under_the_isolation_fixture(
             found[ad.provider] = len(sources)
     assert not found, (
         "these adapters still discover real sources under isolation: %s" % found)
+
+
+# --- the guard's snapshot must come from the real profile --------------------
+# `iso_guard.real_data_roots()` is a module-level snapshot.  If anything ever
+# imports the module lazily -- inside a fixture, or a test -- the snapshot is
+# taken *after* redirection and describes the temp directory instead.  The
+# result is not a quiet pass: every redirection then looks like agent data and
+# the whole suite is refused with a message about the environment, which is a
+# symptom three steps away from the cause.  This assertion names the cause.
+
+def test_iso_guard_snapshotted_the_real_profile_not_the_redirected_one():
+    import iso_guard
+
+    roots = [Path(r) for r in iso_guard.real_data_roots()]
+    assert roots, "no data roots were captured at all"
+
+    outside = [str(r) for r in roots
+               if not _under(r, REAL_HOME)
+               and not _under(r, Path(os.environ.get("APPDATA", str(REAL_HOME))))]
+
+    assert outside == [], (
+        "these data roots are not under the real profile, so iso_guard was "
+        "imported after the harness redirected HOME/APPDATA:/n  "
+        + "\n  ".join(outside)
+        + "\nImport it at conftest module level (collection time), never "
+          "lazily inside a fixture or a test.")
+
+
+def test_the_guard_refuses_a_path_inside_a_real_root():
+    """The behavioural half: the snapshot is wired to the predicate."""
+    import iso_guard
+
+    root = Path(iso_guard.real_data_roots()[0])
+    with pytest.raises(iso_guard.IsolationViolation):
+        iso_guard.guard_not_real_data(root, "scan root")

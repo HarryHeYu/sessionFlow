@@ -26,6 +26,13 @@ import pytest
 from voyager.model import new_event, new_session
 from voyager.store import Store
 
+# Imported at collection time, *before* any fixture redirects HOME or APPDATA.
+# `iso_guard.real_data_roots()` snapshots the real profile on import; if this
+# import happened lazily inside a fixture it would capture the redirected temp
+# directory and the guard would then refuse the redirection it is supposed to
+# protect.  (That failure mode was observed and is why the import lives here.)
+import iso_guard  # noqa: E402  (must precede the fixtures below)
+
 
 def apply_scratch_root_policy(config, env=None):
     """Opt-in local-run scratch policy — never a product default.
@@ -133,8 +140,30 @@ def _isolated_from_the_real_machine(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("HOME", str(root))
     monkeypatch.setenv("USERPROFILE", str(root))
     monkeypatch.setenv("APPDATA", str(missing))
+    # LOCALAPPDATA and the XDG trio are not read by any adapter *today* -- the
+    # path audit in the P28 report covers all eight -- but an adapter that
+    # starts reading one must not be able to reintroduce the Kiro incident
+    # unnoticed.  Redirecting them costs nothing and keeps the hole shut.
+    for extra in ("LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                  "XDG_STATE_HOME"):
+        monkeypatch.setenv(extra, str(missing))
     _redirect_adapters(monkeypatch, missing)
     return missing
+
+
+@pytest.fixture(autouse=True)
+def _fail_closed_isolation(_isolated_from_the_real_machine):
+    """Refuse the test when redirection did not take.
+
+    The fixture above is the safety net for *forgetting* to redirect.  This one
+    makes the net load-bearing: if a future change to the environment, to
+    ``iso_guard.real_data_roots()`` or to the adapters' discovery leaves any
+    variable pointing at the developer's own agent data, every test fails here
+    with the offending variable named -- before a single session is read.
+
+    It depends on the isolation fixture explicitly so it cannot run first.
+    """
+    iso_guard.guard_env()
 
 
 def _copy_tree(name: str, dest: Path) -> Path:

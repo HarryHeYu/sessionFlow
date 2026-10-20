@@ -539,7 +539,8 @@ def test_a_reference_resolves_through_show(tmp_path):
 
     ev = next(e for e in store.events(sid) if e["seq"] == seq)
     actual = event_digest(ev["kind"], ev["content"], ev["command"],
-                          ev["tool_output"], ev["tool_call_id"])
+                          ev["tool_output"], ev["tool_call_id"],
+                          ev["exit_code"])
     assert actual == digest.strip(), (
         "the reference in the bundle must be reproducible from the event"
     )
@@ -567,7 +568,8 @@ def test_a_stale_reference_is_detectable(tmp_path):
     store.con.commit()
     ev = next(e for e in store.events(sid) if e["seq"] == 3)
     now = event_digest(ev["kind"], ev["content"], ev["command"],
-                       ev["tool_output"], ev["tool_call_id"])
+                       ev["tool_output"], ev["tool_call_id"],
+                       ev["exit_code"])
     store.close()
 
     assert now != recorded, (

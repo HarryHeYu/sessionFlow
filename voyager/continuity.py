@@ -792,7 +792,8 @@ def _event_ref(ev: Any) -> str:
     if ev["seq"] is None:
         return ""
     dg = event_digest(ev["kind"], ev["content"], ev["command"],
-                      ev["tool_output"], ev["tool_call_id"])
+                      ev["tool_output"], ev["tool_call_id"],
+                      ev["exit_code"])
     return " · seq %s · #%s" % (ev["seq"], dg)
 
 

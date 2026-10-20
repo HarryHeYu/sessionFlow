@@ -137,6 +137,26 @@ def cmd_scan(args) -> int:
     return 0
 
 
+def cmd_evidence(args) -> int:
+    """Verify that an Evidence Reference still points at the same event."""
+    if args.action != "verify":
+        print("unknown evidence action: %s" % args.action, file=sys.stderr)
+        return 2
+    import json as _json
+
+    from .evidence import EXIT_CODES, render, verify
+    store = open_read(args.db)
+    result = verify(store, args.session_id, args.seq, args.digest)
+    store.close()
+    if args.json:
+        print(_json.dumps({k: v for k, v in result.items()
+                           if k != "session"}, ensure_ascii=False, indent=2,
+                          default=str))
+    else:
+        print(render(result))
+    return EXIT_CODES[result["status"]]
+
+
 def cmd_provenance(args) -> int:
     """Inspect provenance coverage, or deterministically fill NULL origins."""
     import json as _json
@@ -358,7 +378,8 @@ def cmd_show(args) -> int:
         ref = ""
         if ev["seq"] is not None:
             dg = _digest(ev["kind"], ev["content"], ev["command"],
-                         ev["tool_output"], ev["tool_call_id"])
+                         ev["tool_output"], ev["tool_call_id"],
+                         ev["exit_code"])
             ref = "#%s/%s " % (ev["seq"], dg)
         label = {"user": "USER", "assistant": "ASST", "reasoning": "think",
                  "tool_call": "TOOL>", "tool_result": "  out", "error": "ERR!",
@@ -1981,6 +2002,20 @@ def main(argv=None) -> int:
 
     # provenance: structural origin of each event (who really produced it).
     # Read-only by default; `enrich` only ever fills NULLs and only on --apply.
+    sp = sub.add_parser("evidence",
+                        help="verify a bundle's Evidence Reference")
+    sp.add_argument("action", nargs="?", default="verify",
+                    choices=["verify"],
+                    help="what to do with the reference")
+    sp.add_argument("session_id",
+                    help="session the reference was taken from")
+    sp.add_argument("seq",
+                    help="event sequence number cited by the reference")
+    sp.add_argument("digest", nargs="?", default=None,
+                    help="the 8 hex characters the reference cited")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_evidence)
+
     sp = sub.add_parser("provenance",
                         help="inspect or fill per-event provenance (origin)")
     sp.add_argument("action", nargs="?", default="coverage",
