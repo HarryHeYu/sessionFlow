@@ -75,7 +75,7 @@ timeline and doctor models untouched.
 - README Quick Start no longer suggests a non-existent `--preview` flag
 - stale dev test counts
 
-## [Unreleased]
+## [1.3.0] — 2026-10-20
 
 > Headline: **a continuation reference you can actually check.** A bundle stated
 > which session a claim came from and stopped there; now it names the event, and
