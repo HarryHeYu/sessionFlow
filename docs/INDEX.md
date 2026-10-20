@@ -77,6 +77,7 @@ one is a compatibility decision, not an edit.
 | [releases/](releases/) | RELEASE_HISTORY | maintainer | frozen — one file per release, plus per-round reports |
 | [distribution.md](distribution.md) | DEVELOPER_GUIDE | maintainer | maintained |
 | [pypi-checklist.md](pypi-checklist.md) | DEVELOPER_GUIDE | maintainer | maintained |
+| [MAINTENANCE.md](MAINTENANCE.md) | DEVELOPER_GUIDE | maintainer | maintained — known issues, compatibility matrix, release checklist, roadmap |
 
 `releases/` holds `v1.0.0-rc1.md`, `v1.0.0-rc2.md`, `v1.0.0.md`,
 `v1.1.0-readiness.md`, `v1.1.0-hardening-audit.md`,
