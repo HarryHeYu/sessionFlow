@@ -20,12 +20,13 @@ is one client of it, and the core is a general-purpose local tool.)
 |  |  |
 |---|---|
 | **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
-| **Why use it** | Your history is split across eight formats. sessionFlow makes it one thing you can search, summarize, export and continue. |
-| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.2.0"` — [details](#install) |
+| **Why use it** | Your history is split across eight formats. sessionFlow makes it one thing you can search, summarize, export and continue — and every claim in a continuation bundle names the event it came from, so you can check it. |
+| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
-| **Current release** | [v1.2.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.2.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **Current release** | [v1.3.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.3.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Community** | Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7226) |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
+| **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 
 Your AI coding history is fragmented:
 
@@ -105,10 +106,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.2.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
 
 # or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.2.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
@@ -116,15 +117,46 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@v1.2.0` pins a release tag, which is what makes a reinstall reproducible
-and is what the DSH plugin's own error messages recommend. Drop the `@v1.2.0`
+
+### Checking what a handoff claims
+
+A continuation bundle does not just summarise what an agent said — every tool
+observation and every assistant claim carries a reference to the event it came
+from:
+
+```
+- `pytest -q`  # exit 1 · seq 2 · #cbd4d070
+All 42 tests pass. · seq 3 · #c5009a39
+```
+
+`voyager show` prints the same pointer on every line, so you can go from a claim
+to the message behind it. And you can check whether that pointer still lands on
+the same content:
+
+```sh
+voyager evidence verify codex:01ab… 3 c5009a39
+```
+
+It answers with one of five states and a matching exit code — `MATCH` (0),
+`MISMATCH` (1), `NOT_FOUND` (2), `UNVERIFIABLE` (3), `INVALID_REFERENCE` (4) —
+so a script can branch on it. `--json` gives the same thing machine-readable.
+
+**What `MATCH` means, and what it does not.** It means the indexed event is the
+one the reference was made from. It does **not** mean the claim is true — nothing
+here decides that — and it is not a signature: the fingerprint is eight hex
+characters, and anyone who rewrites a transcript can recompute it. The source
+check compares `mtime` and `size`, which is not byte equality. Both limits are
+stated in the command's own output, on every path.
+
+The `@v1.3.0` pins a release tag, which is what makes a reinstall reproducible
+and is what the DSH plugin's own error messages recommend. Drop the `@v1.3.0`
 to follow `main` instead. Check the installed version with:
 
 ```sh
-voyager --version        # must print 1.2.0
+voyager --version        # must print 1.3.0
 ```
 
-> **Upgrading from v1.1.0 needs no migration.** Your index is read as-is: no
+> **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
 > rows change, and the only difference is one index the new version adds for its
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
