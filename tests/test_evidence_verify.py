@@ -13,6 +13,7 @@ objects and the bundle directory before and after.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -115,15 +116,28 @@ def _snapshot(db):
 
 
 def _cli(db, *argv):
-    """Run the real CLI.  `--db` is global, so it precedes the subcommand."""
+    """Run the real CLI in a subprocess, isolated but with a usable environment.
+
+    The env is *inherited and overridden*, never hand-built from scratch: on
+    Windows a child `python.exe` needs SYSTEMROOT (and friends) or it dies with
+    `_Py_HashRandomization_Init: failed to get random numbers`, which is what a
+    minimal dict buys you.  Inheriting is also the honest isolation model --
+    override the agent-data roots, leave the machine's plumbing alone.
+    """
+    env = dict(os.environ)
+    env.update({
+        "HOME": str(db.parent),
+        "USERPROFILE": str(db.parent),
+        "APPDATA": str(db.parent / "appdata"),
+        "LOCALAPPDATA": str(db.parent / "appdata"),
+        "PYTHONPATH": str(REPO_ROOT),
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "VOYAGER_NO_SYNC": "1",
+    })
     cmd = [PY, "-m", "voyager.cli", "--db", str(db)] + list(argv)
     return subprocess.run(cmd, capture_output=True, text=True,
-                          cwd=str(db.parent), timeout=300,
-                          env={"HOME": str(db.parent), "USERPROFILE":
-                               str(db.parent), "PYTHONPATH": str(REPO_ROOT),
-                               "PYTHONDONTWRITEBYTECODE": "1",
-                               "VOYAGER_NO_SYNC": "1",
-                               "PATH": __import__("os").environ.get("PATH", "")})
+                          cwd=str(db.parent), timeout=300, env=env)
 
 
 # ---------------------------------------------------------------------------
