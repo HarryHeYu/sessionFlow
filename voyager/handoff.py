@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .store import Store
-from .util import fmt_ts
+from .util import event_ref, fmt_ts
 
 # targets that accept an initial prompt and can read a file themselves
 PROMPT_TARGETS = {
@@ -108,7 +108,13 @@ def build_context_package(store: Store, srow, goal=None) -> str:
     if asst:
         L.append("## Where the work stopped (last assistant message)")
         L.append("")
-        L.append(asst[-1]["content"][:_ASST_MAX])
+        # The reference rides along with the message.  A handoff package is the
+        # artifact the next agent is actually handed, so a claim that cannot be
+        # traced here is untraceable in practice -- the bundle in
+        # `continue_context`'s reply already carries it, and dropping it at the
+        # last step would make the whole reference chain decorative for the most
+        # common path a user takes.
+        L.append(asst[-1]["content"][:_ASST_MAX] + event_ref(asst[-1]))
         L.append("")
 
     # ---- files ----------------------------------------------------------

@@ -519,3 +519,62 @@ def test_a_deleted_source_is_named_as_such(tmp_path):
     assert r["status"] == MATCH, "the index keeps the history (D15)"
     assert _source_stat(r)["exists"] is False
     assert "no longer on disk" in render(r)
+
+
+# ---------------------------------------------------------------------------
+# fingerprint contract
+# ---------------------------------------------------------------------------
+# The serialization is JSON, and that is a measured decision: with a plain
+# delimiter join, `content="a|b", command="c"` and `content="a", command="b|c"`
+# serialise to the same string and therefore produce the *same* fingerprint --
+# which would read a changed event as unchanged.
+
+def test_a_pipe_in_one_field_cannot_be_mistaken_for_a_boundary():
+    from voyager.util import event_digest
+
+    a = event_digest("user", "a|b", "c", None, None)
+    b = event_digest("user", "a", "b|c", None, None)
+    assert a != b, (
+        "a pipe inside `content` was indistinguishable from a field boundary "
+        "under the old delimiter join; a changed event would read as unchanged")
+
+
+def test_the_digest_is_stable_and_content_sensitive():
+    from voyager.util import event_digest
+
+    assert event_digest("user", "x", None, None, None) == \
+           event_digest("user", "x", None, None, None)
+    assert event_digest("user", "a", None, None, None) != \
+           event_digest("user", "b", None, None, None)
+    assert event_digest("tool_result", None, None, "out", "t", 1) != \
+           event_digest("tool_result", None, None, "out", "t", 0)
+
+
+def test_none_and_empty_are_distinct_and_zero_is_too():
+    """Documented, not accidental.
+
+    Under JSON serialisation `None` is ``null`` and `""` is an empty string, so
+    they hash differently -- a stricter rule than the old delimiter join, which
+    collapsed both to nothing.  `0` must also stay distinct from `None`: a tool
+    result that succeeded and a field that is absent are different facts, and
+    conflating them would hide a status change behind an absent column.
+    """
+    from voyager.util import event_digest
+
+    assert event_digest("user", None, None, None, None) != \
+           event_digest("user", "", None, None, None), (
+        "an absent body and an empty one are serialised differently; that is "
+        "the stricter and safer of the two rules")
+    assert event_digest("tool_result", None, None, "out", None, 0) != \
+           event_digest("tool_result", None, None, "out", None, None), (
+        "exit code 0 (succeeded) is not the same as no exit code")
+
+
+def test_the_algorithm_is_versioned():
+    """So a future change to the field set cannot silently invalidate refs."""
+    from voyager.util import FINGERPRINT_ALGORITHM
+
+    assert FINGERPRINT_ALGORITHM, "the algorithm must be named"
+    assert FINGERPRINT_ALGORITHM in ("sha256-8hex-json-v1",), (
+        "if this changed, every recorded reference must be re-issued; bump the "
+        "name so old references can be recognised rather than mismatching")

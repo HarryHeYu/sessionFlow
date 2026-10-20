@@ -26,7 +26,7 @@ from .model import text_of
 from .provenance import order_rows_for_l1, session_band
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import Store
-from .util import event_digest, fmt_ts
+from .util import event_digest, event_ref, fmt_ts
 from .winsubprocess import background_subprocess_kwargs
 
 PROMPT_TARGETS = {
@@ -789,12 +789,7 @@ def _event_ref(ev: Any) -> str:
     matching digest means "this is the event the reference was made from", never
     "this event is correct".
     """
-    if ev["seq"] is None:
-        return ""
-    dg = event_digest(ev["kind"], ev["content"], ev["command"],
-                      ev["tool_output"], ev["tool_call_id"],
-                      ev["exit_code"])
-    return " · seq %s · #%s" % (ev["seq"], dg)
+    return event_ref(ev)
 
 
 def build_continuation_bundle(

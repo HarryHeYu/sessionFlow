@@ -77,6 +77,72 @@ timeline and doctor models untouched.
 
 ## [Unreleased]
 
+> Headline: **a continuation reference you can actually check.** A bundle stated
+> which session a claim came from and stopped there; now it names the event, and
+> `voyager evidence verify` answers whether that event is still the one it was
+> recorded from.
+
+### Added
+
+- `voyager evidence verify <session> <seq> [digest]` — checks an Evidence
+  Reference against the index and answers with one of five separated outcomes:
+  `MATCH` (0), `MISMATCH` (1), `NOT_FOUND` (2), `UNVERIFIABLE` (3),
+  `INVALID_REFERENCE` (4). `--json` emits a stable object. Read-only: no lease,
+  no scan, no bundle, no migration.
+- Source-metadata check. The scanner has recorded `mtime` and `size` per source
+  since forever and nothing read them back; `evidence verify` now stats the file
+  once and reports the comparison, so "the index still matches" is no longer
+  offered as "the original is intact". Both signals are reported individually and
+  hedged — mtime+size equality is not byte equality, in either direction.
+- `voyager show` prints `#seq/digest` on every event line, so a reference cited by
+  a bundle resolves through the CLI without the reader comparing two windows by
+  eye.
+- Handoff context packages carry the reference on the claim they hand over. It was
+  being dropped at the last step — the artifact the next agent actually receives —
+  which would have made the whole reference chain decorative on the most common
+  path a user takes.
+- `tests/iso_guard.py` and `tests/test_isolation_guard.py`: a fail-closed guard.
+  Any path a test hands to a scan, reader or writer is refused if it resolves into
+  real agent data — including a missing leaf, a `..`, mixed separators, a Windows
+  casing difference, and a symlink planted in a temp directory. Discovery
+  variables are judged on the data directories they *derive*, because
+  `HOME=<profile>` is only dangerous through `$HOME/.codex`.
+- `tests/test_import_time_isolation.py`: controls import order in a subprocess,
+  which an in-process test cannot do. It proves `PATH_GLOBALS` covers *every*
+  adapter's import-time path global, so an adapter that grows a new one fails the
+  build rather than silently reading the developer's sessions.
+
+### Fixed
+
+- **The fingerprint was not canonical.** With a `|`-delimited join,
+  `content="a|b", command="c"` and `content="a", command="b|c"` serialised to the
+  same string and therefore produced the *same* fingerprint — a changed event
+  reading as unchanged, the one direction this mechanism must not fail in. A pipe
+  is ordinary text in shell commands and JSON payloads, so this is not
+  theoretical. The serialisation is now canonical JSON and the algorithm is named
+  (`FINGERPRINT_ALGORITHM = "sha256-8hex-json-v1"`) so a future change can be
+  recognised rather than silently mismatching.
+- `voyager continue --out` dropped the evidence reference from the claim it wrote.
+- Three cross-platform defects in tests written for the isolation work: a
+  hardcoded `\` used as a path separator (a separator on Windows, an ordinary
+  filename character on POSIX, so `..` never collapsed and seven Linux jobs went
+  red), a case-insensitivity assertion that is a Windows-only property, and a
+  subprocess environment built by hand — without `SYSTEMROOT`, a Windows child
+  `python.exe` dies with `_Py_HashRandomization_Init`, which reports as an
+  assertion failure rather than an isolation one.
+
+### Verified, not claimed
+
+- **v1.2.0 → main upgrade: 23/23.** The index is written by the *released v1.2.0
+  code* extracted from the tag, then read by the current tree. No row and no
+  schema object changes. A v1.2.0-era bundle carries no fingerprint, so `evidence
+  verify` answers `UNVERIFIABLE` and offers the digest to adopt rather than
+  inventing one.
+- **The evidence journey: 23/23.** Compile → locate with `show` → verify → rewrite
+  the history → re-scan → the same reference reports `MISMATCH`. An exit code that
+  flips 1 → 0 with the output text unchanged is caught, which is the change most
+  likely to turn a recorded failure into a claimed success.
+
 ## [1.2.0] — 2026-10-19
 
 > Headline: **a read no longer writes, and the page can finally show you what it

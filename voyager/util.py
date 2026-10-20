@@ -121,6 +121,12 @@ def parse_ts(iso: Optional[str]) -> Optional[float]:
         return None
 
 
+#: How an event's identity fields are turned into a fingerprint.  Bump this if
+#: the field set or the serialization ever changes, so a reference recorded under
+#: the old rule can be recognised as such instead of silently mismatching.
+FINGERPRINT_ALGORITHM = "sha256-8hex-json-v1"
+
+
 def event_digest(kind, content, command, tool_output, tool_call_id,
                  exit_code=None) -> str:
     """A short, stable fingerprint of what an event *is*.
@@ -163,10 +169,45 @@ def event_digest(kind, content, command, tool_output, tool_call_id,
     matters is 2^-32 per comparison, not the birthday bound across an index.
     Anyone who can rewrite the transcript can recompute it: this detects
     accidental drift, never a determined forger.
+
+    Canonicalisation, so the value does not depend on the machine or the Python
+    version: JSON with ``ensure_ascii`` (no platform codec enters the hash) and
+    fixed separators (no whitespace variation does either).  A delimiter join
+    was measured and rejected -- with it, ``content="a|b", command="c"`` and
+    ``content="a", command="b|c"`` serialise to the same string and so produce
+    the *same* fingerprint, which would read a changed event as unchanged.  A
+    pipe is ordinary text in shell commands and JSON payloads, so that is not a
+    theoretical case.
     """
     import hashlib
+    import json
 
-    body = "|".join("" if v is None else str(v) for v in
-                    (kind, content, command, tool_output, tool_call_id,
-                     exit_code))
-    return hashlib.sha256(body.encode("utf-8", "replace")).hexdigest()[:8]
+    body = json.dumps(
+        [FINGERPRINT_ALGORITHM, kind, content, command, tool_output,
+         tool_call_id, exit_code],
+        ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:8]
+
+
+def event_ref(ev) -> str:
+    """`" · seq N · #digest"` for one event row -- a locator that can go stale.
+
+    `seq` alone is not enough.  Measured on the codex and grok adapters,
+    inserting or deleting a line in the middle of a transcript leaves only 3/5
+    and 2/5 of recorded references pointing at the same content: the seq still
+    resolves, it just resolves to a different event.  The digest turns that
+    silent misdirection into something a reader can notice.
+
+    What it does *not* do: say anything about whether the content is true.  A
+    matching digest means "this is the event the reference was made from", never
+    "this event is correct".
+
+    Returns an empty string when the row has no seq, so callers can append
+    unconditionally.
+    """
+    if ev is None or ev["seq"] is None:
+        return ""
+    return " · seq %s · #%s" % (
+        ev["seq"],
+        event_digest(ev["kind"], ev["content"], ev["command"],
+                     ev["tool_output"], ev["tool_call_id"], ev["exit_code"]))

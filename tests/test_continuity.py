@@ -446,11 +446,20 @@ class TestTieredBundle:
         only stable pointer a reader can use to re-check the evidence -- and the
         digest is what says whether it still points at the same content.
 
-        The hex value changed again when `exit_code` joined the digest's input
-        fields: a tool result that flipped from 1 to 0 with the same output used
-        to hash identically, which would hide exactly the change a reader is
-        looking for.  No released bundle carries a digest -- v1.2.0 predates the
-        feature -- so there was no consumer to break."""
+        The hex value moved twice since that invariant was written, both times
+        before anything shipped, and both for the same reason: the digest was
+        not canonical.  First `exit_code` joined the input fields (a result that
+        flipped 1 -> 0 with identical output used to hash identically).  Then the
+        serialisation moved from a `|` join to JSON, because with the join
+        `content="a|b", command="c"` and `content="a", command="b|c"` serialise
+        to the same string and so produced the *same* fingerprint -- a changed
+        event reading as unchanged, which is the one direction this mechanism
+        must not fail in.
+
+        No released bundle carries a digest -- v1.2.0 predates the feature -- so
+        there was no consumer to break either time.  That window closes at the
+        v1.3.0 tag: from then on a serialisation change is a breaking change for
+        recorded references, which is what `FINGERPRINT_ALGORITHM` is for."""
         store, thread, members, rows = self._fixture(tmp_path)
         monkeypatch.setattr("voyager.continuity.fmt_ts", lambda ts: "TS")
         out = build_continuation_bundle(store, rows, live_git=False)
@@ -474,11 +483,11 @@ class TestTieredBundle:
             "\n"
             "## Commands executed\n"
             "\n"
-            "- `pytest -q` · seq 2 · #1e4098b5\n"
+            "- `pytest -q` · seq 2 · #cbd4d070\n"
             "\n"
             "## Errors encountered\n"
             "\n"
-            "- [TS] boom: TypeError · seq 3 · #106ae3a5\n"
+            "- [TS] boom: TypeError · seq 3 · #5009a391\n"
             "\n"
             "## Evidence & Provenance\n"
             "\n"
