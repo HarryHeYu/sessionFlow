@@ -121,20 +121,39 @@ If the report is about evidence, also include:
 
 ## Shortest path from zero
 
+Two stages, because the second one reads the user's own history. Do not merge
+them into one `&&` chain — `scan`, `dashboard` and `continue` are not the same
+kind of operation and `continue` is a write.
+
 ```sh
+# --- stage 1: synthetic only, nothing real is opened ---
 pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
 voyager --version        # must print 1.3.0
-voyager demo             # synthetic data, nothing real touched
-voyager scan             # index your own agent history
-voyager search "the thing you half-remember"
-voyager dashboard        # open the generated file
-voyager continue         # what was I doing, and what is left
+voyager demo             # seeds ~/.voyager/demo.db, separate from the real index
+voyager --db ~/.voyager/demo.db search "authentication"
+voyager --db ~/.voyager/demo.db show codex:demo-auth-01
+voyager --db ~/.voyager/demo.db dashboard --out ~/.voyager/demo.html
+voyager --db ~/.voyager/demo.db evidence verify codex:demo-auth-01 1 2198ad71
+
+# --- stage 2: the user's own history, after they say so ---
+voyager scan --platform codex            # one agent first; drop --platform for all
+voyager thread list                      # read-only
+voyager thread summarize <thread>        # read-only preview of the task
+voyager continue --thread <thread> --no-launch -o ./handoff-<thread>.md
 ```
+
+`continue` refreshes the index (a scan), takes the WorkThread lease and writes a
+package; `handoff`/`continue` put `handoff-*.md` in the **current directory**,
+`merge` writes under `~/.voyager/bundles/`. The demo's sessions show
+`[source missing]` because their transcript files were never written to disk —
+expected, and the same label real retained history gets after a rotation. One
+consequence worth knowing before writing a demo script: **`continue --thread`
+refuses on the demo** (`has no live member sessions`), because continuity only
+runs on live members; continue a session id there instead.
 
 `voyager doctor` **exits 1 before the first `scan`**, with `index database not
 found; run voyager scan`. That is the command working — it reports the missing
-index rather than pretending the install is healthy. Run `scan` (or `demo`)
-first, then `doctor`.
+index rather than pretending the install is healthy.
 
 ## Roadmap
 

@@ -186,9 +186,21 @@ the same content:
 voyager evidence verify codex:01ab… 3 c5009a39
 ```
 
-It answers with one of five states and a matching exit code — `MATCH` (0),
-`MISMATCH` (1), `NOT_FOUND` (2), `UNVERIFIABLE` (3), `INVALID_REFERENCE` (4) —
-so a script can branch on it. `--json` gives the same thing machine-readable.
+It answers with one of five states and a matching exit code, so a script can
+branch on it:
+
+| State | Exit | What it means |
+|---|---|---|
+| `MATCH` | 0 | the event at that position is the one the reference was made from |
+| `MISMATCH` | 1 | something else is there now — the transcript changed under the reference |
+| `NOT_FOUND` | 2 | no event at that position (or no such session) |
+| `UNVERIFIABLE` | 3 | the reference carried no digest, so only the position could be checked |
+| `INVALID_REFERENCE` | 4 | the reference is malformed — e.g. a digest that is not 8 hex characters |
+
+`--json` gives the same thing machine-readable. `voyager evidence verify --help`
+does **not** list these states or codes; this table and the command's own output
+do, and [the walkthrough](docs/QUICKSTART.md) has one runnable example per state
+on the synthetic demo index.
 
 **What `MATCH` means, and what it does not.** It means the indexed event is the
 one the reference was made from. It does **not** mean the claim is true — nothing
@@ -207,13 +219,21 @@ data, nothing to install beyond sessionFlow itself:
 
 ```sh
 voyager demo
-voyager search --db ~/.voyager/demo.db "authentication"   # hits 2 agents
-voyager search --db ~/.voyager/demo.db "JWT refresh token"
-voyager show --db ~/.voyager/demo.db codex:demo-auth-01   # compiled session
+voyager --db ~/.voyager/demo.db search "authentication"   # hits 2 agents
+voyager --db ~/.voyager/demo.db search "JWT refresh token"
+voyager --db ~/.voyager/demo.db show codex:demo-auth-01   # compiled session
 ```
 
-The demo index (`~/.voyager/demo.db`) is separate from your real one —
-delete it whenever you like. What that looks like:
+`--db` is a global option: put it **before** the subcommand (`dashboard` and
+`evidence` accept it only there).
+
+The demo index (`~/.voyager/demo.db`) is separate from your real one — delete it
+whenever you like. Two things in its output look like errors and are not: every
+session is marked `[source missing]`, because the demo's events exist only in the
+index and no transcript files were written to disk (real retained history gets
+the same label after a provider rotates its files — still searchable, not
+resumable); and `show` prints a `#seq/digest` pointer on each line, which is the
+reference Evidence Verify checks. What that looks like:
 
 ![Search every AI coding conversation locally](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/search.png)
 
@@ -225,6 +245,20 @@ All screenshots are generated from the synthetic demo
 (`scripts/make_screenshots.py`) — no real user data in this README.
 
 ### Real Usage — your own agents (5 minutes)
+
+**Before the first scan.** `voyager scan` opens the session files your agents
+already wrote to disk (`~/.codex`, `~/.claude`, …) and builds a local index at
+`~/.voyager/index.db`. Nothing is uploaded and the provider files are opened
+read-only — but that history can contain source code, prompts, command output and
+file contents. The dashboard and every continuation package are generated **from
+that index**, so they inherit it: treat `dashboard.html`, `handoff-*.md` and
+`~/.voyager/bundles/` as private and do not paste them into issues or chats.
+
+Start with one agent rather than all of them:
+
+```sh
+voyager scan --platform codex    # codex | claude | zcode | dsh, comma-separated
+```
 
 Once at least one of your agents has session history on this machine:
 
@@ -270,7 +304,11 @@ Same-provider pickup still uses native resume (`codex resume`, …).
 
 **One command to continue**: `voyager continue` picks your newest session
 and does the right thing — native resume for codex/claude/dsh/grok,
-automatic handoff package for the rest. `voyager continue --repo myproj
+automatic handoff package for the rest. It is a write, not a read: it refreshes
+the index first (an incremental scan of your provider directories), takes the
+WorkThread lease while it works, and produces a file — `--no-launch` prints the
+command instead of starting it, and `-o` decides where the package goes.
+`voyager continue --repo myproj
 --launch` goes straight back into a specific project; multi-session
 synthesis (`voyager merge A B C`) groups the work into a **WorkThread**
 and cross-agent switch is one command (`voyager switch codex` — lease

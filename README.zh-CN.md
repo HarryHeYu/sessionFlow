@@ -165,17 +165,24 @@ All 42 tests pass. · seq 3 · #c5009a39
 voyager evidence verify codex:01ab… 3 c5009a39
 ```
 
-回答是五种状态之一，并带对应退出码——`MATCH`(0) / `MISMATCH`(1) /
-`NOT_FOUND`(2) / `UNVERIFIABLE`(3) / `INVALID_REFERENCE`(4)，脚本可以据此分支；
-`--json` 给出同样的机器可读结果。
+回答是五种状态之一，并带对应退出码，脚本可以据此分支：
+
+| 状态 | 退出码 | 含义 |
+|---|---|---|
+| `MATCH` | 0 | 那个位置上的事件，就是当初生成这条引用的事件 |
+| `MISMATCH` | 1 | 那个位置上现在是别的事件——引用底下的 transcript 变了 |
+| `NOT_FOUND` | 2 | 那个位置没有事件（或没有这个会话） |
+| `UNVERIFIABLE` | 3 | 引用里没带 digest，只能核对位置 |
+| `INVALID_REFERENCE` | 4 | 引用本身不合法——例如 digest 不是 8 位十六进制 |
+
+`--json` 给出同样的机器可读结果。`voyager evidence verify --help` **不列**这五种
+状态和退出码；这张表、命令自己的输出，以及
+[上手指南](docs/QUICKSTART.md)里每条状态一个可运行示例，才是它们的出处。
 
 **`MATCH` 是什么意思，不是什么。** 它的意思是"索引里这个事件就是当初那条引用
 所指向的事件"。它**不**表示这条结论为真——这里没有任何东西做那个判断——它也不是
 签名：指纹只有八位十六进制，改写过 transcript 的人可以重算。来源检查比的是
 `mtime` 和 `size`，不等于字节一致。这两条限制写在命令自己的输出里，每条路径都有。
-
-要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
-用 `python -m voyager.cli` 运行。
 
 ## 快速上手
 
@@ -186,15 +193,33 @@ voyager evidence verify codex:01ab… 3 c5009a39
 
 ```sh
 voyager demo
-voyager search --db ~/.voyager/demo.db "authentication"   # 命中 2 个 Agent
-voyager search --db ~/.voyager/demo.db "JWT refresh token"
-voyager show --db ~/.voyager/demo.db codex:demo-auth-01   # 编译好的会话上下文
+voyager --db ~/.voyager/demo.db search "authentication"   # 命中 2 个 Agent
+voyager --db ~/.voyager/demo.db search "JWT refresh token"
+voyager --db ~/.voyager/demo.db show codex:demo-auth-01   # 编译好的会话上下文
 ```
 
-演示索引（`~/.voyager/demo.db`）与真实索引相互独立，随时可删。效果见
-上面的截图与演示动图。
+`--db` 是全局参数，放在子命令**之前**（`dashboard` 和 `evidence` 只认这个位置）。
+
+演示索引（`~/.voyager/demo.db`）与真实索引（`~/.voyager/index.db`）相互独立，
+随时可删。里面有两点看起来像报错、其实不是：每个会话都标着 `[source missing]`
+——demo 的事件只存在于索引里，磁盘上没有对应的 transcript 文件（真实的保留历史
+在 provider 轮转文件后也是这个标记：仍可检索，但不可续接）；`show` 每行都带
+`#seq/digest`，那就是 Evidence Verify 核对的引用。效果见上面的截图与演示动图。
 
 ### 真实使用——索引你自己的 Agent（5 分钟）
+
+**第一次扫描之前请先读这段。** `voyager scan` 会打开你的 Agent 已经写到磁盘上的
+会话文件（`~/.codex`、`~/.claude`……），在 `~/.voyager/index.db` 建一份本地索引。
+数据不会上传，provider 文件也是只读打开——但那些历史里可能有源码、prompt、
+命令输出和文件内容。Dashboard 和每一个接续包都是**从这份索引生成**的，因此会带着
+同样的东西：把 `dashboard.html`、`handoff-*.md` 和 `~/.voyager/bundles/` 当作私密
+文件，不要贴进 issue 或聊天窗口。
+
+先只扫一个 Agent，而不是全部：
+
+```sh
+voyager scan --platform codex    # codex | claude | zcode | dsh，逗号分隔
+```
 
 只要本机至少有一个 Agent 留有会话历史：
 
@@ -240,7 +265,10 @@ tool state 或 cached reasoning）。`voyager handoff <id> --to codex` 会把
 同一平台的续聊仍然走原生 resume（`codex resume` 等）。
 
 **一条命令继续**：`voyager continue` 自动挑你最新的会话并做对的事——
-codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。`voyager continue
+codex/claude/dsh/grok 走原生恢复，其余自动生成接力包。它是**写操作，不是读**：
+会先刷新索引（对你所有 provider 目录做一次增量扫描）、工作期间占用 WorkThread
+租约、并产出一个文件——`--no-launch` 只打印命令不启动，`-o` 决定包写到哪里。
+`voyager continue
 --repo myproj --launch` 直接回到某个项目的现场。多会话合并已经有了
 （`voyager merge A B C` 会把工作聚合成 **WorkThread**）；跨 agent 切换是
 一条命令（`voyager switch codex`——租约感知）。`--goal` 按目标给证据排序，
