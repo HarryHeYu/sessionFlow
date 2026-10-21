@@ -381,6 +381,7 @@ calling the install healthy. Run `scan` (or `demo`) first.
 | DSH stops with `MISSING_CREDENTIAL` | Configure a model provider in the profile — that is the host's setup, not the plugin's. |
 | Two active threads, commands refuse | Pass `--thread <id>`; that is intentional. |
 | `refused: thread … is leased to …` | A previous `continue` still holds the lease. `voyager thread unlock <id> --steal`. |
+| `scan --platform <name>` reports `0 sessions` | The value is not validated — a typo looks exactly like "you have no history". Check the spelling: `codex`, `claude`, `zcode`, `dsh`. |
 
 ---
 
