@@ -18,7 +18,9 @@ known, what is supported, and what a maintainer should check.
 | 7 | **Dashboard search is snapshot-scoped.** | The page filters what it rendered; whole-index search is `voyager search`. | By design (static HTML, no server). |
 | 8 | **Browser verification runs locally, not in CI.** | CI jobs skip where a browser cannot start, with a stated reason. | `CI_BROWSER_NOT_VERIFIED` — declared, not hidden. |
 | 9 | **SQLite concurrent-index flake.** | Rare failure in `test_concurrent_creation_of_a_fresh_index`. | **INCONCLUSIVE**: not reproduced in bounded re-runs (40 fresh-index pairs, 160 child processes). Deliberately not masked with sleeps or unbounded retries. |
-| 10 | **Native resume and model-driven tool selection are unverified** end to end. | Requires paid providers. | `NOT_VERIFIED` — never claimed as working. |
+| 10 | **Native resume is unverified** end to end on every provider. | The command is built and wired; no resume has been observed succeeding. | `NOT_VERIFIED` — never claimed as working. Verifying it needs a paid provider session and writes into a real environment. |
+| 11 | **Model-driven tool selection has no repeatable end-to-end suite.** | It has been *observed* in recorded real-model runs — 3/3 when the prompt names the agent or asks "what was I working on", 1/3 on a bare "continue" — but that is one model, one fixture, three attempts. | `OBSERVED, NOT REPEATABLE`. Contract tests cover the six tools; they do not cover the model choosing them. Do not quote a success rate. |
+| 12 | **`voyager evidence verify --help` does not list the five outcomes or the exit codes.** | A user writing a script has to read the README (or trigger each state) to learn them. The runtime output *does* state its own limits on every path. | Known, deliberate for now: changing help text is a code change, and no release is open to carry it. Documented in the README; fix belongs in the next release. |
 
 ## Supported Platforms
 
@@ -46,8 +48,9 @@ adopt. v1.3.0 never invents a fingerprint for a legacy reference.
 Run before tagging any future release:
 
 ```sh
-cd /e/code/voyager
-PY="C:/Users/He_Yu_Hao/.workbuddy-ai/binaries/python/envs/voyager-dev/Scripts/python.exe"
+# PY must be an interpreter that HAS pytest — the base interpreter does not.
+# A venv works: python -m venv .venv && .venv/bin/python -m pip install -e ".[all,dev]"
+PY=/path/to/venv/bin/python
 
 # 1. version and changelog agree
 grep -m1 '^version' pyproject.toml
@@ -58,20 +61,24 @@ git status --short && git rev-parse --short HEAD origin/main
 
 # 3. full suite (one run at a time — concurrent runs contend on the shared index)
 PYTHONPATH= PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest tests/ -q \
-    --basetemp=E:/sessionflow-scratch/bt-$(date +%s)
+    --basetemp=/tmp/sf-bt-$(date +%s)
 
 # 4. plugin
 cd /e/code/dsh-sessionflow && npm test
 
 # 5. build and install from the artefact, not the worktree
 cd /e/code/voyager
-python -m build --wheel --sdist --outdir /e/sessionflow-scratch/dist
+python -m build --wheel --sdist --outdir /tmp/sf-dist
 # then: clean venv, pip install the wheel, `voyager --version` must match
 
 # 6. upgrade path: build an index with the PREVIOUS tag, read it with this one
-git archive <previous-tag> | tar -x -C /e/sessionflow-scratch/prev
+git archive <previous-tag> | tar -x -C /tmp/sf-prev
 # write synthetic rows with it, then read/verify with the current tree
 ```
+
+`PYTHONPATH=` matters on machines with a delete-guard shim injected through
+`PYTHONPATH`: with it in place, bulk `unlink()` raises and tests fail for a reason
+that has nothing to do with the code.
 
 Release mechanics:
 
@@ -88,46 +95,29 @@ Release mechanics:
 Never: move or delete a published tag, edit a published release's assets, or
 `--force` push.
 
-## Bug Report Template
+## Bug Report / Feature Request
 
-```markdown
-**What happened**
+The GitHub issue forms are the templates — do not paste a second copy here, and do
+not add a parallel set of files:
 
-**What you expected**
+- [`.github/ISSUE_TEMPLATE/bug_report.yml`](../.github/ISSUE_TEMPLATE/bug_report.yml)
+- [`.github/ISSUE_TEMPLATE/feature_request.yml`](../.github/ISSUE_TEMPLATE/feature_request.yml)
 
-**Steps to reproduce**
-1.
-2.
+Two things the bug form asks for that are specific to this project:
 
-**Output of**
-```
+```sh
 voyager --version
 voyager doctor          # paste the "blocking" section if any
 ```
-(redact paths you consider private — `doctor` prints the store path)
 
-**Which agent's history** (Codex / Claude / DSH / Grok / ZCode / Kiro / Cursor /
-Antigravity), and whether `voyager search` finds the session at all.
+`doctor` prints the store path — redact what you consider private. **Never paste
+real session content**; use `voyager demo` or synthetic text.
 
-**If it is about evidence:**
+If the report is about evidence, also include:
+
 - the reference as printed (e.g. `seq 3 · #c5009a39`)
 - `voyager evidence verify <session> <seq> <digest>` and its exit code
 - whether `voyager show <session>` shows the same `#seq/digest`
-```
-
-## Feature Request Template
-
-```markdown
-**The problem you are trying to solve**
-(not the feature — the problem)
-
-**What you do today instead**
-
-**Which part of the product** (indexing / search / WorkThread / continuation /
-evidence / dashboard / plugin)
-
-**Would a smaller change solve it?**
-```
 
 ## Shortest path from zero
 
@@ -140,6 +130,11 @@ voyager search "the thing you half-remember"
 voyager dashboard        # open the generated file
 voyager continue         # what was I doing, and what is left
 ```
+
+`voyager doctor` **exits 1 before the first `scan`**, with `index database not
+found; run voyager scan`. That is the command working — it reports the missing
+index rather than pretending the install is healthy. Run `scan` (or `demo`)
+first, then `doctor`.
 
 ## Roadmap
 

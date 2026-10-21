@@ -3,78 +3,6 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
-## [1.0.0-rc1] — 2026-10-06
-
-Release candidate. Scope: performance evidence, retention, canonical
-timeline, doctor safety, verification truth, packaging.
-
-### Added
-- O1: benchmark harness over the real store and synthetic 10k/100k-session
-  corpora; git-probe and scan-path subprocess merges; documented, kept debts
-- O2: a vanished provider source no longer deletes history —
-  ACTIVE_SOURCE / SOURCE_MISSING / ARCHIVED_CANONICAL lifecycle, retention
-  keeps events/files/FTS searchable, explicit archive, E-drive scratch
-  policy (opt-in via VOYAGER_SCRATCH_ROOT)
-- O3: one canonical WorkThread timeline (derived vs persisted facts,
-  provenance per event, deterministic same-second ordering, SOURCE_ARCHIVED,
-  pending-attach resolution), consumed by CLI/API/dashboard/webview
-- O4: canonical doctor Issue model (severity x repair_kind), read-only
-  guarantees, explicit SAFE_FIXERS allowlist, transactional + idempotent
-  repairs with dry-run, FTS/archive/ambiguity diagnostics
-- O5: evidence-only verification (HOOK/PREPARED/EMITTED split, transport
-  truth for stdout providers and grok's rules-file transport, fail-closed
-  correlation chains), cross-surface state convergence
-- O6.5: dsh-sessionflow consumer closure (thin-adapter audit, bridge
-  schema v1 unchanged)
-
-### Fixed
-- prune per-source updates clear the SQLite variable limit at six-figure
-  source counts
-- retention exclusion honored on every continuity path; live-state filters
-  no longer treat archived sessions as live
-
-## [1.0.0-rc2] — 2026-10-06
-
-Release candidate focused on first-time-user experience and open-source
-plumbing. No core-semantics changes: bridge schema stays v1; verification,
-timeline and doctor models untouched.
-
-### Added
-- `voyager demo`: a synthetic 4-agent / 1-WorkThread index at
-  `~/.voyager/demo.db` (separate from the real index) so the product can
-  be explored with zero agents installed; every command the verb suggests
-  is regression-tested
-- README: dual-path Quick Start (Fast Demo / Real Usage), product
-  screenshots and a typed-terminal demo GIF — all generated from the
-  synthetic demo (`scripts/make_screenshots.py`, `scripts/make_demo_gif.py`)
-- docs: use cases, public architecture page
-- CI: windows matrix widened to Python 3.10-3.13; release workflow creates
-  a GitHub Release from `v*` tags (notes from docs/releases/<tag>.md,
-  test-gated, rc tags marked pre-release)
-- community: issue templates, PR template, contributing guide with the
-  O1-O6 architecture rules, security policy, code of conduct
-
-### Documentation
-- Chinese README synchronized with the RC1 product workflow: 10-second
-  positioning, dual-path Quick Start (Fast Demo / Real Usage, commands
-  identical to the English README), synthetic screenshots + demo GIF
-  embedded (no real user data), feature list covering doctor /
-  verification / DSH integration
-
-### Packaging
-- Verified PyPI build metadata: authors field, `voyager.integrations`
-  subpackage + relay `.ps1` in the wheel (the session-start hooks were
-  missing from a wheel install), README references converted to absolute
-  URLs so the PyPI page renders
-- Wheel/sdist validated: `twine check` PASSED, clean-venv install smoke
-  (`voyager demo` works from the wheel), no tests/user data in artifacts
-- TestPyPI dry-run checklist at docs/pypi-checklist.md (token held by the
-  maintainer; nothing uploaded)
-
-### Fixed
-- README Quick Start no longer suggests a non-existent `--preview` flag
-- stale dev test counts
-
 ## [1.3.0] — 2026-10-20
 
 > Headline: **a continuation reference you can actually check.** A bundle stated
@@ -948,6 +876,78 @@ Recorded so the findings are not lost while implementation stays frozen.
   "no manual scan ran" is an operator record rather than something the index can
   prove) are in
   [`grok_continuity_verdict.md`](docs/archive/root-reports-2026-09/grok_continuity_verdict.md#final-acceptance--closed-2026-09-25).
+
+## [1.0.0-rc2] — 2026-10-06
+
+Release candidate focused on first-time-user experience and open-source
+plumbing. No core-semantics changes: bridge schema stays v1; verification,
+timeline and doctor models untouched.
+
+### Added
+- `voyager demo`: a synthetic 4-agent / 1-WorkThread index at
+  `~/.voyager/demo.db` (separate from the real index) so the product can
+  be explored with zero agents installed; every command the verb suggests
+  is regression-tested
+- README: dual-path Quick Start (Fast Demo / Real Usage), product
+  screenshots and a typed-terminal demo GIF — all generated from the
+  synthetic demo (`scripts/make_screenshots.py`, `scripts/make_demo_gif.py`)
+- docs: use cases, public architecture page
+- CI: windows matrix widened to Python 3.10-3.13; release workflow creates
+  a GitHub Release from `v*` tags (notes from docs/releases/<tag>.md,
+  test-gated, rc tags marked pre-release)
+- community: issue templates, PR template, contributing guide with the
+  O1-O6 architecture rules, security policy, code of conduct
+
+### Documentation
+- Chinese README synchronized with the RC1 product workflow: 10-second
+  positioning, dual-path Quick Start (Fast Demo / Real Usage, commands
+  identical to the English README), synthetic screenshots + demo GIF
+  embedded (no real user data), feature list covering doctor /
+  verification / DSH integration
+
+### Packaging
+- Verified PyPI build metadata: authors field, `voyager.integrations`
+  subpackage + relay `.ps1` in the wheel (the session-start hooks were
+  missing from a wheel install), README references converted to absolute
+  URLs so the PyPI page renders
+- Wheel/sdist validated: `twine check` PASSED, clean-venv install smoke
+  (`voyager demo` works from the wheel), no tests/user data in artifacts
+- TestPyPI dry-run checklist at docs/pypi-checklist.md (token held by the
+  maintainer; nothing uploaded)
+
+### Fixed
+- README Quick Start no longer suggests a non-existent `--preview` flag
+- stale dev test counts
+
+## [1.0.0-rc1] — 2026-10-06
+
+Release candidate. Scope: performance evidence, retention, canonical
+timeline, doctor safety, verification truth, packaging.
+
+### Added
+- O1: benchmark harness over the real store and synthetic 10k/100k-session
+  corpora; git-probe and scan-path subprocess merges; documented, kept debts
+- O2: a vanished provider source no longer deletes history —
+  ACTIVE_SOURCE / SOURCE_MISSING / ARCHIVED_CANONICAL lifecycle, retention
+  keeps events/files/FTS searchable, explicit archive, E-drive scratch
+  policy (opt-in via VOYAGER_SCRATCH_ROOT)
+- O3: one canonical WorkThread timeline (derived vs persisted facts,
+  provenance per event, deterministic same-second ordering, SOURCE_ARCHIVED,
+  pending-attach resolution), consumed by CLI/API/dashboard/webview
+- O4: canonical doctor Issue model (severity x repair_kind), read-only
+  guarantees, explicit SAFE_FIXERS allowlist, transactional + idempotent
+  repairs with dry-run, FTS/archive/ambiguity diagnostics
+- O5: evidence-only verification (HOOK/PREPARED/EMITTED split, transport
+  truth for stdout providers and grok's rules-file transport, fail-closed
+  correlation chains), cross-surface state convergence
+- O6.5: dsh-sessionflow consumer closure (thin-adapter audit, bridge
+  schema v1 unchanged)
+
+### Fixed
+- prune per-source updates clear the SQLite variable limit at six-figure
+  source counts
+- retention exclusion honored on every continuity path; live-state filters
+  no longer treat archived sessions as live
 
 ## [0.3.0] — 2026-09-19
 

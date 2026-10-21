@@ -18,11 +18,25 @@
 |  |  |
 |---|---|
 | **是什么** | 在编码 Agent 已经写到磁盘上的会话历史之上，加一层本地索引 + 接续层。 |
-| **为什么用** | 你的历史分散在八种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西。 |
-| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"` —— [详见](#安装) |
+| **为什么用** | 你的历史分散在八种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
+| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"` —— [详见](#安装) |
 | **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
-| **当前版本** | [v1.1.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.1.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **当前版本** | [v1.3.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.3.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
+
+### 它主要解决三件事
+
+**换一个 Agent 接着做。** 你在 Codex 里开了一半，想让 Claude Code 接手。
+`voyager continue` 会把目标、动过的文件、跑过的命令、报过的错、以及"停在哪一步"
+编译成一份上下文包，下一个 Agent 直接读——不用你把一下午重新讲一遍。
+
+**一个项目，好几个会话。** 一个功能散在四个会话、三个 Agent 里。
+`voyager merge A B C` 把它们归成一个 WorkThread，`voyager thread summarize <thread>`
+给出一份跨 Agent 的简报：谁做了什么、还有哪些没关。
+
+**追一句话的出处。** 交接包里写着"42 个测试全过"。包里每条结论都标着它来自哪个
+事件，`voyager evidence verify` 告诉你那条引用是否还落在同一个事件上。它**不**判断
+这句话本身是否为真——[见下文](#核对交接包里的说法)。
 
 你的 AI 编码历史是碎片化的：
 
@@ -94,22 +108,33 @@ JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成*
 
 ```sh
 # 用 pipx 装成独立 CLI（推荐，不用折腾虚拟环境）
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
 
-# 或者用 pip 装到用户目录
-pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git"
+# 或者用 pip 装到用户目录（Windows 上用 `python -m pip`，`pip` 常常不在 PATH 里）
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
 ```
 
 **Voyager 没有发布到 PyPI。** PyPI 上的 `voyager` 是一个毫不相干的最近邻搜索库，
 所以裸跑 `pip install voyager` 会装错项目 —— 请一律使用上面的 `@ git+…` 形式。
 改用正式包名的进度见 `CHANGELOG.md`。
 
+`@v1.3.0` 是发布 tag，重装才能装到同一份代码，插件报错信息里推荐的也是它；
+去掉 `@v1.3.0` 就是跟 `main` 走。确认装到的版本：
+
+```sh
+voyager --version        # 应当输出 1.3.0
+```
+
+> **从 v1.2.0（或 v1.1.0）升级不需要迁移。** 索引原样读取：不改任何行，
+> 唯一区别是新版本给自己加了一个索引。回滚同样安全——v1.1.0 读同一个库，
+> 只是忽略那个多出来的索引。
+
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git"          # 核心
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"          # 核心
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"     # + MCP server
 ```
 
 想改 Voyager 本身：
@@ -117,8 +142,37 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"   
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # e768c40 上实测：1176 passed / 4 skipped（随用例数变化）
+python -m pytest tests/ -q     # v1.3.0 上实测：1303 passed / 6 skipped
 ```
+
+要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
+用 `python -m voyager.cli` 运行。
+
+## 核对交接包里的说法
+
+接续包不只是把 Agent 说过的话汇总一遍——每条工具结果、每条助手结论都带着
+它出自哪个事件的引用：
+
+```
+- `pytest -q`  # exit 1 · seq 2 · #cbd4d070
+All 42 tests pass. · seq 3 · #c5009a39
+```
+
+`voyager show` 每一行都打印同一个指针，所以可以从一句话走回它背后那条消息。
+指针是否还落在同样的内容上，可以直接问：
+
+```sh
+voyager evidence verify codex:01ab… 3 c5009a39
+```
+
+回答是五种状态之一，并带对应退出码——`MATCH`(0) / `MISMATCH`(1) /
+`NOT_FOUND`(2) / `UNVERIFIABLE`(3) / `INVALID_REFERENCE`(4)，脚本可以据此分支；
+`--json` 给出同样的机器可读结果。
+
+**`MATCH` 是什么意思，不是什么。** 它的意思是"索引里这个事件就是当初那条引用
+所指向的事件"。它**不**表示这条结论为真——这里没有任何东西做那个判断——它也不是
+签名：指纹只有八位十六进制，改写过 transcript 的人可以重算。来源检查比的是
+`mtime` 和 `size`，不等于字节一致。这两条限制写在命令自己的输出里，每条路径都有。
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
 用 `python -m voyager.cli` 运行。
@@ -372,7 +426,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # e768c40 上实测：1176 passed / 4 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP
+python -m pytest tests/ -q                # v1.3.0 上实测：1303 passed / 6 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP / 证据引用
 python scripts/run_tests_core_only.py     # 模拟 core-only：把可选依赖变成不可导入后重跑，被门禁的用例转为 skipped
 ```
 

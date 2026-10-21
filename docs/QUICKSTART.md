@@ -1,7 +1,7 @@
 # Quick Start
 
 **Five minutes, from nothing to continuing another agent's work.** Every command
-below is exercised against v1.1.0; nothing here is aspirational.
+below is exercised against v1.3.0; nothing here is aspirational.
 
 - **sessionFlow** (this repo, CLI command `voyager`) — indexes and searches your
   local agent history.
@@ -13,16 +13,16 @@ below is exercised against v1.1.0; nothing here is aspirational.
 ## 1. Install the core (1 min)
 
 ```sh
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
 ```
 
 `[all]` pulls in the DSH (`zstandard`) and MCP (`mcp`) extras. Drop it for a bare
-install. The `@f2a6445` pins a known-good commit so a reinstall reproduces the
-same build; drop it to follow `main`. No `pipx`? Use pip — `python -m pip` on
+install. The `@v1.3.0` pins a release tag so a reinstall reproduces the same
+build; drop it to follow `main`. No `pipx`? Use pip — `python -m pip` on
 Windows, where `pip` is often not on `PATH`:
 
 ```sh
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@f2a6445"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
 ```
 
 **Not on PyPI.** The `voyager` name there is an unrelated library, so a bare
@@ -135,6 +135,32 @@ VOYAGER_BUNDLES_DIR=./tmp-bundles voyager continue        # or for a whole shell
 > **Continuity is not session migration.** The target agent gets the goal, the
 > recent real work and the repository state — not the previous session's hidden
 > tool state or cached reasoning.
+
+### Check a claim before you trust it
+
+A bundle names the event behind each claim, and `voyager show` prints the same
+pointer on every line:
+
+```
+- `pytest -q`  # exit 1 · seq 2 · #cbd4d070
+All 42 tests pass. · seq 3 · #c5009a39
+```
+
+Ask whether that reference still lands on the same content:
+
+```sh
+voyager evidence verify codex:01ab… 3 c5009a39        # human-readable
+voyager evidence verify codex:01ab… 3 c5009a39 --json # machine-readable
+```
+
+Five outcomes, each with its own exit code: `MATCH` (0), `MISMATCH` (1),
+`NOT_FOUND` (2), `UNVERIFIABLE` (3), `INVALID_REFERENCE` (4). A reference with no
+digest is `UNVERIFIABLE`, never `MATCH`.
+
+**This is not fact-checking.** `MATCH` says the indexed event is the one the
+reference was made from; it does not say the claim is true. The fingerprint is
+eight hex characters, not a signature, and the source check compares `mtime` and
+`size` rather than bytes. Both limits are printed by the command itself.
 
 ---
 
@@ -251,9 +277,15 @@ voyager status            # current thread, or AMBIGUOUS
 - Cross-agent continuation has been verified live with a real DSH agent against
   both a synthetic index and real provider session files — see the plugin's
   `docs/p8-live-verification.md` and `docs/p9-live-verification.md`.
+- **Evidence is about references, not truth.** `MATCH` means the indexed event is
+  the one a claim was recorded from; nothing here decides whether the claim is
+  correct, and the fingerprint is not a signature. See §5.
 - Provider capability varies: file-edit tracking and token accounting are
   stronger on some agents than others. See the platform table in the README.
 
-Version relationship: the core and the plugin are released together, both at
-**v1.1.0**, and they speak **bridge schema 1**. The plugin declares the schema it
-needs and fails clearly against an older core rather than guessing.
+Version relationship: the core and the plugin are **versioned independently** —
+this page installs core **v1.3.0**, and the current plugin is **v1.1.0**. They
+are not required to share a number; what binds them is **bridge schema 1**, which
+the plugin declares and the core reports (`voyager integration-info --json`). A
+newer core that kept the schema would need no plugin release, and the plugin
+refuses an older core by name rather than misbehaving.

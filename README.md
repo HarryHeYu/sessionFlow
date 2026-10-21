@@ -24,9 +24,26 @@ is one client of it, and the core is a general-purpose local tool.)
 | **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
 | **Current release** | [v1.3.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.3.0) · Python ≥ 3.10 · Windows / macOS / Linux |
-| **Community** | Listed in [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/7226) |
+| **Community** | Listed in the third-party [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/data/plugins/HarryHeYu__dsh-sessionflow.yml) directory — a listing, not a certification |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
+
+### Three things it is for
+
+**Continue work in a different agent.** You started something in Codex; Claude
+Code should finish it. `voyager continue` compiles the goal, the files touched,
+the commands, the errors and where the work stopped into a context package the
+next agent reads — instead of you re-explaining an afternoon.
+
+**One project, several sessions.** A feature is spread over four sessions and
+three agents. `voyager merge A B C` groups them into a WorkThread, and
+`voyager thread summarize <thread>` gives you one brief across all of them —
+who contributed what, and which items are still open.
+
+**Trace a claim back to the event.** A handoff says "all 42 tests pass". Every
+claim in a bundle names the event it came from, and `voyager evidence verify`
+tells you whether that event is still the one the reference was made from. It
+does **not** decide whether the claim is true — [see below](#checking-what-a-handoff-claims).
 
 Your AI coding history is fragmented:
 
@@ -117,8 +134,40 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
+The `@v1.3.0` pins a release tag, which is what makes a reinstall reproducible
+and is what the DSH plugin's own error messages recommend. Drop the `@v1.3.0`
+to follow `main` instead. Check the installed version with:
 
-### Checking what a handoff claims
+```sh
+voyager --version        # must print 1.3.0
+```
+
+> **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
+> rows change, and the only difference is one index the new version adds for its
+> own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
+> the same database and ignores the extra index.
+
+`[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
+optional and only needed for those features:
+
+```sh
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"          # core
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"     # + MCP server
+```
+
+Working on Voyager itself:
+
+```sh
+git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
+pip install -e ".[all,dev]"    # editable + extras + pytest
+python -m pytest tests/ -q     # 1303 passed, 6 skipped (measured at v1.3.0)
+```
+
+Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
+run it as `python -m voyager.cli`.
+
+## Checking what a handoff claims
 
 A continuation bundle does not just summarise what an agent said — every tool
 observation and every assistant claim carries a reference to the event it came
@@ -147,43 +196,6 @@ here decides that — and it is not a signature: the fingerprint is eight hex
 characters, and anyone who rewrites a transcript can recompute it. The source
 check compares `mtime` and `size`, which is not byte equality. Both limits are
 stated in the command's own output, on every path.
-
-The `@v1.3.0` pins a release tag, which is what makes a reinstall reproducible
-and is what the DSH plugin's own error messages recommend. Drop the `@v1.3.0`
-to follow `main` instead. Check the installed version with:
-
-```sh
-voyager --version        # must print 1.3.0
-```
-
-> **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
-> rows change, and the only difference is one index the new version adds for its
-> own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
-> the same database and ignores the extra index.
-
-```sh
-voyager --version
-```
-
-`[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
-optional and only needed for those features:
-
-```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git"          # core
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git"     # + MCP server
-```
-
-Working on Voyager itself:
-
-```sh
-git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
-pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 1176 passed, 4 skipped (measured at e768c40, 2026-10-16)
-```
-
-Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
-run it as `python -m voyager.cli`.
 
 ## Quick Start
 
@@ -574,7 +586,9 @@ DeepSeek Harness integration: <https://github.com/HarryHeYu/dsh-sessionflow>
 [`dsh-sessionflow`](https://github.com/HarryHeYu/dsh-sessionflow) is a thin DSH
 plugin that exposes search, current work, continuation and merge as six
 `sessionflow_*` tools, so a DSH agent can pick up work from Codex, Claude Code,
-Grok and the rest without leaving the harness.
+Grok and the rest without leaving the harness. Its current release is **plugin
+v1.1.0**, tested against **core v1.3.0** over **bridge schema 1** — the two repos
+are versioned independently, and the schema is what actually binds them.
 
 It is a *client* of this repo, not a second implementation: the core stays the
 single source of truth, and the plugin talks to it over the stable JSON surface
@@ -605,7 +619,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 1176 passed, 4 skipped at e768c40 — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, provider hooks
+python -m pytest tests/ -q                # 1303 passed, 6 skipped at v1.3.0 — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, evidence, provider hooks
 python scripts/run_tests_core_only.py     # core-only simulated: a subset that skips the DB-backed suites
 ```
 
