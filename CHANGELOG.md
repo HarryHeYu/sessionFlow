@@ -7,15 +7,21 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Fixed
 
-- **Grok on Windows stays in the terminal after quit.** Grok 1.0.70 logs
-  `pager.exited` (the session is already flushed and the terminal mode already
-  restored) and then blocks inside `ExitProcess`, so the shell never gets a
-  prompt. The SessionStart hook now arms a detached watcher that, only after
-  that line is appended for the same process, terminates it if it is still
-  alive. A clean exit is left alone, and a recycled pid is not signalled.
-  The Windows launcher shim also runs `grok.exe` in the current console
-  instead of `start`, which detached it into a window the shim could not wait
-  on. Disable the watcher with `VOYAGER_GROK_EXIT_WATCH=0`.
+- **Grok on Windows stays in the terminal after quit, and the first
+  watcher popped extra consoles.** Grok 1.0.70 restores the console, prints
+  the resume footer, and then blocks inside `ExitProcess`. The quit log line
+  is not always flushed, so a log-only watcher never reaped it, and launching
+  that watcher with `python.exe` opened a visible command window. The Windows
+  launcher now runs Grok in the same console and reaps it once the TUI has
+  been active and the console stays cooked with only the children that were
+  already there (the MCP servers), or once `quit.terminal_restore` /
+  `pager.exited` is logged. A command that owns the terminal is left alone.
+  Disable the reap with
+  `VOYAGER_GROK_EXIT_WATCH=0`. The install also drops `grok.exe` next to
+  `grok.cmd`; the shell runs that exe in the same console, so the quit does
+  not sit inside `cmd.exe` and does not open another window.
+  `~/.voyager/bin` has to precede the real `grok.exe` on `PATH` or this
+  launcher is not the process the shell waits on.
 
 ## [1.3.0] — 2026-10-20
 

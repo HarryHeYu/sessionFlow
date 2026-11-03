@@ -50,7 +50,7 @@ voyager-mcp = "voyager.mcp_server:main"
 packages = ["voyager", "voyager.adapters", "voyager.integrations"]
 
 [tool.setuptools.package-data]
-voyager = ["SKILL.md", "integrations/*.ps1"]
+voyager = ["SKILL.md", "integrations/*.ps1", "integrations/grok_shim.exe"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

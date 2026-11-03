@@ -219,7 +219,7 @@ def test_plain_grok_launch_path_carries_the_continuation_context(
     # ...and the installed launcher must actually run the writer.
     monkeypatch.setattr(
         "shutil.which",
-        lambda name: "/opt/grok/bin/grok" if name == "grok" else None,
+        lambda name, path=None: "/opt/grok/bin/grok" if name == "grok" else None,
     )
     from voyager.integrations.grok import GrokIntegration
 
@@ -231,6 +231,7 @@ def test_plain_grok_launch_path_carries_the_continuation_context(
     # `start` detaches the CLI into a new console and returns at once, so a
     # Grok that stays alive after quit freezes a window this shim no longer owns.
     assert "start " not in win
+    assert "--supervise" in win
     assert '"/opt/grok/bin/grok"' in win
 
 

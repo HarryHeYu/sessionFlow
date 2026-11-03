@@ -97,18 +97,6 @@ def main() -> int:
     result["hook_event"] = payload.get("hookEventName") or os.environ.get(
         "GROK_HOOK_EVENT"
     )
-    # Arm after the attach is recorded. The watcher is detached and fail-open;
-    # it must not delay or fail this hook. It exists so a Grok 1.0.70 quit,
-    # which logs pager.exited and then sticks in ExitProcess, cannot hold the
-    # terminal. ``~/.voyager/bin`` is not on PATH here, so the launcher shim
-    # never sees this process — the hook is the only sessionFlow code that runs.
-    try:
-        from voyager.integrations.grok_exit_watch import arm_from_here
-        armed = arm_from_here()
-        if armed:
-            result["exit_watch_pid"] = armed
-    except Exception:
-        pass
     _log(result)
     return 0
 

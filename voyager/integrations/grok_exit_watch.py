@@ -1,18 +1,21 @@
 """Reap a Grok CLI that has finished quitting but will not leave the terminal.
 
-Grok 1.0.70 on Windows logs a complete quit (``quit.terminal_restore`` through
-``pager.exited``) and then blocks inside ``ExitProcess``. The parent shell is
-waiting on that process, so the terminal looks frozen after a normal quit.
-``quit.terminal_restore`` is logged *before* ``pager.exited``, and the session
-flush has already happened by then, so terminating the process once
-``pager.exited`` has been logged gives the console back without dropping the
-session.
+Grok 1.0.70 on Windows draws the "Finishing session" footer, restores the
+console to cooked mode, and then blocks inside ``ExitProcess``. The parent
+shell waits on that process, so the terminal looks frozen. The quit log line
+``pager.exited`` is not always flushed before the block, so a watcher that
+only tails the log never fires.
 
-The SessionStart hook arms one detached watcher per Grok process. It only
-reads log lines appended after it starts, and it only calls ``TerminateProcess``
-when the same process (same pid and same creation time) is still alive after a
-short grace. A clean exit during the grace is left alone. Set
-``VOYAGER_GROK_EXIT_WATCH=0`` to disable.
+The Windows launcher runs Grok in *this* console and reaps it when either:
+
+* ``pager.exited`` or ``quit.terminal_restore`` is appended for this pid, or
+* the console has been in the raw TUI mode and then stays cooked, and every
+  child still alive was already there during that TUI (the MCP servers).
+
+A command that starts when the console is cooked keeps a new child, so that
+path is not reaped. Set ``VOYAGER_GROK_EXIT_WATCH=0`` to disable the reap and only
+wait. The launcher must not start a second console: a detached ``python.exe``
+is a visible window, which is the popup this used to cause.
 """
 
 from __future__ import annotations
@@ -26,8 +29,17 @@ from pathlib import Path
 from typing import Callable, Optional
 
 PAGER_EXITED = "pager.exited"
+QUIT_LOG_MSGS = frozenset(("pager.exited", "quit.terminal_restore"))
+ENABLE_LINE_INPUT = 0x0002
 DEFAULT_GRACE_S = 2.0
 DEFAULT_POLL_S = 0.2
+# Long-lived helpers Grok keeps for the whole session. They are not a tool
+# the user is waiting on, so they must not block the post-quit reap.
+_LONG_LIVED_MARKERS = ("voyager.mcp_server", "grok_exit_watch.py", "grok_session_start.py")
+# A child still this young when the console becomes cooked was just started
+# for that cooked stretch (a shell tool). Older children were already there
+# through the TUI — MCP servers, not the command the user is watching.
+HELPER_AGE_S = 1.0
 
 
 def log_path() -> Path:
@@ -39,10 +51,9 @@ def log_path() -> Path:
     return root / "logs" / "unified.jsonl"
 
 
-def pager_exited_for_pid(line: str, pid: int) -> bool:
-    """True when ``line`` is Grok's final quit record for this process."""
+def _log_msg_for_pid(line: str, pid: int, msgs: frozenset) -> bool:
     line = line.strip()
-    if not line or PAGER_EXITED not in line:
+    if not line or '"pid"' not in line:
         return False
     try:
         record = json.loads(line)
@@ -50,7 +61,55 @@ def pager_exited_for_pid(line: str, pid: int) -> bool:
         return False
     if not isinstance(record, dict):
         return False
-    return record.get("msg") == PAGER_EXITED and record.get("pid") == pid
+    return record.get("pid") == pid and record.get("msg") in msgs
+
+
+def pager_exited_for_pid(line: str, pid: int) -> bool:
+    """True when ``line`` is Grok's final quit record for this process."""
+    return _log_msg_for_pid(line, pid, frozenset((PAGER_EXITED,)))
+
+
+def quit_signaled_for_pid(line: str, pid: int) -> bool:
+    """True when the terminal has been handed back or the quit has finished."""
+    return _log_msg_for_pid(line, pid, QUIT_LOG_MSGS)
+
+
+class ReapState:
+    """Cooked-console and quit-log timers for one supervised Grok."""
+
+    def __init__(self) -> None:
+        self.saw_raw = False
+        self.cooked_since: Optional[float] = None
+        self.quit_since: Optional[float] = None
+
+    def update(
+        self,
+        *,
+        now: float,
+        cooked: bool,
+        tool_child: bool,
+        quit_logged: bool,
+        console_grace: float = DEFAULT_GRACE_S,
+        quit_grace: float = 0.5,
+    ) -> Optional[str]:
+        """Return ``"reap"`` when this process should be terminated."""
+        if quit_logged and self.quit_since is None:
+            self.quit_since = now
+        if self.quit_since is not None and now - self.quit_since >= quit_grace:
+            return "reap"
+        if not cooked:
+            self.saw_raw = True
+            self.cooked_since = None
+            return None
+        # Still starting, or a tool is using the terminal. Do not reap.
+        if not self.saw_raw or tool_child:
+            self.cooked_since = None
+            return None
+        if self.cooked_since is None:
+            self.cooked_since = now
+        if now - self.cooked_since >= console_grace:
+            return "reap"
+        return None
 
 
 def watch_until_reaped(
@@ -131,31 +190,6 @@ def _read_new(log_file: Path, offset: int) -> tuple:
     return data.decode("utf-8", errors="replace"), offset + len(data)
 
 
-def arm_from_here() -> Optional[int]:
-    """Start a detached watcher for the Grok that launched this hook.
-
-    Fail-open: any problem returns ``None`` and the hook still exits 0.
-    No-op unless this is Windows and ``VOYAGER_GROK_EXIT_WATCH`` is not ``0``.
-    """
-    if os.name != "nt":
-        return None
-    if os.environ.get("VOYAGER_GROK_EXIT_WATCH", "1") == "0":
-        return None
-    if "--watch-exit" in sys.argv:
-        return None
-    try:
-        pid = grok_ancestor_pid()
-    except Exception:
-        return None
-    if not pid:
-        return None
-    try:
-        _spawn_watcher(pid)
-    except Exception:
-        return None
-    return pid
-
-
 def grok_ancestor_pid(table: Optional[dict] = None,
                       start: Optional[int] = None) -> Optional[int]:
     """Pid of the nearest ``grok.exe`` above this process.
@@ -179,62 +213,295 @@ def grok_ancestor_pid(table: Optional[dict] = None,
     return None
 
 
-def _spawn_watcher(pid: int) -> None:
-    """Start the watcher outside this process's job.
+class ChildRoles:
+    """Which direct children are session helpers, and which are a live tool.
 
-    Grok runs the SessionStart hook inside a job object and tears that job
-    down when the hook returns. A normal child dies with the hook, which is
-    before the user ever quits, so it never gets to reap. ``CREATE_BREAKAWAY_FROM_JOB``
-    is refused from that job (access denied). ``Win32_Process.Create`` goes
-    through the WMI service, and the watcher comes back with a parent that is
-    not this hook.
+    Grok keeps MCP servers as children for the whole session, including the
+    hung quit. Those must not block the reap. A process that appears when the
+    console is cooked — or is still brand new at that moment — is a tool, and
+    it blocks the reap until it exits.
     """
-    script = str(Path(__file__).resolve())
-    command = subprocess.list2cmdline(
-        [sys.executable, script, "--watch-exit", str(int(pid))])
-    ps = (
-        "$cmd = @'\n" + command + "\n'@\n"
-        "Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
-        "-Arguments @{ CommandLine = $cmd } | Out-Null\n"
-    )
-    kwargs = {}
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    completed = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        timeout=8,
-        check=False,
-        **kwargs,
-    )
-    if completed.returncode == 0:
+
+    def __init__(self) -> None:
+        self.role = {}
+        self.seen = {}
+        self.saw_raw = False
+
+    def tool_running(self, *, now: float, cooked: bool, children) -> bool:
+        """``children`` is ``(pid, is_tool)``. Returns whether a tool is live.
+
+        ``is_tool`` is ignored for a process that has already been alive for
+        ``HELPER_AGE_S``: that one was here before this cooked stretch.
+        """
+        alive = {pid for pid, _is_tool in children}
+        for pid in list(self.role):
+            if pid not in alive:
+                self.role.pop(pid, None)
+                self.seen.pop(pid, None)
+        if not cooked:
+            self.saw_raw = True
+        for pid, is_tool in children:
+            if pid not in self.role:
+                self.seen[pid] = now
+                if cooked and self.saw_raw:
+                    self.role[pid] = "tool" if is_tool else "helper"
+                else:
+                    self.role[pid] = "pending"
+                continue
+            if self.role[pid] != "pending":
+                continue
+            aged = now - self.seen[pid] >= HELPER_AGE_S
+            if aged or not is_tool:
+                self.role[pid] = "helper"
+            elif cooked and self.saw_raw:
+                self.role[pid] = "tool"
+        if not (cooked and self.saw_raw):
+            return False
+        return any(self.role.get(pid) == "tool" for pid, _is_tool in children)
+
+
+def is_tool_child(name: str, command_line: Optional[str]) -> bool:
+    """A direct child that is using the terminal for a Grok tool call.
+
+    Long-lived helpers (the MCP server, this supervisor's hook scripts) do
+    not count: they are alive for the whole session, including the hung quit.
+    """
+    text = "{0} {1}".format(name or "", command_line or "").lower()
+    if any(marker in text for marker in _LONG_LIVED_MARKERS):
+        return False
+    if (name or "").lower() in ("conhost.exe", "grok.exe"):
+        return False
+    return True
+
+
+def supervise_loop(
+    pid: int,
+    log_file: Path,
+    *,
+    cooked: Callable[[], bool],
+    tool_child: Callable[[int], bool],
+    alive: Callable[[int], bool],
+    terminate: Callable[[int], None],
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.monotonic,
+    poll_s: float = DEFAULT_POLL_S,
+    console_grace: float = DEFAULT_GRACE_S,
+    quit_grace: float = 0.5,
+    reap_enabled: bool = True,
+) -> str:
+    """Wait until ``pid`` exits, or reap it once the terminal is free.
+
+    ``cooked`` and ``tool_child`` are injected so a test never touches the
+    real console or a real process tree.
+    """
+    state = ReapState()
+    offset = log_file.stat().st_size if log_file.is_file() else 0
+    pending = ""
+    quit_logged = False
+    while alive(pid):
+        chunk, offset = _read_new(log_file, offset)
+        if chunk:
+            pending += chunk
+            lines = pending.split("\n")
+            pending = lines[-1]
+            for line in lines[:-1]:
+                if quit_signaled_for_pid(line, pid):
+                    quit_logged = True
+                    break
+        if reap_enabled:
+            decision = state.update(
+                now=now(),
+                cooked=cooked(),
+                tool_child=tool_child(pid),
+                quit_logged=quit_logged,
+                console_grace=console_grace,
+                quit_grace=quit_grace,
+            )
+            if decision == "reap" and alive(pid):
+                terminate(pid)
+                return "reaped"
+        sleep(poll_s)
+    return "gone"
+
+
+def _prepare_launch() -> None:
+    """Write the continuation rule, then discover the active thread.
+
+    The ``grok.exe`` shim does not run a batch file, so this is the only
+    place that work happens. The ``.cmd`` fallback sets
+    ``VOYAGER_LAUNCHER_RUNNING`` after doing it itself; skip in that case.
+    A failure here must not stop the CLI from starting.
+    """
+    if os.environ.get("VOYAGER_LAUNCHER_RUNNING"):
         return
-    # A launcher that is not inside a hook job can still supervise directly.
-    subprocess.Popen(
-        [sys.executable, script, "--watch-exit", str(int(pid))],
-        close_fds=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-    )
+    os.environ["VOYAGER_LAUNCHER_RUNNING"] = "1"
+    cwd = os.getcwd()
+    try:
+        from voyager.integrations.grok_native import write_context_rules
+        write_context_rules(cwd=cwd)
+    except Exception:
+        pass
+    try:
+        from voyager.launcher import prelaunch
+        prelaunch(provider="grok", cwd=cwd)
+    except Exception:
+        pass
+
+
+def supervise(argv: list, log_file: Optional[Path] = None) -> int:
+    """Run Grok in this console and reap it if the quit never returns."""
+    if not argv:
+        return 2
+    if os.name == "nt":
+        _prepare_launch()
+    # Ignore Ctrl+C only after the child exists. SetConsoleCtrlHandler(NULL,
+    # TRUE) is inherited at CreateProcess time; doing it first would make
+    # Grok ignore Ctrl+C as well.
+    proc = subprocess.Popen(argv)
+    if os.name == "nt":
+        _ignore_ctrl_c()
+    token = _creation_token(proc.pid)
+    reap = os.environ.get("VOYAGER_GROK_EXIT_WATCH", "1") != "0"
+    roles = ChildRoles()
+
+    def _terminate_if_same(pid: int) -> None:
+        # A recycled pid must not be killed. No token means we cannot tell.
+        if token is None or _creation_token(pid) != token:
+            return
+        _terminate(pid)
+    try:
+        outcome = supervise_loop(
+            proc.pid,
+            log_file or log_path(),
+            cooked=_console_is_cooked,
+            tool_child=lambda pid: _tool_child_for_session(pid, roles),
+            alive=lambda pid: proc.poll() is None,
+            terminate=_terminate_if_same,
+            reap_enabled=reap,
+        )
+    except Exception:
+        outcome = "error"
+    if proc.poll() is None and outcome == "reaped":
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    code = proc.poll()
+    _note(proc.pid, outcome)
+    if code is None:
+        return 0
+    return int(code)
 
 
 def main(argv: Optional[list] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "--supervise":
+        return supervise(argv[1:])
     if len(argv) >= 2 and argv[0] == "--watch-exit":
-        try:
-            pid = int(argv[1])
-        except ValueError:
-            return 0
-        try:
-            outcome = watch_until_reaped(pid, log_path())
-        except Exception:
-            return 0
-        _note(pid, outcome)
+        # Kept so a watcher started by an older hook still exits instead of
+        # sitting in a console window. It no longer reaps: the launcher does.
         return 0
     return 0
+
+
+def _ignore_ctrl_c() -> None:
+    """Let Grok handle Ctrl+C. This supervisor shares its console."""
+    import ctypes
+    ctypes.WinDLL("kernel32").SetConsoleCtrlHandler(None, True)
+
+
+def _console_is_cooked() -> bool:
+    """True when this console is back in line-input mode.
+
+    Grok's TUI clears ``ENABLE_LINE_INPUT``. The quit path sets it again
+    before the process blocks, which is the moment the shell should return.
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+    kernel32.GetStdHandle.restype = ctypes.c_void_p
+    kernel32.GetConsoleMode.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetConsoleMode.restype = wintypes.BOOL
+    handle = kernel32.GetStdHandle(0xFFFFFFF6)  # STD_INPUT_HANDLE
+    mode = wintypes.DWORD()
+    if not handle or not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+        return False
+    return bool(mode.value & ENABLE_LINE_INPUT)
+
+
+def _tool_child_for_session(pid: int, roles: ChildRoles) -> bool:
+    """True when a direct child is a tool started for this cooked stretch.
+
+    Children already classified are not opened again. A snapshot failure
+    counts as a tool so the reap does not fire on a guess.
+    """
+    cooked = _console_is_cooked()
+    try:
+        table = _process_table()
+    except Exception:
+        return True
+    children = []
+    for child, (parent, name) in table.items():
+        if parent != pid:
+            continue
+        if roles.role.get(child) in ("helper", "tool"):
+            children.append((child, False))
+            continue
+        children.append((child, is_tool_child(name, _command_line(child))))
+    return roles.tool_running(
+        now=time.monotonic(), cooked=cooked, children=children)
+
+
+def _command_line(pid: int) -> Optional[str]:
+    """Process command line, or ``None`` when it cannot be read.
+
+    A child whose command line cannot be read counts as a tool (see
+    ``is_tool_child``): failing open here would reap a live command.
+    """
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ProcessCommandLineInformation = 60
+    STATUS_INFO_LENGTH_MISMATCH = 0xC0000004
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    ntdll = ctypes.WinDLL("ntdll")
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    ntdll.NtQueryInformationProcess.argtypes = [
+        ctypes.c_void_p, wintypes.ULONG, ctypes.c_void_p,
+        wintypes.ULONG, ctypes.POINTER(wintypes.ULONG),
+    ]
+    ntdll.NtQueryInformationProcess.restype = ctypes.c_ulong
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        needed = wintypes.ULONG(0)
+        status = ntdll.NtQueryInformationProcess(
+            handle, ProcessCommandLineInformation, None, 0, ctypes.byref(needed))
+        if status != STATUS_INFO_LENGTH_MISMATCH or not needed.value:
+            return None
+        buf = ctypes.create_string_buffer(needed.value)
+        status = ntdll.NtQueryInformationProcess(
+            handle, ProcessCommandLineInformation, buf, needed.value,
+            ctypes.byref(needed))
+        if status != 0 or needed.value < 16:
+            return None
+        length = int.from_bytes(buf.raw[0:2], "little")
+        ptr = int.from_bytes(buf.raw[8:16], "little")
+        if not ptr or length <= 0:
+            return None
+        return ctypes.wstring_at(ptr, length // 2)
+    except Exception:
+        return None
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _note(pid: int, outcome: str) -> None:

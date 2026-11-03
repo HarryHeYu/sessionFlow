@@ -12,9 +12,13 @@ import json
 import pytest
 
 from voyager.integrations.grok_exit_watch import (
-    arm_from_here,
+    ChildRoles,
+    ReapState,
     grok_ancestor_pid,
+    is_tool_child,
     pager_exited_for_pid,
+    quit_signaled_for_pid,
+    supervise_loop,
     watch_until_reaped,
 )
 
@@ -188,51 +192,102 @@ def test_a_split_line_is_still_seen(tmp_path):
     assert killed == [PID]
 
 
-def test_arm_is_off_when_disabled(monkeypatch):
-    monkeypatch.setenv("VOYAGER_GROK_EXIT_WATCH", "0")
-    assert arm_from_here() is None
+def test_quit_terminal_restore_counts_as_quit_signal():
+    assert quit_signaled_for_pid(_line(PID, "quit.terminal_restore"), PID)
+    assert quit_signaled_for_pid(_line(PID, "pager.exited"), PID)
+    assert not quit_signaled_for_pid(_line(PID, "quit.started"), PID)
 
 
-def test_arm_spawns_the_ancestor_on_windows(monkeypatch):
-    monkeypatch.setattr("voyager.integrations.grok_exit_watch.os.name", "nt")
-    monkeypatch.delenv("VOYAGER_GROK_EXIT_WATCH", raising=False)
-    monkeypatch.setattr(
-        "voyager.integrations.grok_exit_watch.grok_ancestor_pid", lambda: 77)
-    seen = []
-    monkeypatch.setattr(
-        "voyager.integrations.grok_exit_watch._spawn_watcher",
-        lambda pid: seen.append(pid))
-    assert arm_from_here() == 77
-    assert seen == [77]
+def test_session_helpers_do_not_block_the_quit_reap():
+    roles = ChildRoles()
+    mcp = [(10, True), (11, True)]
+    # Startup is cooked, and these processes are still young.
+    assert roles.tool_running(now=0, cooked=True, children=mcp) is False
+    assert roles.tool_running(now=0.2, cooked=False, children=mcp) is False
+    # Quit. The same processes are now old, so they are helpers.
+    assert roles.tool_running(now=2.0, cooked=True, children=mcp) is False
 
 
-def test_spawn_uses_wmi_so_the_hook_job_cannot_kill_it(monkeypatch):
-    calls = []
-
-    def fake_run(argv, **kwargs):
-        calls.append((argv, kwargs))
-        class Done:
-            returncode = 0
-        return Done()
-
-    monkeypatch.setattr(
-        "voyager.integrations.grok_exit_watch.subprocess.run", fake_run)
-    monkeypatch.setattr(
-        "voyager.integrations.grok_exit_watch.subprocess.Popen",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("child spawn")))
-    from voyager.integrations.grok_exit_watch import _spawn_watcher
-    _spawn_watcher(77)
-    assert calls, "watcher was not started"
-    argv, kwargs = calls[0]
-    assert argv[0] == "powershell"
-    assert "--watch-exit 77" in argv[-1]
-    assert kwargs.get("timeout") == 8
+def test_a_shell_that_appears_as_the_console_is_cooked_blocks_the_reap():
+    roles = ChildRoles()
+    roles.tool_running(now=0, cooked=False, children=[])
+    assert roles.tool_running(now=5, cooked=True, children=[(20, True)]) is True
+    assert roles.tool_running(now=6, cooked=True, children=[]) is False
 
 
-def test_arm_is_off_off_windows(monkeypatch):
-    monkeypatch.setattr("voyager.integrations.grok_exit_watch.os.name", "posix")
-    monkeypatch.delenv("VOYAGER_GROK_EXIT_WATCH", raising=False)
-    assert arm_from_here() is None
+def test_a_shell_seen_for_a_moment_of_raw_mode_is_still_a_tool():
+    roles = ChildRoles()
+    roles.tool_running(now=0, cooked=False, children=[])
+    roles.tool_running(now=5, cooked=False, children=[(21, True)])
+    assert roles.tool_running(now=5.2, cooked=True, children=[(21, True)]) is True
+
+
+def test_conhost_appearing_while_cooked_does_not_block():
+    roles = ChildRoles()
+    roles.tool_running(now=0, cooked=False, children=[])
+    assert roles.tool_running(now=5, cooked=True, children=[(22, False)]) is False
+
+
+def test_mcp_helper_is_not_a_tool_child():
+    assert not is_tool_child(
+        "python.exe", "C:\\Python314\\python.exe -m voyager.mcp_server")
+    assert is_tool_child("python.exe", "C:\\Python314\\python.exe -m pytest")
+    assert is_tool_child("powershell.exe", None)
+    assert not is_tool_child("conhost.exe", None)
+
+
+def test_cooked_console_reaps_only_after_the_tui_and_without_a_tool():
+    state = ReapState()
+    # Startup is cooked. That must not reap.
+    assert state.update(now=0, cooked=True, tool_child=False, quit_logged=False) is None
+    # TUI is raw.
+    assert state.update(now=1, cooked=False, tool_child=False, quit_logged=False) is None
+    # A tool holds the terminal.
+    assert state.update(now=2, cooked=True, tool_child=True, quit_logged=False) is None
+    assert state.update(now=10, cooked=True, tool_child=True, quit_logged=False) is None
+    # Quit restored the console and no tool is running.
+    assert state.update(now=11, cooked=True, tool_child=False, quit_logged=False) is None
+    assert state.update(
+        now=13, cooked=True, tool_child=False, quit_logged=False) == "reap"
+
+
+def test_quit_log_reaps_even_while_a_helper_is_alive():
+    state = ReapState()
+    state.saw_raw = True
+    assert state.update(
+        now=0, cooked=True, tool_child=True, quit_logged=True, quit_grace=0.5,
+    ) is None
+    assert state.update(
+        now=0.5, cooked=True, tool_child=True, quit_logged=True, quit_grace=0.5,
+    ) == "reap"
+
+
+def test_supervisor_reaps_when_the_console_stays_cooked(tmp_path):
+    log = tmp_path / "unified.jsonl"
+    log.write_text("", encoding="utf-8")
+    clock = _Clock()
+    killed = []
+    phase = {"cooked": False, "tool": False}
+
+    def sleep(seconds):
+        clock.sleep(seconds)
+        if clock.t >= 0.5:
+            phase["cooked"] = False  # TUI up
+        if clock.t >= 1.0:
+            phase["cooked"] = True   # quit restored the console
+            phase["tool"] = False
+
+    outcome = supervise_loop(
+        PID, log,
+        cooked=lambda: phase["cooked"] if clock.t < 0.5 or clock.t >= 1.0 else False,
+        tool_child=lambda _pid: phase["tool"],
+        alive=lambda _pid: not killed,
+        terminate=lambda pid: killed.append(pid),
+        sleep=sleep, now=clock.now,
+        poll_s=0.5, console_grace=1.0,
+    )
+    assert outcome == "reaped"
+    assert killed == [PID]
 
 
 @pytest.mark.skipif(__import__("os").name != "nt", reason="Windows process snapshot")

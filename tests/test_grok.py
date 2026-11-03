@@ -40,13 +40,15 @@ FAKE_GROK = "/opt/grok/bin/grok"
 @pytest.fixture
 def grok_with_cli(monkeypatch):
     """Pretend a real `grok` binary is on PATH."""
-    monkeypatch.setattr("shutil.which", lambda name: FAKE_GROK if name == "grok" else None)
+    monkeypatch.setattr(
+        "shutil.which",
+        lambda name, path=None: FAKE_GROK if name == "grok" else None)
 
 
 def test_grok_install_without_cli_is_a_clean_error(tmp_path, monkeypatch):
     from voyager.integrations.grok import GrokIntegration
 
-    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr("shutil.which", lambda name, path=None: None)
     result = GrokIntegration(home=tmp_path).install()
 
     assert result["status"] == "error"
@@ -78,12 +80,41 @@ def test_grok_launcher_install_verify_remove(tmp_path, grok_with_cli):
     assert "VOYAGER_LAUNCHER_RUNNING" in body
     assert "voyager launcher prelaunch" in body
     assert 'exec "$real_executable" "$@"' in body
+    win = (tmp_path / ".voyager/bin/grok.cmd").read_text(encoding="utf-8")
+    assert "--supervise" in win
+    assert "start " not in win
+    launch = (tmp_path / ".voyager/bin/grok.launch").read_text(encoding="utf-8")
+    assert "--supervise" in launch
+    assert FAKE_GROK in launch
+    if os.name == "nt":
+        assert (tmp_path / ".voyager/bin/grok.exe").is_file()
 
     assert gi.verify()["verified"] is True
 
     assert gi.remove()["status"] == "removed"
     assert not launcher.exists()
+    assert not (tmp_path / ".voyager/bin/grok.exe").exists()
+    assert not (tmp_path / ".voyager/bin/grok.launch").exists()
     assert gi.verify()["verified"] is False
+
+
+def test_install_skips_the_shim_directory_when_finding_grok(tmp_path, monkeypatch):
+    from voyager.integrations.grok import GrokIntegration
+
+    home = tmp_path / "home"
+    shim_dir = home / ".voyager" / "bin"
+    real_dir = tmp_path / "real"
+    seen = {}
+
+    def fake_which(name, path=None):
+        seen["path"] = path
+        return str(real_dir / "grok.exe") if name == "grok" else None
+
+    monkeypatch.setenv("PATH", os.pathsep.join([str(shim_dir), str(real_dir)]))
+    monkeypatch.setattr("shutil.which", fake_which)
+    assert GrokIntegration(home=home).install()["status"] == "installed"
+    assert str(shim_dir) not in (seen.get("path") or "")
+    assert str(real_dir) in seen["path"]
 
 
 def test_grok_verify_does_not_require_the_posix_execute_bit_on_windows(tmp_path, grok_with_cli):

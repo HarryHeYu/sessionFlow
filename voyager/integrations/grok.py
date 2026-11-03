@@ -84,20 +84,22 @@ class GrokIntegration:
         )
 
     def _windows_shim_body(self, real_grok: str) -> str:
+        script = Path(__file__).with_name("grok_exit_watch.py").resolve()
+        # Same console as this .cmd. `start` opens a second window, and a
+        # detached python.exe is itself a visible console. The supervisor
+        # reaps Grok after quit when ExitProcess never returns.
         return (
             "@echo off\r\n"
             "REM Voyager launcher for Grok CLI on Windows.\r\n"
-            "REM Writes the continuation rule file, then starts the real CLI.\r\n"
+            "REM Writes the continuation rule file, then runs the real CLI\r\n"
+            "REM in this console under the exit supervisor.\r\n"
             "setlocal\r\n"
             "if not \"%VOYAGER_LAUNCHER_RUNNING%\"==\"\" goto EXECUTE_GROK\r\n"
             "set VOYAGER_LAUNCHER_RUNNING=1\r\n"
             "voyager hook grok-context --cwd \"%CD%\" --quiet\r\n"
             "voyager launcher prelaunch --provider grok --cwd \"%CD%\" >nul 2>&1\r\n"
             ":EXECUTE_GROK\r\n"
-            "REM Run in this console. `start` without /b opens a second console\r\n"
-            "REM and returns immediately, so a Grok that sticks in ExitProcess\r\n"
-            "REM after quit freezes a window this script can no longer reap.\r\n"
-            f"\"{real_grok}\" %*\r\n"
+            f"\"{sys.executable}\" \"{script}\" --supervise \"{real_grok}\" %*\r\n"
             "exit /b %ERRORLEVEL%\r\n"
         )
 
@@ -112,7 +114,7 @@ class GrokIntegration:
         - ~/.voyager/bin/grok                 (POSIX launcher shim)
         - ~/.voyager/bin/grok.cmd             (Windows launcher shim)
         """
-        real_grok = shutil.which("grok")
+        real_grok = self._real_grok()
         if not real_grok:
             return {
                 "provider": "grok",
@@ -153,6 +155,16 @@ exec "$real_executable" "$@"
 
         self.windows_shim.write_text(
             self._windows_shim_body(real_grok), encoding="utf-8")
+        script = Path(__file__).with_name("grok_exit_watch.py").resolve()
+        launch = "\n".join([
+            sys.executable, str(script), "--supervise", real_grok,
+        ]) + "\n"
+        (self.voyager_bin / "grok.launch").write_text(launch, encoding="utf-8")
+        # grok.exe is what PATH finds before grok.cmd. It runs in this console,
+        # so quitting does not go through cmd.exe and does not open a window.
+        shim_exe = Path(__file__).with_name("grok_shim.exe")
+        if os.name == "nt" and shim_exe.is_file():
+            shutil.copyfile(shim_exe, self.voyager_bin / "grok.exe")
 
         # Native SessionStart hook.
         self.hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -181,6 +193,8 @@ exec "$real_executable" "$@"
         """Remove Grok integration artifacts."""
         removed = []
         for path in (self.voyager_bin / "grok", self.windows_shim,
+                     self.voyager_bin / "grok.exe",
+                     self.voyager_bin / "grok.launch",
                      self.hook_json, self.hook_cmd):
             try:
                 if path.exists():
@@ -200,6 +214,25 @@ exec "$real_executable" "$@"
         if self._capabilities is None:
             self._capabilities = detect_capabilities("grok", self.home)
         return self._capabilities
+
+    def _real_grok(self) -> Optional[str]:
+        """The Grok binary this shim should exec.
+
+        ``shutil.which`` walks ``PATH``. Once ``~/.voyager/bin`` is first, that
+        walk finds this shim and the next install would supervise itself.
+        """
+        skip = os.path.normcase(str(self.voyager_bin.resolve()))
+        kept = []
+        for entry in os.environ.get("PATH", "").split(os.pathsep):
+            if not entry:
+                continue
+            try:
+                if os.path.normcase(str(Path(entry).resolve())) == skip:
+                    continue
+            except OSError:
+                pass
+            kept.append(entry)
+        return shutil.which("grok", path=os.pathsep.join(kept))
 
     def launcher_on_path(self) -> bool:
         """Does ``grok`` resolve to our shim before the real binary?
