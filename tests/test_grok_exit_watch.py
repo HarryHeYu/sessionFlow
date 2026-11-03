@@ -17,6 +17,7 @@ from voyager.integrations.grok_exit_watch import (
     grok_ancestor_pid,
     is_tool_child,
     pager_exited_for_pid,
+    quit_footer_visible,
     quit_signaled_for_pid,
     supervise_loop,
     watch_until_reaped,
@@ -249,6 +250,45 @@ def test_cooked_console_reaps_only_after_the_tui_and_without_a_tool():
     assert state.update(now=11, cooked=True, tool_child=False, quit_logged=False) is None
     assert state.update(
         now=13, cooked=True, tool_child=False, quit_logged=False) == "reap"
+
+
+def test_quit_screen_reaps_even_while_the_console_stays_raw():
+    state = ReapState()
+    state.saw_raw = True
+    assert state.update(
+        now=0, cooked=False, tool_child=True, quit_logged=False, footer=True,
+        quit_grace=0.5,
+    ) is None
+    # A transcript that only flashed the words must not reap.
+    assert state.update(
+        now=0.2, cooked=False, tool_child=True, quit_logged=False, footer=False,
+        quit_grace=0.5,
+    ) is None
+    assert state.update(
+        now=1, cooked=False, tool_child=True, quit_logged=False, footer=True,
+        quit_grace=0.5,
+    ) is None
+    assert state.update(
+        now=1.5, cooked=False, tool_child=True, quit_logged=False, footer=True,
+        quit_grace=0.5,
+    ) == "reap"
+
+
+def test_quit_footer_ignores_the_same_words_inside_the_composer():
+    assert quit_footer_visible([
+        "Finishing session…",
+        "",
+        "Resume this session with:",
+        "  grok --resume 01a1a085-7bf5-7482-ba60-660356da922c",
+    ])
+    assert not quit_footer_visible([
+        "Resume this session with:",
+        "  grok --resume 01a1a085",
+        "╭──╮",
+        "│ ❯ still here",
+        "╰──╯",
+    ])
+    assert not quit_footer_visible(["ordinary composer", "│ ❯ hello"])
 
 
 def test_quit_log_reaps_even_while_a_helper_is_alive():

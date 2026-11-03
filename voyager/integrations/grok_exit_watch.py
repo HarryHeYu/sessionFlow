@@ -9,6 +9,8 @@ only tails the log never fires.
 The Windows launcher runs Grok in *this* console and reaps it when either:
 
 * ``pager.exited`` or ``quit.terminal_restore`` is appended for this pid, or
+* the visible window is Grok's quit screen (``Resume this session with:``
+  and no composer), or
 * the console has been in the raw TUI mode and then stays cooked, and every
   child still alive was already there during that TUI (the MCP servers).
 
@@ -89,12 +91,20 @@ class ReapState:
         cooked: bool,
         tool_child: bool,
         quit_logged: bool,
+        footer: bool = False,
         console_grace: float = DEFAULT_GRACE_S,
         quit_grace: float = 0.5,
     ) -> Optional[str]:
-        """Return ``"reap"`` when this process should be terminated."""
-        if quit_logged and self.quit_since is None:
-            self.quit_since = now
+        """Return ``"reap"`` when this process should be terminated.
+
+        ``footer`` is the quit screen Grok draws before it blocks. It has to
+        stay up for ``quit_grace``; a one-off match must not reap.
+        """
+        if quit_logged or footer:
+            if self.quit_since is None:
+                self.quit_since = now
+        elif self.quit_since is not None:
+            self.quit_since = None
         if self.quit_since is not None and now - self.quit_since >= quit_grace:
             return "reap"
         if not cooked:
@@ -260,6 +270,21 @@ class ChildRoles:
         return any(self.role.get(pid) == "tool" for pid, _is_tool in children)
 
 
+def quit_footer_visible(lines) -> bool:
+    """The visible window is Grok's quit screen, not the live composer.
+
+    The quit screen ends with ``Resume this session with:``. The same words
+    inside a chat still have the composer (``❯``) on the bottom rows, and
+    that must not be reaped.
+    """
+    tail = [str(ln) for ln in list(lines)[-12:]]
+    text = "\n".join(tail)
+    if "Resume this session with:" not in text:
+        return False
+    # The live composer owns the bottom of the window. A quit replaces it.
+    return not any(("❯" in ln or "╭" in ln) for ln in tail)
+
+
 def is_tool_child(name: str, command_line: Optional[str]) -> bool:
     """A direct child that is using the terminal for a Grok tool call.
 
@@ -282,6 +307,7 @@ def supervise_loop(
     tool_child: Callable[[int], bool],
     alive: Callable[[int], bool],
     terminate: Callable[[int], None],
+    footer: Callable[[], bool] = lambda: False,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.monotonic,
     poll_s: float = DEFAULT_POLL_S,
@@ -314,6 +340,7 @@ def supervise_loop(
                 cooked=cooked(),
                 tool_child=tool_child(pid),
                 quit_logged=quit_logged,
+                footer=footer(),
                 console_grace=console_grace,
                 quit_grace=quit_grace,
             )
@@ -375,6 +402,7 @@ def supervise(argv: list, log_file: Optional[Path] = None) -> int:
             log_file or log_path(),
             cooked=_console_is_cooked,
             tool_child=lambda pid: _tool_child_for_session(pid, roles),
+            footer=_quit_footer_on_console,
             alive=lambda pid: proc.poll() is None,
             terminate=_terminate_if_same,
             reap_enabled=reap,
@@ -430,6 +458,68 @@ def _console_is_cooked() -> bool:
     if not handle or not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
         return False
     return bool(mode.value & ENABLE_LINE_INPUT)
+
+
+def _visible_console_lines() -> list:
+    """Last rows of this console's visible window. Empty when there is none."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    class COORD(ctypes.Structure):
+        _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+    class SMALL_RECT(ctypes.Structure):
+        _fields_ = [
+            ("Left", ctypes.c_short), ("Top", ctypes.c_short),
+            ("Right", ctypes.c_short), ("Bottom", ctypes.c_short),
+        ]
+
+    class CSBI(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", COORD),
+            ("dwCursorPosition", COORD),
+            ("wAttributes", ctypes.c_ushort),
+            ("srWindow", SMALL_RECT),
+            ("dwMaximumWindowSize", COORD),
+        ]
+
+    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+    kernel32.GetStdHandle.restype = ctypes.c_void_p
+    kernel32.GetConsoleScreenBufferInfo.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(CSBI)]
+    kernel32.GetConsoleScreenBufferInfo.restype = wintypes.BOOL
+    kernel32.ReadConsoleOutputCharacterW.argtypes = [
+        ctypes.c_void_p, ctypes.c_wchar_p, wintypes.DWORD, COORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.ReadConsoleOutputCharacterW.restype = wintypes.BOOL
+    handle = kernel32.GetStdHandle(0xFFFFFFF5)  # STD_OUTPUT_HANDLE
+    info = CSBI()
+    if not handle or not kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(info)):
+        return []
+    width = max(1, int(info.dwSize.X))
+    bottom = int(info.srWindow.Bottom)
+    top = max(int(info.srWindow.Top), bottom - 11)
+    lines = []
+    for y in range(top, bottom + 1):
+        buf = ctypes.create_unicode_buffer(width + 1)
+        read = wintypes.DWORD()
+        if not kernel32.ReadConsoleOutputCharacterW(
+            handle, buf, width, COORD(0, y), ctypes.byref(read),
+        ):
+            return []
+        lines.append(buf.value[:read.value])
+    return lines
+
+
+def _quit_footer_on_console() -> bool:
+    try:
+        return quit_footer_visible(_visible_console_lines())
+    except Exception:
+        return False
 
 
 def _tool_child_for_session(pid: int, roles: ChildRoles) -> bool:

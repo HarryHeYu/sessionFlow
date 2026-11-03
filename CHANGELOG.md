@@ -14,7 +14,8 @@ All notable changes to Voyager are documented here. Format loosely follows
   that watcher with `python.exe` opened a visible command window. The Windows
   launcher now runs Grok in the same console and reaps it once the TUI has
   been active and the console stays cooked with only the children that were
-  already there (the MCP servers), or once `quit.terminal_restore` /
+  already there (the MCP servers), once the visible window is the quit
+  screen (`Resume this session with:` and no composer), or once `quit.terminal_restore` /
   `pager.exited` is logged. A command that owns the terminal is left alone.
   Disable the reap with
   `VOYAGER_GROK_EXIT_WATCH=0`. The install also drops `grok.exe` next to
