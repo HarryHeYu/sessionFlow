@@ -228,6 +228,10 @@ def test_plain_grok_launch_path_carries_the_continuation_context(
     win = (home / ".voyager/bin/grok.cmd").read_text(encoding="utf-8")
     assert "hook grok-context" in shim
     assert "hook grok-context" in win
+    # `start` detaches the CLI into a new console and returns at once, so a
+    # Grok that stays alive after quit freezes a window this shim no longer owns.
+    assert "start " not in win
+    assert '"/opt/grok/bin/grok"' in win
 
 
 # ---------------------------------------------------------------------------

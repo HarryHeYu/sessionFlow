@@ -40,11 +40,18 @@ except ImportError:
 
 
 def _read_payload() -> Dict[str, Any]:
-    """Read Grok's hook envelope from stdin, tolerating an empty/closed pipe."""
+    """Read Grok's hook envelope from stdin.
+
+    A console (or a closed stream) is not a hook pipe. Reading it would block
+    until the user typed EOF, and on Windows that read holds the console the
+    Grok TUI is using. Grok writes one JSON line and does not always close the
+    pipe, so this reads a single line rather than until EOF.
+    """
     try:
-        if sys.stdin is None or sys.stdin.closed:
+        stdin_stream = sys.stdin
+        if stdin_stream is None or stdin_stream.closed or stdin_stream.isatty():
             return {}
-        raw = sys.stdin.read()
+        raw = stdin_stream.readline()
     except Exception:
         return {}
     if not raw or not raw.strip():
@@ -90,6 +97,18 @@ def main() -> int:
     result["hook_event"] = payload.get("hookEventName") or os.environ.get(
         "GROK_HOOK_EVENT"
     )
+    # Arm after the attach is recorded. The watcher is detached and fail-open;
+    # it must not delay or fail this hook. It exists so a Grok 1.0.70 quit,
+    # which logs pager.exited and then sticks in ExitProcess, cannot hold the
+    # terminal. ``~/.voyager/bin`` is not on PATH here, so the launcher shim
+    # never sees this process — the hook is the only sessionFlow code that runs.
+    try:
+        from voyager.integrations.grok_exit_watch import arm_from_here
+        armed = arm_from_here()
+        if armed:
+            result["exit_watch_pid"] = armed
+    except Exception:
+        pass
     _log(result)
     return 0
 

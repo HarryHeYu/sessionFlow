@@ -94,8 +94,11 @@ class GrokIntegration:
             "voyager hook grok-context --cwd \"%CD%\" --quiet\r\n"
             "voyager launcher prelaunch --provider grok --cwd \"%CD%\" >nul 2>&1\r\n"
             ":EXECUTE_GROK\r\n"
-            f"start \"\" \"{real_grok}\" %*\r\n"
-            "endlocal\r\n"
+            "REM Run in this console. `start` without /b opens a second console\r\n"
+            "REM and returns immediately, so a Grok that sticks in ExitProcess\r\n"
+            "REM after quit freezes a window this script can no longer reap.\r\n"
+            f"\"{real_grok}\" %*\r\n"
+            "exit /b %ERRORLEVEL%\r\n"
         )
 
     # -- lifecycle ---------------------------------------------------------

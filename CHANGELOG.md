@@ -3,6 +3,20 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Fixed
+
+- **Grok on Windows stays in the terminal after quit.** Grok 1.0.70 logs
+  `pager.exited` (the session is already flushed and the terminal mode already
+  restored) and then blocks inside `ExitProcess`, so the shell never gets a
+  prompt. The SessionStart hook now arms a detached watcher that, only after
+  that line is appended for the same process, terminates it if it is still
+  alive. A clean exit is left alone, and a recycled pid is not signalled.
+  The Windows launcher shim also runs `grok.exe` in the current console
+  instead of `start`, which detached it into a window the shim could not wait
+  on. Disable the watcher with `VOYAGER_GROK_EXIT_WATCH=0`.
+
 ## [1.3.0] — 2026-10-20
 
 > Headline: **a continuation reference you can actually check.** A bundle stated
