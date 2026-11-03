@@ -11,7 +11,9 @@ them and nothing ran on CI.
 
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -81,11 +83,19 @@ def test_grok_launcher_install_verify_remove(tmp_path, grok_with_cli):
     assert "voyager launcher prelaunch" in body
     assert 'exec "$real_executable" "$@"' in body
     win = (tmp_path / ".voyager/bin/grok.cmd").read_text(encoding="utf-8")
-    assert "--supervise" in win
+    assert "grok.exe" in win
+    assert "python.exe" not in win.lower()
     assert "start " not in win
     launch = (tmp_path / ".voyager/bin/grok.launch").read_text(encoding="utf-8")
     assert "--supervise" in launch
     assert FAKE_GROK in launch
+    hook = json.loads((tmp_path / ".grok/hooks/voyager.json").read_text(encoding="utf-8"))
+    handler = hook["hooks"]["SessionStart"][0]["hooks"][0]
+    assert handler["args"]
+    assert handler["args"][0].endswith("grok_session_start.py")
+    assert not handler["command"].lower().endswith(".cmd")
+    if os.name == "nt":
+        assert Path(handler["command"]).name.lower() == "pythonw.exe"
     if os.name == "nt":
         assert (tmp_path / ".voyager/bin/grok.exe").is_file()
 

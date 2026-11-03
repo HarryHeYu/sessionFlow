@@ -19,7 +19,9 @@ All notable changes to Voyager are documented here. Format loosely follows
   Disable the reap with
   `VOYAGER_GROK_EXIT_WATCH=0`. The install also drops `grok.exe` next to
   `grok.cmd`; the shell runs that exe in the same console, so the quit does
-  not sit inside `cmd.exe` and does not open another window.
+  not sit inside `cmd.exe` and does not open another window. The SessionStart
+  hook starts `pythonw.exe` directly (`args`, no PowerShell, no `.cmd`), so
+  a windowless hook host no longer allocates a console for it.
   `~/.voyager/bin` has to precede the real `grok.exe` on `PATH` or this
   launcher is not the process the shell waits on.
 

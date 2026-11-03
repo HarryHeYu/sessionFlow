@@ -226,13 +226,15 @@ def test_plain_grok_launch_path_carries_the_continuation_context(
     GrokIntegration(home=home).install()
     shim = (home / ".voyager/bin/grok").read_text(encoding="utf-8")
     win = (home / ".voyager/bin/grok.cmd").read_text(encoding="utf-8")
+    launch = (home / ".voyager/bin/grok.launch").read_text(encoding="utf-8")
     assert "hook grok-context" in shim
-    assert "hook grok-context" in win
-    # `start` detaches the CLI into a new console and returns at once, so a
-    # Grok that stays alive after quit freezes a window this shim no longer owns.
+    # The Windows launcher is grok.exe. The .cmd only delegates to it, so a
+    # windowless parent cannot be handed a console python.exe.
+    assert "grok.exe" in win
+    assert "python.exe" not in win.lower()
     assert "start " not in win
-    assert "--supervise" in win
-    assert '"/opt/grok/bin/grok"' in win
+    assert "--supervise" in launch
+    assert "/opt/grok/bin/grok" in launch
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ Two layers, in the order Grok's own surfaces allow:
 The shim only helps when ``~/.voyager/bin`` precedes the real Grok binary on
 ``PATH``; ``verify()`` reports that, and the native hook works regardless.
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -41,65 +42,65 @@ class GrokIntegration:
 
     # -- generated file bodies ---------------------------------------------
 
-    def _hook_command(self) -> str:
-        """The python invocation the SessionStart hook shim runs."""
-        script = Path(__file__).with_name("grok_session_start.py").resolve()
-        return '"{0}" "{1}"'.format(sys.executable, script)
+    def _hook_interpreter(self) -> str:
+        """Interpreter for the SessionStart hook.
+
+        On Windows this is ``pythonw.exe``. The hook host is windowless, and a
+        console ``python.exe`` (or a ``.cmd`` that starts one) allocates a
+        visible console. SessionStart ignores stdout, so the windowless
+        interpreter is enough.
+        """
+        if os.name == "nt":
+            candidate = Path(sys.executable).with_name("pythonw.exe")
+            if candidate.is_file():
+                return str(candidate)
+        return sys.executable
+
+    def _hook_script(self) -> str:
+        return str(Path(__file__).with_name("grok_session_start.py").resolve())
 
     def _hook_json_body(self) -> str:
         """Grok hook definition.
 
-        ``command`` must be a *path to an executable* relative to the JSON file.
-        An inline shell command does not survive the runner: Grok executes hook
-        commands through PowerShell on Windows, and a quoted inline command is
-        rejected at parse time (verified: ``exit code 1`` at the first quote).
+        ``args`` makes ``command`` one program and skips the shell. A command
+        without ``args`` is run by PowerShell, and that path is what opened a
+        console window for ``voyager-session-start.cmd``.
         """
-        return (
-            "{\n"
-            '  "hooks": {\n'
-            '    "SessionStart": [\n'
-            "      {\n"
-            '        "hooks": [\n'
-            "          {\n"
-            '            "type": "command",\n'
-            '            "command": "voyager-session-start.cmd",\n'
-            '            "timeout": 30\n'
-            "          }\n"
-            "        ]\n"
-            "      }\n"
-            "    ]\n"
-            "  }\n"
-            "}\n"
-        )
+        payload = {
+            "hooks": {
+                "SessionStart": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": self._hook_interpreter(),
+                        "args": [self._hook_script()],
+                        "timeout": 30,
+                    }],
+                }],
+            },
+        }
+        return json.dumps(payload, indent=2) + "\n"
 
     def _hook_cmd_body(self) -> str:
+        # Not referenced by the hook JSON. Kept so an older status check that
+        # looks for this filename still sees a file, and so a manual run does
+        # not start console python.
         return (
             "@echo off\r\n"
-            "REM Voyager Grok SessionStart hook.\r\n"
-            "REM Grok runs hook commands through PowerShell, which rejects a\r\n"
-            "REM quoted inline command; a file the runner can execute directly\r\n"
-            "REM avoids the quoting problem entirely.\r\n"
-            f"{self._hook_command()} >nul 2>&1\r\n"
+            "REM Not used by voyager.json. The hook starts pythonw directly.\r\n"
+            "\"{0}\" \"{1}\"\r\n"
             "exit /b 0\r\n"
-        )
+        ).format(self._hook_interpreter(), self._hook_script())
 
     def _windows_shim_body(self, real_grok: str) -> str:
-        script = Path(__file__).with_name("grok_exit_watch.py").resolve()
-        # Same console as this .cmd. `start` opens a second window, and a
-        # detached python.exe is itself a visible console. The supervisor
-        # reaps Grok after quit when ExitProcess never returns.
+        # A .cmd that starts python.exe pops a console when its parent has
+        # none. Delegate to grok.exe, which shares the caller's console.
+        # ``real_grok`` is recorded in grok.launch, which that exe reads.
+        del real_grok
         return (
             "@echo off\r\n"
             "REM Voyager launcher for Grok CLI on Windows.\r\n"
-            "REM Writes the continuation rule file, then runs the real CLI\r\n"
-            "REM in this console under the exit supervisor.\r\n"
-            "setlocal\r\n"
-            "if not \"%VOYAGER_LAUNCHER_RUNNING%\"==\"\" goto EXECUTE_GROK\r\n"
-            "set VOYAGER_LAUNCHER_RUNNING=1\r\n"
-            "voyager hook grok-context --cwd \"%CD%\" --quiet\r\n"
-            "voyager launcher prelaunch --provider grok --cwd \"%CD%\" >nul 2>&1\r\n"
-            ":EXECUTE_GROK\r\n"
-            f"\"{sys.executable}\" \"{script}\" --supervise \"{real_grok}\" %*\r\n"
+            "REM grok.exe runs the supervisor in this console.\r\n"
+            "\"%~dp0grok.exe\" %*\r\n"
             "exit /b %ERRORLEVEL%\r\n"
         )
 
