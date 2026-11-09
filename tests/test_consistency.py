@@ -91,6 +91,15 @@ def test_without_git_the_tag_check_is_needs_online_not_a_pass(tmp_path):
                    for l in r.lines)
 
 
+def test_an_empty_tag_list_is_unknown_not_no_releases(tmp_path):
+    """A shallow clone has no tags; that must not read as "nothing was ever released".
+    """
+    root = make_repo(tmp_path)
+    r = cc.check(root, tags=[])
+    assert any(l.startswith("NEEDS_ONLINE") for l in r.lines), r.lines
+    assert not any(l.startswith("FAIL") and "tag" in l for l in r.lines), r.lines
+
+
 def test_bridge_schema_mismatch_fails(tmp_path):
     root = make_repo(tmp_path)
     plugin = tmp_path / "plugin"

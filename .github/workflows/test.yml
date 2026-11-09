@@ -38,9 +38,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # The release-metadata check compares README against the tags that
-          # exist; a depth-1 checkout has none and would silently degrade to
-          # "needs online verification".
-          fetch-tags: true
+          # exist. `fetch-tags: true` alone left the tag list empty in CI
+          # (measured on run 42594999041), so fetch the full history: it is the
+          # only form that reliably carries tags.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

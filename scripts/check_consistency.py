@@ -129,6 +129,11 @@ def check(root: Path, plugin_root: Optional[Path] = None,
 
     # README: the current release must be a tag that exists, and the newest one.
     known = list(tags) if tags is not None else git_tags(root)
+    if known is not None and not known:
+        # A shallow clone returns an empty list, not an error. Treating that as
+        # "no release exists" turned a CI checkout into three false failures
+        # (run 42594999041). Unknown must stay unknown.
+        known = None
     en = README_EN_CURRENT.search(_read(root / "README.md"))
     zh = README_ZH_CURRENT.search(_read(root / "README.zh-CN.md"))
     if not en:
