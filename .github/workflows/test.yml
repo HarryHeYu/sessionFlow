@@ -36,6 +36,11 @@ jobs:
             python-version: "3.13"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release-metadata check compares README against the tags that
+          # exist; a depth-1 checkout has none and would silently degrade to
+          # "needs online verification".
+          fetch-tags: true
 
       - uses: actions/setup-python@v5
         with:
@@ -61,6 +66,12 @@ jobs:
             python scripts/ci_report_failures.py pytest.log
           fi
           exit $rc
+
+      - name: Release metadata consistency
+        # pyproject, CHANGELOG, README (both languages), release notes and git
+        # tags must name the same release. Fails the job on drift.
+        shell: bash
+        run: python scripts/check_consistency.py
 
   core-only:
     # The core install must work with zero optional dependencies: `pip install

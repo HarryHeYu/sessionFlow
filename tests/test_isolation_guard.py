@@ -281,3 +281,53 @@ def test_empty_and_none_are_not_data_roots(fake_protected):
     assert not iso_guard.is_inside_real_data(None)
     assert not iso_guard.is_inside_real_data("")
     assert iso_guard.guard_not_real_data(None, "db") is None
+
+
+# --- the mistake this guard exists to prevent, as a regression ------------
+#
+# 2026-11-09: a smoke run used `export HOME=<scratch> USERPROFILE=$HOME`.  In
+# bash, `$HOME` on the right-hand side is the OLD value, so USERPROFILE stayed
+# the real profile while HOME looked redirected.  `voyager demo` then wrote into
+# the real `~/.voyager/`.  Redirecting one variable is not enough; every one of
+# them is judged on what it derives.
+
+def test_a_redirected_home_does_not_excuse_a_real_userprofile(fake_protected,
+                                                              tmp_path):
+    profile, _ = fake_protected
+    env = {"HOME": str(tmp_path / "safe"), "USERPROFILE": str(profile)}
+    with pytest.raises(iso_guard.IsolationViolation) as ei:
+        iso_guard.guard_env(env)
+    assert "USERPROFILE" in str(ei.value)
+
+
+def test_a_real_xdg_data_home_fails_closed(fake_protected, tmp_path):
+    profile, _ = fake_protected
+    # Point at a real *data* directory, not the profile root: the root itself is
+    # deliberately not a data root (temp files and executables live there).
+    env = {"HOME": str(tmp_path / "safe"),
+           "XDG_DATA_HOME": str(profile / ".codex")}
+    with pytest.raises(iso_guard.IsolationViolation) as ei:
+        iso_guard.guard_env(env)
+    assert "XDG_DATA_HOME" in str(ei.value)
+
+
+@pytest.mark.skipif(os.name != "nt",
+                    reason="Windows paths are case-insensitive; POSIX is not")
+def test_a_case_variant_of_userprofile_is_still_refused(fake_protected,
+                                                        tmp_path):
+    profile, _ = fake_protected
+    env = {"HOME": str(tmp_path / "safe"),
+           "USERPROFILE": str(profile).upper()}
+    with pytest.raises(iso_guard.IsolationViolation):
+        iso_guard.guard_env(env)
+
+
+def test_a_fully_redirected_environment_passes(fake_protected, tmp_path):
+    """The guard must not be so eager that a correct setup is refused."""
+    safe = tmp_path / "safe"
+    env = {"HOME": str(safe), "USERPROFILE": str(safe),
+           "APPDATA": str(safe / "AppData/Roaming"),
+           "LOCALAPPDATA": str(safe / "AppData/Local"),
+           "XDG_CONFIG_HOME": str(safe / ".config"),
+           "XDG_DATA_HOME": str(safe / ".local/share")}
+    assert iso_guard.guard_env(env) is None
