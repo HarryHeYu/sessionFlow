@@ -53,6 +53,15 @@ one is a compatibility decision, not an edit.
 | [../AGENTS.md](../AGENTS.md) | DEVELOPER_GUIDE | AI coding agent | maintained — the project agent instructions |
 | [../.agents/skills/sessionflow-ci/SKILL.md](../.agents/skills/sessionflow-ci/SKILL.md) | DEVELOPER_GUIDE | AI coding agent | maintained — how to run the quality gates |
 
+## Audits
+
+One round's measurement, frozen when the round closes. An audit records what was
+true on a date; it is not a description of the product and is not updated.
+
+| Document | Kind | Audience | Status |
+|---|---|---|---|
+| [audits/2026-11-next-phase-baseline.md](audits/2026-11-next-phase-baseline.md) | AUDIT | maintainer | frozen — 2026-11-09 baseline before the next phase (test counts, provider matrix, doc drift) |
+
 ## Performance evidence
 
 | Document | Kind | Audience | Status |
