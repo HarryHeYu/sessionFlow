@@ -146,6 +146,22 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
                 print(f"  ! {ad.provider}: could not probe sources ({e})",
                       file=sys.stderr)
 
+        # A provider that renamed its artifact can leave weeks of sessions
+        # invisible while the scan still reports a clean total.  Adapters opt
+        # in by naming the shapes they do NOT recognise; this is a warning,
+        # never an attempt to parse an unknown file.
+        probe_unknown = getattr(ad, "unrecognised_sources", None)
+        if callable(probe_unknown):
+            try:
+                unknown = list(probe_unknown())
+            except Exception:           # a probe must never break the scan
+                unknown = []
+            if unknown and not quiet:
+                print(f"  ! {ad.provider}: {len(unknown)} session file(s) "
+                      f"with unrecognised names were NOT indexed "
+                      f"(e.g. {unknown[0].name}); the provider may have "
+                      f"renamed its artifact", flush=True)
+
         if not sources:
             if unusable_paths:
                 if not quiet:

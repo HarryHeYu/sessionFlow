@@ -410,7 +410,10 @@ are ordinary text to a human and operators to FTS5 -- so the query never has to 
 escaped by hand. The filters are the structured half, and they only ever narrow
 where to look: `--human-only` excludes turns a provider injected through the user
 channel, `--since 7d` accepts relative days or a date, and combining them is a
-conjunction. Chinese substring search works because the index is trigram-based.
+conjunction. Chinese substring search works: 3+ character phrases go through
+the trigram index, and 1-2 character phrases take a literal scan of the same
+indexed text (milliseconds when they hit; a full scan of 469k events costs
+~0.4 s when they do not, which is the only way to prove absence).
 
 ### WorkThread commands
 
@@ -683,7 +686,8 @@ Provider files are read-only. Adapters translate each platform's events into
 one normalized model (`Session` / `Event`) while keeping the raw provider
 event alongside — nothing is lost, giant blobs are truncated with a pointer
 back to the source. Everything lands in a local SQLite index with FTS5
-(trigram, so CJK substring search works). Scans are idempotent: sources are
+(trigram, plus a literal fallback for 1-2 character CJK phrases). Scans are
+idempotent: sources are
 tracked by `(mtime, size)` and re-parsed only when they change; sessions
 whose source files vanish are pruned.
 

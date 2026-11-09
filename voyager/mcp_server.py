@@ -609,6 +609,11 @@ def voyager_startup(provider: str, cwd: str = "", native_session_id: str = "",
 def main() -> None:
     if not MCP_AVAILABLE:
         raise SystemExit(_MISSING_MCP)
+    # JSON-RPC over stdio is UTF-8 by spec; on Windows the default stream
+    # encoding is the ANSI code page, which turns every non-ASCII title into
+    # U+FFFD before the client ever sees it.
+    from .util import force_utf8_stdio
+    force_utf8_stdio()
     mcp.run()
 
 

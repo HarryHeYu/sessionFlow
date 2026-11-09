@@ -8,6 +8,12 @@ as a crash that aborts the scan.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
 
 def test_dsh_parse(adapter_of, patch_paths, dsh_fixture):
     ad = adapter_of("dsh")
@@ -51,3 +57,49 @@ def test_dsh_corrupt_zstd_is_reported(adapter_of, patch_paths, dsh_fixture):
     f.write_bytes(b"NOT-ZSTD")
     r = ad.parse(f)
     assert r and "__error__" in r     # surfaced, not a crash
+
+
+def test_dsh_discovers_both_artifact_names(adapter_of, patch_paths, dsh_fixture,
+                                           tmp_path):
+    """DSH 0.2.1-rc.3 renamed session.jsonl.zstd -> session.v4.jsonl.zstd.
+
+    Both shapes can be present on one machine.  A glob that only names the old
+    one silently drops every newer session while `scan` still reports a clean
+    total, which is worse than an error.
+    """
+    zstd = pytest.importorskip("zstandard", reason="dsh extra not installed")
+    src = (FIXTURES / "dsh" / "sessions" / "--E--proj--demo--" /
+           "session-dsh-1" / "session.jsonl")
+    blob = zstd.ZstdCompressor().compress(src.read_bytes())
+
+    new_dir = dsh_fixture / "--E--proj--demo--" / "session-dsh-v4"
+    new_dir.mkdir(parents=True)
+    (new_dir / "session.v4.jsonl.zstd").write_bytes(blob)
+
+    # a future rename must not be parsed as a session, but must be reported
+    future = dsh_fixture / "--E--proj--demo--" / "session-dsh-v9"
+    future.mkdir(parents=True)
+    (future / "rollout.jsonl.zstd").write_bytes(blob)
+
+    ad = adapter_of("dsh")
+    patch_paths(ad, SESSIONS_DIR=dsh_fixture)
+    files = ad.discover()
+    names = [p.name for p in files]
+    assert "session.jsonl.zstd" in names
+    assert "session.v4.jsonl.zstd" in names
+    assert len(files) == 2
+
+    # both parse: the parser is format-agnostic, only discovery was wrong
+    for f in files:
+        r = ad.parse(f)
+        assert r and "session" in r and "events" in r
+
+    unknown = ad.unrecognised_sources()
+    assert [p.name for p in unknown] == ["rollout.jsonl.zstd"]
+
+
+def test_dsh_unrecognised_sources_is_empty_for_known_names(
+        adapter_of, patch_paths, dsh_fixture):
+    ad = adapter_of("dsh")
+    patch_paths(ad, SESSIONS_DIR=dsh_fixture)
+    assert ad.unrecognised_sources() == []

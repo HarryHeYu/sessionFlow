@@ -22,7 +22,8 @@ from .scanner import (MAX_WRITE_FAILURES,
                       WRITE_FAILURE_GRACE_SECONDS, run_scan)
 from .store import Store, default_db_path, lease_state, open_read
 from .integrations.hook import cmd_hook_startup
-from .util import fmt_ts, same_repo_loose, parse_when as _parse_when
+from .util import (fmt_ts, same_repo_loose, parse_when as _parse_when,
+                   force_utf8_stdio)
 from ._version import get_version
 
 
@@ -1969,6 +1970,11 @@ def cmd_checkpoint(args) -> int:
 # ---------------------------------------------------------------------------
 
 def main(argv=None) -> int:
+    # Every subcommand inherits this.  On Windows the default stdout encoding
+    # is the ANSI code page, while the DSH bridge and the VS Code client decode
+    # as UTF-8 -- without this, every non-ASCII title arrives as U+FFFD and the
+    # user blames the index.  Single entry point, no environment variable.
+    force_utf8_stdio()
     p = argparse.ArgumentParser(
         prog="voyager",
         description="Unified local session manager for AI coding agents",

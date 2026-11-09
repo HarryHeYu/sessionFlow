@@ -1,10 +1,15 @@
 """DeepSeek Harness (DSH) adapter.
 
-Source: ~/.dsh/sessions/<munged-cwd>/session-<uuid>/session.jsonl.zstd
+Source: ~/.dsh/sessions/<munged-cwd>/session-<uuid>/session*.jsonl.zstd
 zstd-compressed JSONL; rows {type, seq, time(ms), data}.
 Key types: session, session/title, user/message, assistant/message,
 reasoning-chunks/... (明文流, skipped), tool/call, tool/result,
 request/context (provider/model/contextWindow), turn/*, step/*.
+
+The artifact was renamed over time: older DSH builds write
+``session.jsonl.zstd``; 0.2.1-rc.3 and later write
+``session.v4.jsonl.zstd``.  Both can be present on one machine at the same
+time, and the parser is format-agnostic, so discovery has to accept both.
 """
 
 from __future__ import annotations
@@ -66,10 +71,37 @@ class DshAdapter(Adapter):
     can_resume = False
     can_fork = False
 
+    # Known artifact names.  A new DSH build that renames the file again must
+    # not silently lose weeks of history: discover() takes the union and
+    # unrecognised_sources() reports anything that looks like a session file
+    # but matched none of these, so `voyager scan` says so instead of
+    # quietly reporting "N sessions indexed" with a hole in the middle.
+    SESSION_GLOBS = (
+        "*/session-*/session.jsonl.zstd",
+        "*/session-*/session.v*.jsonl.zstd",
+    )
+
     def discover(self) -> List[Path]:
         if not SESSIONS_DIR.is_dir():
             return []
-        return sorted(SESSIONS_DIR.glob("*/session-*/session.jsonl.zstd"))
+        found: set = set()
+        for pattern in self.SESSION_GLOBS:
+            found.update(SESSIONS_DIR.glob(pattern))
+        return sorted(found)
+
+    def unrecognised_sources(self) -> List[Path]:
+        """Session-shaped zstd files that no known glob claims.
+
+        This is a probe, not a source of sessions: the scanner only uses it
+        to warn.  Never parse an unknown name as if it were a session.
+        """
+        if not SESSIONS_DIR.is_dir():
+            return []
+        known = set(self.discover())
+        return sorted(
+            p for p in SESSIONS_DIR.glob("*/session-*/*.jsonl.zstd")
+            if p not in known
+        )
 
     def parse(self, source: Path) -> Optional[dict]:
         try:

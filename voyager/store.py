@@ -115,6 +115,11 @@ CREATE INDEX IF NOT EXISTS idx_events_sid ON events(sid);
 CREATE INDEX IF NOT EXISTS idx_events_sid_ts ON events(sid, ts DESC, seq DESC);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
 CREATE INDEX IF NOT EXISTS idx_events_call ON events(tool_call_id);
+-- The short-phrase fallback in Store.search orders by ts across the whole
+-- index (a LIKE scan has no rank to sort by).  Without this index SQLite
+-- sorts every matching row -- measured 3.4-5.2 s on a 469k-event index --
+-- instead of walking the newest events and stopping at the LIMIT.
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
 
 CREATE TABLE IF NOT EXISTS files (
     sid        TEXT NOT NULL,
@@ -1393,23 +1398,22 @@ class Store:
     def events(self, sid: str) -> List[sqlite3.Row]:
         return self.q("SELECT * FROM events WHERE sid=? ORDER BY seq, id", (sid,))
 
-    def search(self, query: str, limit: int = 50,
-               filters: Optional[Dict[str, Any]] = None) -> List[sqlite3.Row]:
-        """Substring search over every event body, with optional filters.
+    #: FTS5's trigram tokenizer builds 3-character windows, so a phrase shorter
+    #: than this cannot match anything.  Two-character CJK words ("补丁",
+    #: "账本") are what Chinese users type most, and MATCH returns 0 rows with
+    #: no error -- which reads as "this word is not in the index".  Below this
+    #: length the search takes a LIKE fallback over the *same* event_fts rows.
+    TRIGRAM_MIN_CHARS = 3
 
-        The user's text is always passed as ONE quoted FTS5 phrase: queries
-        like `pytest -q`, `a:b` or `"unbalanced` are ordinary text to a human
-        but operators/syntax errors to FTS5, and this is a substring search,
-        not a query language.
+    def _search_clause(self, f: Dict[str, Any]) -> Tuple[List[str], List[Any]]:
+        """Build the filter half of a search: WHERE fragments + bound values.
 
-        Filters narrow *where* to look; they never change what the phrase means.
-        Recognised keys: ``providers``, ``repo``, ``since``, ``until``,
-        ``kinds``, ``tool``, ``file``, ``origins``, ``human_only``.
+        Filters narrow *where* to look; they never change what the phrase
+        means.  Shared by the FTS path and the short-phrase fallback so the two
+        cannot drift into selecting different row sets.
         """
-        phrase = '"' + (query or "").replace('"', '""') + '"'
         where: List[str] = []
-        args: List[Any] = [phrase]
-        f = filters or {}
+        args: List[Any] = []
 
         def _in(column: str, values) -> None:
             values = [v for v in (values or []) if v]
@@ -1438,9 +1442,83 @@ class Store:
             where.append("e.origin = 'human'")
         else:
             _in("e.origin", f.get("origins"))
+        return where, args
 
+    def _search_short(self, text: str, limit: int, clause: str,
+                      fargs: List[Any]) -> List[sqlite3.Row]:
+        """Literal-scan fallback for phrases the trigram index cannot see.
+
+        Same source as the FTS path: the ``event_fts.body`` column that
+        ``MATCH`` reads, so a row found here would have been found there had
+        the phrase been long enough.  The body is what the index stores (it is
+        capped at :data:`FTS_BODY_CAP` on write), not a second concatenation of
+        the ``events`` columns -- recomputing it would silently search text the
+        index never saw.
+
+        Ordering is ``e.ts DESC``, never ``rowid``: rowid follows insertion
+        order, so a ``LIMIT`` on it returns the wrong window while looking
+        fast.  ``idx_events_ts`` keeps this to a bounded scan.
+        """
+        # instr() is a literal substring test: no wildcard semantics to escape
+        # (`%` in the query is a percent sign, as it is for FTS), and it reuses
+        # the same lower() the snippet position needs.  LIKE would need ESCAPE
+        # and a second scan of the body.
+        n = len(text)
+        sql = ("""
+        WITH hits AS (
+            SELECT e.id AS rid, e.sid AS esid, e.ts AS ets,
+                   f.sid AS fsid, f.body AS body,
+                   instr(lower(f.body), lower(?)) AS pos
+              FROM events e
+              JOIN event_fts f ON f.rowid = e.id
+              JOIN sessions s ON s.id = e.sid
+             WHERE instr(lower(f.body), lower(?)) > 0""" + clause + """
+             ORDER BY e.ts DESC
+             LIMIT ?
+        )
+        SELECT s.*, e.kind AS _kind, e.origin AS _origin, e.ts AS _ts,
+               e.tool_name AS _tool, e.file_path AS _file,
+               h.fsid AS _sid,
+               CASE WHEN h.pos > 0
+                    THEN '…' || substr(h.body, max(1, h.pos - 24), 24)
+                         || '>>>' || substr(h.body, h.pos, ?) || '<<<'
+                         || substr(h.body, h.pos + ?, 48) || '…'
+                    ELSE '…' || substr(h.body, 1, 120) || '…'
+               END AS snippet
+          FROM hits h
+          JOIN events e ON e.id = h.rid
+          JOIN sessions s ON s.id = h.esid
+         ORDER BY e.ts DESC
+        """)
+        # Parameter order follows the SQL text: pos, WHERE, filters, LIMIT,
+        # then the two substr() lengths in the outer SELECT.
+        return self.q(sql, tuple([text, text] + fargs + [limit, n, n]))
+
+    def search(self, query: str, limit: int = 50,
+               filters: Optional[Dict[str, Any]] = None) -> List[sqlite3.Row]:
+        """Substring search over every event body, with optional filters.
+
+        The user's text is always passed as ONE quoted FTS5 phrase: queries
+        like `pytest -q`, `a:b` or `"unbalanced` are ordinary text to a human
+        but operators/syntax errors to FTS5, and this is a substring search,
+        not a query language.
+
+        A phrase shorter than :data:`TRIGRAM_MIN_CHARS` cannot be matched by
+        the trigram index at all, so it takes the LIKE fallback above instead
+        of returning an empty result that looks like "no such word".
+
+        Filters narrow *where* to look; they never change what the phrase means.
+        Recognised keys: ``providers``, ``repo``, ``since``, ``until``,
+        ``kinds``, ``tool``, ``file``, ``origins``, ``human_only``.
+        """
+        text = query or ""
+        where, fargs = self._search_clause(filters or {})
         clause = (" AND " + " AND ".join(where)) if where else ""
-        args.append(limit)
+
+        if 0 < len(text) < self.TRIGRAM_MIN_CHARS:
+            return self._search_short(text, limit, clause, fargs)
+
+        phrase = '"' + text.replace('"', '""') + '"'
         return self.q(
             """SELECT s.*, e.kind AS _kind, e.origin AS _origin, e.ts AS _ts,
                       e.tool_name AS _tool, e.file_path AS _file,
@@ -1451,7 +1529,7 @@ class Store:
                JOIN sessions s ON s.id = f.sid
                WHERE event_fts MATCH ?%s
                ORDER BY rank LIMIT ?""" % clause,
-            tuple(args),
+            tuple([phrase] + fargs + [limit]),
         )
 
     def stats(self) -> Dict[str, Any]:

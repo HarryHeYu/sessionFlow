@@ -7,6 +7,26 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Fixed
 
+- **DSH 0.2.1-rc.3 renamed its transcript to `session.v4.jsonl.zstd`, and the
+  adapter only looked for `session.jsonl.zstd`.** Every session written after
+  the rename was invisible: `scan` printed a clean total with no warning, so
+  weeks of history were missing from search while looking indexed. Discovery
+  now accepts both names (`session.v*.jsonl.zstd` covers later renames), and
+  `scan` warns when it finds session-shaped files that no known pattern claims
+  instead of silently skipping them. The parser was already format-agnostic;
+  only discovery was wrong.
+- **Windows wrote stdout in the ANSI code page while the DSH bridge decoded it
+  as UTF-8**, so every non-ASCII title came back as U+FFFD (the index was
+  fine). `voyager` and `voyager-mcp` now force UTF-8 on stdout/stderr at the
+  entry point (`util.force_utf8_stdio`), with no environment variable needed.
+- **Queries shorter than three characters returned nothing.** FTS5's trigram
+  tokenizer indexes 3-character windows, so `voyager search 补丁` (two CJK
+  characters — the common case) silently returned 0 rows and looked like "this
+  word is not in the index". Short phrases now take a literal `instr()` scan
+  over the same `event_fts.body` the index stores, ordered by `ts` (never
+  `rowid`), with a new `idx_events_ts` index. Measured on 469k events: 2 ms
+  when the phrase occurs, ~0.44 s when it does not (a full scan is the only
+  way to prove absence), versus 0 rows before.
 - **Grok on Windows stays in the terminal after quit, and the first
   watcher popped extra consoles.** Grok 1.0.70 restores the console, prints
   the resume footer, and then blocks inside `ExitProcess`. The quit log line

@@ -22,9 +22,38 @@ without an import cycle.
 
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timezone
 from typing import Optional
+
+
+def force_utf8_stdio() -> None:
+    """Best-effort UTF-8 on the standard streams.  Never raises.
+
+    On a Chinese Windows install Python writes stdout in the ANSI code page
+    (GBK / cp936) unless ``PYTHONUTF8=1`` is set.  Everything that reads our
+    output as UTF-8 -- the DSH bridge (``child.stdout.setEncoding('utf8')``),
+    the VS Code client, MCP clients -- then decodes every non-ASCII character
+    as U+FFFD.  The index is fine; only the transport is wrong, so the fix
+    belongs at the process boundary, not at each print().
+
+    ``errors="replace"`` keeps a hostile/locale-specific character from
+    turning a successful command into a traceback: the JSON or the table is
+    still parseable, one glyph is lost.
+
+    Streams that are detached (``sys.stdout is None``) or already wrapped by a
+    test harness may not support ``reconfigure``; both cases are tolerated
+    rather than allowed to abort the command.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except Exception:               # noqa: BLE001 -- never break a command
+            pass
 
 
 def _norm_repo(p: Optional[str]) -> str:
