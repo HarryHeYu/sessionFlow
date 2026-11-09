@@ -5,6 +5,10 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.3.1] — 2026-11-09
+
 ### Fixed
 
 - **DSH 0.2.1-rc.3 renamed its transcript to `session.v4.jsonl.zstd`, and the

@@ -129,6 +129,12 @@ voyager --version        # 应当输出 1.3.0
 > 唯一区别是新版本给自己加了一个索引。回滚同样安全——v1.1.0 读同一个库，
 > 只是忽略那个多出来的索引。
 
+> **`main` 比最新 tag 新。** 三个正确性修复在 `v1.3.0` 之后才落地，**不在**
+> 这个 tag 里：DSH 0.2.1-rc.3 改了会话文件名（`session.v4.jsonl.zstd`）导致发现
+> 阶段看不到新会话；Windows 下 stdout 按 ANSI 代码页写、而 DSH bridge 按 UTF-8 读；
+> 短于 3 个字符的查询返回空。需要这些修复就装 `@main`，它们记在
+> `CHANGELOG.md` 的 `[Unreleased]` 下。
+
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
 ```sh

@@ -2008,8 +2008,30 @@ def main(argv=None) -> int:
 
     # provenance: structural origin of each event (who really produced it).
     # Read-only by default; `enrich` only ever fills NULLs and only on --apply.
-    sp = sub.add_parser("evidence",
-                        help="verify a bundle's Evidence Reference")
+    sp = sub.add_parser(
+        "evidence",
+        help="verify a bundle's Evidence Reference",
+        # The five outcomes and their exit codes are the contract a script
+        # branches on, so they belong in --help and not only in the README.
+        # tests/test_evidence_help.py compares this text with
+        # evidence.EXIT_CODES, so the two cannot drift.
+        description=(
+            "Check whether an Evidence Reference still lands on the event it "
+            "cites.\n"
+            "\n"
+            "Outcomes (exit code):\n"
+            "  MATCH (0)              the event at that position is the one cited\n"
+            "  MISMATCH (1)           something else is there now\n"
+            "  NOT_FOUND (2)          no event at that position\n"
+            "  UNVERIFIABLE (3)       no digest given; only the position was checked\n"
+            "  INVALID_REFERENCE (4)  the reference itself is malformed\n"
+            "\n"
+            "MATCH means the reference is consistent. It does not mean the claim "
+            "is true: the fingerprint is 8 hex characters, not a signature, and "
+            "the source check compares mtime and size rather than bytes."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sp.add_argument("action", nargs="?", default="verify",
                     choices=["verify"],
                     help="what to do with the reference")

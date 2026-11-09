@@ -103,3 +103,34 @@ def test_dsh_unrecognised_sources_is_empty_for_known_names(
     ad = adapter_of("dsh")
     patch_paths(ad, SESSIONS_DIR=dsh_fixture)
     assert ad.unrecognised_sources() == []
+
+
+def test_dsh_same_session_under_both_names_indexes_once(
+        adapter_of, patch_paths, dsh_fixture, tmp_path):
+    """Both names in one session directory must not become two sessions.
+
+    The parser derives the session id from the record, not the filename, so the
+    second file replaces the first.  What must not happen is a duplicate row or
+    a silent "2 sessions indexed" for one conversation.
+    """
+    zstd = pytest.importorskip("zstandard", reason="dsh extra not installed")
+    src = (FIXTURES / "dsh" / "sessions" / "--E--proj--demo--" /
+           "session-dsh-1" / "session.jsonl")
+    blob = zstd.ZstdCompressor().compress(src.read_bytes())
+    same_dir = dsh_fixture / "--E--proj--demo--" / "session-dsh-1"
+    (same_dir / "session.v4.jsonl.zstd").write_bytes(blob)
+
+    ad = adapter_of("dsh")
+    patch_paths(ad, SESSIONS_DIR=dsh_fixture)
+    files = ad.discover()
+    assert len(files) == 2
+
+    from voyager.store import Store
+    store = Store(tmp_path / "index.db")
+    try:
+        for f in files:
+            r = ad.parse(f)
+            store.replace_session(r["session"], r["events"], "dsh", f)
+        assert store.stats()["sessions"] == 1
+    finally:
+        store.close()

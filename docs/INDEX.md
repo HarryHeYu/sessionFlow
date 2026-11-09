@@ -61,6 +61,7 @@ true on a date; it is not a description of the product and is not updated.
 | Document | Kind | Audience | Status |
 |---|---|---|---|
 | [audits/2026-11-next-phase-baseline.md](audits/2026-11-next-phase-baseline.md) | AUDIT | maintainer | frozen — 2026-11-09 baseline before the next phase (test counts, provider matrix, doc drift) |
+| [audits/2026-11-v1.3.1-rc-report.md](audits/2026-11-v1.3.1-rc-report.md) | AUDIT | maintainer | frozen — 2026-11-09 v1.3.1 candidate: artifacts, upgrade path, plugin pairing, release steps |
 
 ## Performance evidence
 
@@ -91,9 +92,10 @@ true on a date; it is not a description of the product and is not updated.
 `releases/` holds `v1.0.0-rc1.md`, `v1.0.0-rc2.md`, `v1.0.0.md`,
 `v1.1.0-readiness.md`, `v1.1.0-hardening-audit.md`,
 `v1.1.0-community-readiness.md`, `v1.1.0.md`, `v1.1.1.md`,
-`v1.1.1-reliability-hardening.md`, `scan-reliability-and-perf-debt.md` and
-`p7-architecture-audit.md`. The release notes the workflow reads for a tag are
-`v<version>.md`; the rest are round reports.
+`v1.1.1-reliability-hardening.md`, `v1.2.0.md`, `v1.3.0.md`,
+`scan-reliability-and-perf-debt.md` and `p7-architecture-audit.md`. The release
+notes the workflow reads for a tag are `v<version>.md`; the rest are round
+reports. `v1.2.0.md` and `v1.3.0.md` were backfilled on 2026-11-09 and say so.
 
 ## Governance
 

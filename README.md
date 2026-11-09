@@ -147,6 +147,13 @@ voyager --version        # must print 1.3.0
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
 
+> **`main` is ahead of the latest tag.** Three correctness fixes landed after
+> `v1.3.0` and are **not** in it: DSH 0.2.1-rc.3's renamed transcript
+> (`session.v4.jsonl.zstd`) was invisible to discovery, Windows wrote stdout in
+> the ANSI code page while the DSH bridge decoded UTF-8, and queries shorter than
+> three characters returned nothing. Install `@main` if you need them before the
+> next patch release; they are listed under `[Unreleased]` in `CHANGELOG.md`.
+
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
 

@@ -28,10 +28,10 @@ def world(tmp_path):
     src = tmp_path / "s.jsonl"
     src.write_text("{}", encoding="utf-8")
 
-    def seed(sid, provider, events):
+    def seed(sid, provider, events, repo="E:/p"):
         sess = new_session(id=sid, provider=provider, native_session_id=sid,
                            title=sid, started_at=NOW - 1000, updated_at=NOW,
-                           repo_root="E:/p", cwd="E:/p")
+                           repo_root=repo, cwd=repo)
         store.replace_session(sess, events, provider, src)
 
     seed("codex:a", "codex", [
@@ -44,6 +44,10 @@ def world(tmp_path):
         new_event(sid="claude:b", seq=1, kind="user", ts=NOW - 100,
                   content="abc def 补丁", origin="human"),
     ])
+    seed("claude:c", "claude", [
+        new_event(sid="claude:c", seq=1, kind="user", ts=NOW - 50,
+                  content="補丁 한국 テスト", origin="human"),
+    ], repo="E:/q")
     yield store
     store.close()
 
@@ -95,6 +99,18 @@ def test_wildcards_are_literal_text(world):
     """`%` is a LIKE wildcard; the query is literal text, so it must not match."""
     assert world.search("%") == []
     assert world.search("_") == []
+
+
+def test_japanese_and_korean_two_characters(world):
+    """The trigram limit is about characters, not bytes or script."""
+    assert len(world.search("補丁")) == 1      # Japanese kanji, 2 chars
+    assert len(world.search("한국")) == 1      # Hangul, 2 chars
+
+
+def test_repo_filter_narrows_short_results(world):
+    """Filters must narrow the fallback exactly as they narrow FTS."""
+    assert len(world.search("補丁", filters={"repo": "E:/q"})) == 1
+    assert world.search("補丁", filters={"repo": "E:/p"}) == []
 
 
 def test_empty_query_does_not_return_everything(world):
