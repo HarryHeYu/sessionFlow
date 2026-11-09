@@ -62,6 +62,7 @@ true on a date; it is not a description of the product and is not updated.
 |---|---|---|---|
 | [audits/2026-11-next-phase-baseline.md](audits/2026-11-next-phase-baseline.md) | AUDIT | maintainer | frozen — 2026-11-09 baseline before the next phase (test counts, provider matrix, doc drift) |
 | [audits/2026-11-v1.3.1-rc-report.md](audits/2026-11-v1.3.1-rc-report.md) | AUDIT | maintainer | frozen — 2026-11-09 v1.3.1 candidate: artifacts, upgrade path, plugin pairing, release steps |
+| [audits/2026-11-development-final-report.md](audits/2026-11-development-final-report.md) | AUDIT | maintainer | frozen — Phase 0–1 delivery; Phases 2–10 not started |
 
 ## Performance evidence
 
