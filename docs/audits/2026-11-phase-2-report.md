@@ -126,8 +126,18 @@ the real `~/.voyager`. Four tests now pin the behaviour:
 | Consistency checker | 8 tests, 8 checks OK on this tree |
 | Isolation guard | 21 passed / 2 skipped (same two environment skips as baseline) |
 | Docs | 20 passed |
-| Core CI | run after this commit (see the push note in the final reply) |
-| Plugin CI | `cold-start.yml` only; no change made, not re-run |
+| Core CI | **10/10 success** (run 42595938476, `66194e7`) — the consistency step passed in CI |
+| Plugin CI | **success** (run 42595007899, `6940d9b`) — `cold-start.yml` runs on push |
+
+### The checker failed its own first CI run — and that was useful
+
+Run 42594999041 failed all eight matrix jobs on the new step, with
+`v1.3.0 not in []`: `actions/checkout` with `fetch-tags: true` produced no tags,
+and the checker read an empty list as "no release exists". Two fixes: fetch with
+`fetch-depth: 0`, and treat an empty list as **unknown** (`NEEDS_ONLINE`) with a
+regression test. The next run passed 10/10 and printed the eight checks,
+including `README names the newest tag v1.3.0` — which is the proof that the tag
+list is now real rather than assumed.
 
 ## G. Release readiness (v1.3.1)
 
