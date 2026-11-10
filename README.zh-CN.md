@@ -496,6 +496,21 @@ Context Composer）排在这条 pipeline 之后。
 分阶段计划、CLI 草稿和 issue 列表：
 [docs/ROADMAP.zh-CN.md](docs/ROADMAP.zh-CN.md) · [English](docs/ROADMAP.md)。
 
+## 参与贡献
+
+[CONTRIBUTING.md](CONTRIBUTING.md) 写了目录结构、架构规则和 PR 要求。动手前值得先知道两件事：
+
+- **核心负责「行为」，DSH 插件负责「桥」。** 搜索、合并、接续、provenance 和
+  provider 解析只在这里实现一次；[插件](https://github.com/HarryHeYu/dsh-sessionflow)
+  只调用，不重写。
+- **说明你达到了哪一级验证** —— `UNIT_TESTED`、`INTEGRATION_TESTED`、
+  `LIVE_VERIFIED` 或 `NOT_VERIFIED`。合成测试不等于实机跑过，文档里的区分是刻意保留的。
+
+可认领的任务和范围见
+[docs/ROADMAP.md](docs/ROADMAP.md) 与
+[插件仓 ROADMAP](https://github.com/HarryHeYu/dsh-sessionflow/blob/main/ROADMAP.md)。
+流程是：issue 讨论 → fork/分支 → draft PR → CI 与 review → 合并；没有固定交付日期。
+
 ## License
 
 MIT — 见 [LICENSE](LICENSE)。

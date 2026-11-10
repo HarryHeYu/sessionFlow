@@ -714,6 +714,25 @@ PyPI/packaging polish — lives in [docs/POST-1.0.md](https://github.com/HarryHe
 Phased plan, CLI sketches, and the issue list:
 [docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) · [中文](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.zh-CN.md).
 
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the layout, the architecture rules and
+what a PR needs. Two things worth knowing before you start:
+
+- **The core owns behaviour; the DSH plugin owns the bridge.** Search, merge,
+  continuity, provenance and provider parsing are implemented once, here. The
+  [plugin](https://github.com/HarryHeYu/dsh-sessionflow) calls them and never
+  re-implements them.
+- **Say which verification level you reached** — `UNIT_TESTED`,
+  `INTEGRATION_TESTED`, `LIVE_VERIFIED`, or `NOT_VERIFIED`. A synthetic test is
+  not a live run, and the docs here are written to keep that distinction.
+
+Claimable work and its scope live in
+[docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md)
+and the [plugin's ROADMAP](https://github.com/HarryHeYu/dsh-sessionflow/blob/main/ROADMAP.md).
+Work flow: issue discussion → fork/branch → draft PR → CI and review → merge.
+No fixed dates.
+
 ## License
 
 MIT — see [LICENSE](https://github.com/HarryHeYu/sessionFlow/blob/main/LICENSE).
