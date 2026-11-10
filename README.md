@@ -264,7 +264,7 @@ that index**, so they inherit it: treat `dashboard.html`, `handoff-*.md` and
 Start with one agent rather than all of them:
 
 ```sh
-voyager scan --platform codex    # codex | claude | zcode | dsh, comma-separated
+voyager scan --platform codex    # codex | claude | zcode | dsh | opencode, comma-separated
 ```
 
 Once at least one of your agents has session history on this machine:
@@ -614,6 +614,7 @@ For verification of actual zero-touch startup behavior, see [docs/DOGFOOD.md](ht
 | Cursor | `state.vscdb` (SQLite) | ✅ | ✅ | ❌ | ⚠️ in raw | ⚠️ | ❌ IDE only |
 | Kiro IDE | workspace-session JSON | ✅ | ❌ not persisted | ❌ | ❌ | ❌ | ❌ IDE only |
 | Antigravity | conversation SQLite (protobuf) | ⚠️ heuristic | ⚠️ heuristic | ⚠️ text | ⚠️ snapshots on disk | ❌ | ❌ IDE only |
+| OpenCode | read-only SQLite (`~/.local/share/opencode`) | ✅ | ✅ | ⚠️ shell only | ❌ | ✅ session totals | ❌ read-only index |
 
 The **Resume** column names the command Voyager will run for that provider — it
 says the command exists and is wired up, **not** that a resume has been observed
@@ -621,6 +622,14 @@ to work. No native resume has been exercised end to end on any provider, so
 treat every `✅` there as `NOT VERIFIED` until the verification table above
 carries a row saying otherwise. (The `*_continuity_verdict.md` files cover hook
 injection, which is a different capability.)
+
+OpenCode is indexed **read-only** from its SQLite database (both the current
+`session_v2` schema and the pre-v2 `session`/`message`/`part` shape). That
+gives you messages, tool calls and results in `search`/`show`/`repo` and lets
+another agent continue from the context — it is **not** native resume, and no
+resume command, startup hook or transcript writer exists for it. Verified only
+against synthetic fixtures (`tests/test_opencode.py`); a real install has not
+been observed yet. Set `VOYAGER_OPENCODE_DB` to point at a specific database.
 
 Cursor and Antigravity adapters are marked experimental: Cursor reads its
 key-value store read-only and Antigravity decodes protobuf blobs
