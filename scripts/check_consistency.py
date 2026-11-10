@@ -25,8 +25,9 @@ Usage:
 
 ``--strict`` is for CI and release gates.  A ``NEEDS_ONLINE`` result on a
 *version* check means the release metadata was not actually verified; in strict
-mode that is a failure, not an OK with a footnote.  Without ``--strict`` an
-unknown is still printed but does not block a local developer run.
+mode that is a failure, not an OK with a footnote.  Strict is the **default**
+when ``CI`` or ``GITHUB_ACTIONS`` is set (a CI job that cannot verify must not
+report success); ``--no-strict`` forces the lenient local behaviour.
 
 ``--online`` really queries ``git ls-remote --tags origin v<version>``: an
 already-published tag is a hard failure (tags are never moved), a missing tag
@@ -295,6 +296,18 @@ def _clean_env() -> dict:
     return env
 
 
+def _running_in_ci() -> bool:
+    """True under GitHub Actions or any runner that sets CI.
+
+    Strict is the *default* there, because a CI job that cannot verify the
+    release metadata must not report success. Keeping that default in the
+    script (rather than in the workflow's command line) also means the gate
+    cannot be lost by editing one YAML line.
+    """
+    import os
+    return bool(os.environ.get("GITHUB_ACTIONS") or os.environ.get("CI"))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", default=".", help="core repository root")
@@ -302,23 +315,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="plugin checkout, to compare the bridge schema")
     ap.add_argument("--online", action="store_true",
                     help="query the remote for whether v<version> is already tagged")
-    ap.add_argument("--strict", action="store_true",
+    ap.add_argument("--strict", dest="strict", action="store_true", default=None,
                     help="CI/release mode: an unresolved critical check fails "
-                         "instead of printing NEEDS_ONLINE and exiting 0")
+                         "instead of printing NEEDS_ONLINE and exiting 0 "
+                         "(the default when CI or GITHUB_ACTIONS is set)")
+    ap.add_argument("--no-strict", dest="strict", action="store_false",
+                    help="force the lenient local behaviour even inside CI")
     ap.add_argument("--require-plugin", action="store_true",
                     help="fail when --plugin-root was not given (release gates "
                          "must prove the bridge schema, not skip it)")
     args = ap.parse_args(argv)
+
+    strict = _running_in_ci() if args.strict is None else args.strict
 
     root = Path(args.repo).resolve()
     plugin = Path(args.plugin_root).resolve() if args.plugin_root else None
     result = check(root, plugin_root=plugin, online=args.online,
                    require_plugin=args.require_plugin)
     print("\n".join(result.lines))
-    rc = result.exit_code(args.strict)
+    rc = result.exit_code(strict)
     if result.failures:
         print("\n%d check(s) failed" % result.failures)
-    if args.strict and result.unresolved:
+    if strict and result.unresolved:
         print("%d critical check(s) unresolved — strict mode treats "
               "NEEDS_ONLINE as failure" % len(result.unresolved))
     if rc:

@@ -129,7 +129,31 @@ def test_non_strict_still_allows_a_local_run_with_unknowns(tmp_path, monkeypatch
     """A developer with no tags fetched still gets useful output, not a red run."""
     root = make_repo(tmp_path)
     monkeypatch.setattr(cc, "git_tags", lambda _root: None)
+    # The local default is lenient, but only outside CI. Clear the runner's
+    # variables so this test measures the default rather than the environment.
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     assert cc.main(["--repo", str(root)]) == 0
+
+
+def test_strict_is_the_default_inside_ci(tmp_path, monkeypatch):
+    """A CI job that cannot verify the metadata must not report success.
+
+    The default lives in the script, not in the workflow's command line, so the
+    gate cannot be lost by editing one YAML line.
+    """
+    root = make_repo(tmp_path)
+    monkeypatch.setattr(cc, "git_tags", lambda _root: None)
+    monkeypatch.setenv("CI", "true")
+    assert cc.main(["--repo", str(root)]) == 1
+
+
+def test_no_strict_forces_leniency_even_inside_ci(tmp_path, monkeypatch):
+    """The escape hatch exists for a CI leg that deliberately cannot see tags."""
+    root = make_repo(tmp_path)
+    monkeypatch.setattr(cc, "git_tags", lambda _root: None)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert cc.main(["--repo", str(root), "--no-strict"]) == 0
 
 
 def test_strict_passes_when_every_check_resolves(tmp_path, monkeypatch):
@@ -232,8 +256,15 @@ def test_without_require_plugin_the_skip_is_visible_but_not_a_failure(tmp_path):
     assert any(l.startswith("SKIP") and "bridge schema" in l for l in r.lines)
 
 
-def test_ci_invokes_the_checker_in_strict_mode():
-    """CI must not silently drop the flag that makes unknowns fatal."""
+def test_ci_does_not_need_a_flag_to_be_strict():
+    """The workflow must not be the only thing enforcing strictness.
+
+    It used to assert `check_consistency.py --strict` in the YAML; that made the
+    gate a one-line edit away from silently disappearing. The script now
+    defaults to strict under CI, so this test asserts the default instead.
+    """
     workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(
         encoding="utf-8")
-    assert "check_consistency.py --strict" in workflow
+    assert "check_consistency.py" in workflow
+    assert "--no-strict" not in workflow, (
+        "CI must not opt out of strict mode")
