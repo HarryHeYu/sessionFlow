@@ -110,3 +110,130 @@ def test_bridge_schema_mismatch_fails(tmp_path):
     # In a synthetic tree the probe cannot run, which is itself a failure;
     # either message is acceptable — the point is that it does not pass.
     assert any("schema" in l.lower() for l in failures(r))
+
+
+# --- --strict: an unresolved critical check is not a success --------------
+
+def test_strict_fails_when_a_critical_check_is_unresolved(tmp_path, capsys,
+                                                          monkeypatch):
+    """The release gate must not green-light metadata it could not verify."""
+    root = make_repo(tmp_path)
+    monkeypatch.setattr(cc, "git_tags", lambda _root: None)
+    assert cc.main(["--repo", str(root), "--strict"]) == 1
+    out = capsys.readouterr().out
+    assert "NEEDS_ONLINE" in out
+    assert "critical check(s) unresolved" in out
+
+
+def test_non_strict_still_allows_a_local_run_with_unknowns(tmp_path, monkeypatch):
+    """A developer with no tags fetched still gets useful output, not a red run."""
+    root = make_repo(tmp_path)
+    monkeypatch.setattr(cc, "git_tags", lambda _root: None)
+    assert cc.main(["--repo", str(root)]) == 0
+
+
+def test_strict_passes_when_every_check_resolves(tmp_path, monkeypatch):
+    root = make_repo(tmp_path)
+    monkeypatch.setattr(cc, "git_tags", lambda _root: ["1.2.0", "1.3.0"])
+    assert cc.main(["--repo", str(root), "--strict"]) == 0
+
+
+def test_strict_fails_on_a_hard_failure_even_without_unknowns(tmp_path, monkeypatch):
+    """Strict adds a rule; it must not mask the existing FAIL path."""
+    root = make_repo(tmp_path, readme="1.2.0", readme_zh="1.2.0", pin="1.2.0")
+    monkeypatch.setattr(cc, "git_tags", lambda _root: ["1.2.0", "1.3.0"])
+    assert cc.main(["--repo", str(root), "--strict"]) == 1
+
+
+def test_result_exit_code_is_strict_aware():
+    r = cc.Result()
+    r.ok("something")
+    assert r.exit_code(strict=False) == 0
+    assert r.exit_code(strict=True) == 0
+    r.needs_online("a critical version fact", "cannot tell")
+    assert r.exit_code(strict=False) == 0
+    assert r.exit_code(strict=True) == 1
+    r.fail("a real drift", "nope")
+    assert r.exit_code(strict=False) == 1
+
+
+def test_noncritical_unknowns_do_not_gate_a_release():
+    r = cc.Result()
+    r.needs_online("informational", "no remote", critical=False)
+    assert r.exit_code(strict=True) == 0
+
+
+# --- --online: really ask the remote, and never move a tag -----------------
+
+def test_online_fails_when_the_release_tag_already_exists(tmp_path):
+    root = make_repo(tmp_path)
+    r = cc.check(root, tags=["1.3.0"], online=True, remote_state="present")
+    assert any("release tag v1.3.1 is unused" in l for l in failures(r))
+
+
+def test_online_passes_when_the_release_tag_is_free(tmp_path):
+    root = make_repo(tmp_path)
+    r = cc.check(root, tags=["1.3.0"], online=True, remote_state="absent")
+    assert failures(r) == [], r.lines
+    assert any("release tag v1.3.1 is unused" in l and l.startswith("OK")
+               for l in r.lines)
+
+
+def test_online_probe_failure_is_a_critical_unknown(tmp_path):
+    root = make_repo(tmp_path)
+    r = cc.check(root, tags=["1.3.0"], online=True, remote_state="unknown")
+    assert any(l.startswith("NEEDS_ONLINE") and "remote tag" in l for l in r.lines)
+    assert r.exit_code(strict=True) == 1
+    assert r.exit_code(strict=False) == 0
+
+
+def test_exact_ref_does_not_match_a_longer_version(tmp_path, monkeypatch):
+    """v1.3.10 / v1.3.1-rc1 must not read as 'v1.3.1 is taken'."""
+    root = make_repo(tmp_path)
+
+    class FakeOut:
+        returncode = 0
+        stdout = ("deadbeef\trefs/tags/v1.3.10\n"
+                  "cafebabe\trefs/tags/v1.3.1-rc1^{}\n")
+        stderr = ""
+
+    monkeypatch.setattr(cc.subprocess, "run", lambda *a, **k: FakeOut())
+    assert cc._remote_tag_state(root, "1.3.1") == "absent"
+
+    FakeOut.stdout = "deadbeef\trefs/tags/v1.3.1\n"
+    assert cc._remote_tag_state(root, "1.3.1") == "present"
+
+    FakeOut.stdout = "deadbeef\trefs/tags/v1.3.1^{}\n"
+    assert cc._remote_tag_state(root, "1.3.1") == "present"
+
+
+def test_remote_probe_error_is_unknown_not_absent(tmp_path, monkeypatch):
+    root = make_repo(tmp_path)
+
+    def boom(*a, **k):
+        raise OSError("no network")
+
+    monkeypatch.setattr(cc.subprocess, "run", boom)
+    assert cc._remote_tag_state(root, "1.3.1") == "unknown"
+
+
+# --- --require-plugin: a release gate cannot skip the bridge contract ------
+
+def test_require_plugin_fails_when_no_checkout_was_given(tmp_path):
+    root = make_repo(tmp_path)
+    r = cc.check(root, tags=["1.3.0"], require_plugin=True)
+    assert any("plugin checkout provided" in l for l in failures(r))
+
+
+def test_without_require_plugin_the_skip_is_visible_but_not_a_failure(tmp_path):
+    root = make_repo(tmp_path)
+    r = cc.check(root, tags=["1.3.0"])
+    assert not failures(r), r.lines
+    assert any(l.startswith("SKIP") and "bridge schema" in l for l in r.lines)
+
+
+def test_ci_invokes_the_checker_in_strict_mode():
+    """CI must not silently drop the flag that makes unknowns fatal."""
+    workflow = (ROOT / ".github" / "workflows" / "test.yml").read_text(
+        encoding="utf-8")
+    assert "check_consistency.py --strict" in workflow
