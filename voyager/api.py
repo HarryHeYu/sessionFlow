@@ -6,6 +6,13 @@ direct SQLite access, no second implementation — the VS Code extension (and
 any other UI) talks to this surface, over stdio JSON-lines via
 `voyager api serve` or by importing these functions directly.
 
+All three stdio entry points — `voyager api`, `voyager api serve` and
+`python -m voyager.api [serve]` — converge on :func:`serve`, which is therefore
+where the stream setup belongs.  ``serve`` accepts the ``serve`` verb as a
+no-op: it is the form this docstring, ``docs/API.md``, the CHANGELOG and the
+shipped ``vscode-extension/extension.js`` all use, and it is what a caller
+following the docs will type.
+
 Read-only by design: the only "write-ish" op is bundle_preview, which
 writes nothing (it renders a bundle in memory).
 
@@ -28,7 +35,7 @@ from .budget import apply_budget, parse_budget, resolve_auto_budget
 from .continuity import build_continuation_bundle
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import default_db_path, open_read, Store
-from .util import parse_when, same_repo_loose
+from .util import force_utf8_stdio, parse_when, same_repo_loose
 
 
 def _row(r) -> Dict[str, Any]:
@@ -542,7 +549,19 @@ def handle_request(req: Dict[str, Any], db: Optional[Path] = None) -> Dict[str, 
 
 
 def serve(db: Optional[Path] = None) -> None:
-    """JSON-lines stdio loop: one request per line, one response per line."""
+    """JSON-lines stdio loop: one request per line, one response per line.
+
+    The stream setup lives *here*, not only in ``cli.main()``, because this is
+    the one place that reads stdin: ``voyager api``, ``python -m voyager.api``
+    and the VS Code extension's ``python -m voyager.api serve`` all converge on
+    it.  A client writes UTF-8; on a Chinese Windows install stdin defaults to
+    the ANSI code page (cp936), so the bytes would be decoded through GBK
+    without an error and ``{"query": "会话记录"}`` would answer ``count: 0`` --
+    indistinguishable from "no such session".  ``force_utf8_stdio`` is
+    idempotent, so calling it again from an entry point that already did is
+    free.
+    """
+    force_utf8_stdio()
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -561,6 +580,13 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="voyager-api",
                                 description="Voyager local API (stdio JSON-lines)")
     p.add_argument("--db", help="index db path (default ~/.voyager/index.db)")
+    # `serve` is the documented verb -- docs/API.md and CHANGELOG both say
+    # `voyager api serve`, and the shipped VS Code extension spawns exactly
+    # `python -m voyager.api serve` (extension.js).  This parser never accepted
+    # it, so that client exited 2 before reading a single request: "unrecognized
+    # arguments: serve".  Accepted here as a no-op verb so the documented form
+    # works instead of breaking callers that were written to the docs.
+    p.add_argument("verb", nargs="?", choices=["serve"], help=argparse.SUPPRESS)
     args = p.parse_args()
     serve(Path(args.db) if args.db else None)
 

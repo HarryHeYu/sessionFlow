@@ -156,6 +156,47 @@ def test_api_op_reads_utf8_stdin_under_gbk(tmp_path):
     (``gbk("浼氳瘽") == utf8("会话") == e4bc9ae8af9d``), so an assertion on the
     echo can pass while the match is already corrupted.
     """
+    _assert_cjk_query_matches([sys.executable, "-m", "voyager.cli", "api"],
+                              tmp_path)
+
+
+def test_documented_serve_verb_is_accepted(tmp_path):
+    """`python -m voyager.api serve` is what the shipped client spawns.
+
+    ``vscode-extension/extension.js`` builds exactly
+    ``spawn(python, ["-m", "voyager.api", "serve"])`` and docs/API.md documents
+    ``voyager api serve``, but neither parser ever accepted the verb: the child
+    exited 2 with "unrecognized arguments: serve" before reading a request, so
+    the sidebar could never have worked.  A documented invocation is a contract;
+    this asserts it answers rather than exits.
+    """
+    _assert_cjk_query_matches([sys.executable, "-m", "voyager.api", "serve"],
+                              tmp_path)
+
+
+def test_bare_api_module_still_serves(tmp_path):
+    """The un-verbed form must keep working -- it is the other documented path."""
+    _assert_cjk_query_matches([sys.executable, "-m", "voyager.api"], tmp_path)
+
+
+def test_unknown_api_verb_is_still_rejected():
+    """Accepting `serve` must not turn the parser into "anything goes".
+
+    A typo has to fail loudly; the fix is one accepted verb, not a catch-all.
+    """
+    proc = subprocess.run([sys.executable, "-m", "voyager.api", "bogus"],
+                          capture_output=True, cwd=str(ROOT), timeout=180)
+    assert proc.returncode == 2, (
+        "a bogus verb exited %d, not argparse's usage error 2"
+        % proc.returncode)
+
+
+def _assert_cjk_query_matches(argv, tmp_path):
+    """Seed one CJK session, then assert ``argv`` answers a CJK query.
+
+    Shared by the invocation-form tests so they differ only in the command a
+    client would type -- the assertion (``count``, never the echo) stays fixed.
+    """
     from voyager.model import new_event, new_session
     from voyager.store import Store
 
@@ -194,11 +235,14 @@ def test_api_op_reads_utf8_stdin_under_gbk(tmp_path):
                           "params": {"query": query, "db": str(db)}},
                          ensure_ascii=False) + "\n"
     proc = subprocess.run(
-        [sys.executable, "-m", "voyager.cli", "api"],
+        argv,
         input=request.encode("utf-8"),      # exactly what the Node bridge writes
         capture_output=True, env=env, cwd=str(tmp_path), timeout=180,
     )
-    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert proc.returncode == 0, (
+        "%s exited %d: %s"
+        % (" ".join(argv[1:]), proc.returncode,
+           proc.stderr.decode("utf-8", "replace").strip()[:300]))
     line = proc.stdout.decode("utf-8").strip().splitlines()[-1]
     result = json.loads(line)["result"]
 

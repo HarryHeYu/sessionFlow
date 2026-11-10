@@ -2472,6 +2472,12 @@ def main(argv=None) -> int:
 
     sp = sub.add_parser("api", help="local stdio JSON-lines API (VS Code client)",
                         parents=[common])
+    # `voyager api serve` is what docs/API.md documents and what every caller
+    # of this command was told to type; the subparser only ever accepted a bare
+    # `voyager api`, so the documented invocation died with "unrecognized
+    # arguments: serve" before reading a request.  The verb is a no-op -- `api`
+    # already means serve -- accepted so the documented form works.
+    sp.add_argument("verb", nargs="?", choices=["serve"], help=argparse.SUPPRESS)
     sp.set_defaults(func=cmd_api)
 
     sp = sub.add_parser("status", parents=[common],

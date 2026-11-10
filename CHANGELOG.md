@@ -5,7 +5,28 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
-(nothing yet)
+### Fixed
+
+- **The `api` bridge decoded stdin in the ANSI code page, so a CJK query
+  answered `count: 0`.** 1.3.1 forced UTF-8 on stdout/stderr only; on a Chinese
+  Windows install Python also *decodes* stdin as cp936, so the UTF-8 request
+  lines a client writes were not rejected — they were silently decoded through
+  GBK, and `{"query": "会话记录"}` searched for `"浼氳瘽璁板綍"` and found nothing.
+  "No such session" and "your query was corrupted in transit" are the same
+  answer to the caller, which is why it survived. The setup now lives in
+  `api.serve()` (the one place that reads stdin) rather than only in
+  `cli.main()`, so `voyager api`, `python -m voyager.api` and
+  `python -m voyager.api serve` are all covered. The confusion is easy to miss
+  because a GBK *echo* of the UTF-8 bytes renders as plausible CJK
+  (`gbk("浼氳瘽") == utf8("会话") == e4bc9ae8af9d`), so only `count` and the stored
+  bytes are evidence — the regression test asserts `count`, never the echo.
+- **`voyager api serve` — the documented command — exited 2 without serving.**
+  `docs/API.md`, the CHANGELOG and `vscode-extension/extension.js` (which spawns
+  `["-m", "voyager.api", "serve"]`) all use the `serve` verb, but neither parser
+  ever accepted it: the child died on `unrecognized arguments: serve` before
+  reading a single request, so the shipped VS Code sidebar could never have
+  worked. Both parsers now accept `serve` as a no-op verb; an unknown verb is
+  still a usage error.
 
 ## [1.3.1] — 2026-11-09
 
