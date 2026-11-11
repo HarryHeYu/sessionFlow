@@ -7,14 +7,16 @@
 > **当前状态与下一阶段（2026-11-11）。** 下面的 Phase 记录是历史档案，保持原样。
 > 现行计划由发布门槛与 GitHub Issue 驱动，不再新增 Phase。
 >
-> - **P0 / 阻塞：** Core `v1.3.1` 是 RC，**未打 tag、未发 Release**。新确认的
->   缺陷已纳入门槛：JSON-lines `api` 从 stdin 读请求时用的是 Windows 旧代码页，
->   而 stdout/stderr 已强制 UTF-8，UTF-8 中文查询会静默返回 0 行
->   （[sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21)）。
->   由 @SunnyRad 在 dsh-sessionflow PR #5 报告，已做字节级复现；
->   [Core PR #19](https://github.com/HarryHeYu/sessionFlow/pull/19) 已提交修复
->   （另含一个独立的 `api serve` parser 缺陷），**未合并**，仍需 Review 与 CI；
->   维护者不并行实现同一改动。**修复前构建的候选产物不得当作最终发布包。**
+- **P0 / 候选重建进行中：** Core `v1.3.1` 仍是 RC，**未打 tag、未发 Release**。stdin
+>  UTF-8 缺陷（[sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21)，
+>  由 @SunnyRad 在 dsh-sessionflow PR #5 报告并做字节级复现）已**修复并合并**为
+>  [Core PR #19](https://github.com/HarryHeYu/sessionFlow/pull/19)（`15723c1`），
+>  同时修了独立的 `api serve` parser 缺陷。硬编码的
+>  `E:/code/voyager` 测试路径（[sessionFlow#20](https://github.com/HarryHeYu/sessionFlow/issues/20)）
+>  也一并修掉（`b64e964`）。**代码层面门槛已清除。** 剩余工作：从最终 HEAD
+>  （`b64e964`）重建 wheel/sdist、重算 SHA-256、重跑 `twine check`、全量测试、
+>  `v1.3.0 → v1.3.1` 升级路径，以及本 Plugin 的 `v1.2.0` 配对。**打 tag 与发
+>  GitHub Release 仍需维护者单独确认——本轮不做。**
 > - **P0 / 已完成：** dsh-sessionflow PR #5 已 Squash Merge（`b3fc6b9`），保留作者
 >   归属。Plugin 仍是 `v1.2.0`，未发新版。
 > - **P1：** OpenCode Adapter Phase 3（真实 SQLite Schema 复核、增量扫描、WAL

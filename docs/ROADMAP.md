@@ -6,17 +6,20 @@
 > is kept as-is. The live plan is now driven by the release gate and by GitHub
 > issues, not by new phases.
 >
-> - **P0 / blocked:** Core `v1.3.1` is a release candidate — **not tagged, not
->   released**. A newly confirmed defect is now a gate item: the JSON-lines
->   `api` reads stdin with the Windows legacy code page while stdout/stderr are
->   forced to UTF-8, so UTF-8 CJK queries silently return 0 rows
->   ([sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21)).
->   Reported by @SunnyRad in dsh-sessionflow PR #5 and reproduced at byte level.
->   [Core PR #19](https://github.com/HarryHeYu/sessionFlow/pull/19) from
->   @SunnyRad is already open with the fix (and a separate `api serve` parser
->   defect); it is **not merged** and still needs review + CI. The maintainer
->   does not implement it in parallel. **Candidate artifacts built before that
->   fix must not be published as the final release.**
+> - **P0 / candidate rebuild in progress:** Core `v1.3.1` is a release candidate
+>   — **not tagged, not released**. The stdin UTF-8 defect
+>   ([sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21),
+>   reported by @SunnyRad in dsh-sessionflow PR #5 and reproduced at byte level)
+>   is **fixed and merged** as
+>   [Core PR #19](https://github.com/HarryHeYu/sessionFlow/pull/19) (`15723c1`),
+>   together with a separate `api serve` parser fix. The hard-coded
+>   `E:/code/voyager` test paths
+>   ([sessionFlow#20](https://github.com/HarryHeYu/sessionFlow/issues/20)) were
+>   also fixed (`b64e964`). **The release is unblocked at the code level.** What
+>   remains: rebuild wheel/sdist **from the final HEAD** (`b64e964`), recompute
+>   SHA-256, rerun `twine check`, the full test suite, the `v1.3.0 → v1.3.1`
+>   upgrade path, and the Plugin `v1.2.0` pairing. **The tag and GitHub Release
+>   still require explicit maintainer confirmation — not done this round.**
 > - **P0 / done:** dsh-sessionflow PR #5 merged (`b3fc6b9`), author attribution
 >   preserved. Plugin is still at `v1.2.0`; no new plugin version was released.
 > - **P1:** OpenCode Adapter Phase 3 (real SQLite schema review, incremental
