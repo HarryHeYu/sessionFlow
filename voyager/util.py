@@ -31,22 +31,37 @@ from typing import Optional
 def force_utf8_stdio() -> None:
     """Best-effort UTF-8 on the standard streams.  Never raises.
 
-    On a Chinese Windows install Python writes stdout in the ANSI code page
-    (GBK / cp936) unless ``PYTHONUTF8=1`` is set.  Everything that reads our
-    output as UTF-8 -- the DSH bridge (``child.stdout.setEncoding('utf8')``),
-    the VS Code client, MCP clients -- then decodes every non-ASCII character
-    as U+FFFD.  The index is fine; only the transport is wrong, so the fix
-    belongs at the process boundary, not at each print().
+    On a Chinese Windows install Python decodes stdin *and* encodes stdout in
+    the ANSI code page (GBK / cp936) unless ``PYTHONUTF8=1`` is set.
+
+    **stdout** — everything that reads our output as UTF-8 -- the DSH bridge
+    (``child.stdout.setEncoding('utf8')``), the VS Code client, MCP clients --
+    otherwise decodes every non-ASCII character as U+FFFD.  The index is fine;
+    only the transport is wrong, so the fix belongs at the process boundary,
+    not at each print().
+
+    **stdin** — the ``api`` op reads JSON-lines requests from stdin
+    (:func:`voyager.api.serve`).  With a GBK stdin the UTF-8 bytes a client
+    writes are not rejected: they are silently decoded through the wrong codec,
+    so ``{"query": "会话记录"}`` becomes ``"浼氳瘽璁板綍"`` and the search returns
+    ``count: 0``.  That is worse than an error -- "no such session" and "your
+    query was corrupted in transit" are the same answer to the caller.
+
+    The confusion is easy to miss because a GBK *echo* of UTF-8 bytes often
+    renders as plausible CJK: ``gbk("浼氳瘽") == utf8("会话") == e4bc9ae8af9d``
+    for exactly this pair, so the echoed query can look correct while the match
+    is already wrong.  Only the result count and the stored bytes are evidence.
 
     ``errors="replace"`` keeps a hostile/locale-specific character from
     turning a successful command into a traceback: the JSON or the table is
     still parseable, one glyph is lost.
 
-    Streams that are detached (``sys.stdout is None``) or already wrapped by a
-    test harness may not support ``reconfigure``; both cases are tolerated
-    rather than allowed to abort the command.
+    Streams that are detached (``sys.stdin`` is ``None`` when fd 0 is closed)
+    or already wrapped by a test harness may not support ``reconfigure``; both
+    cases are tolerated rather than allowed to abort the command.  This mirrors
+    the ``_force_utf8`` helper the SessionStart hook already carries.
     """
-    for stream in (sys.stdout, sys.stderr):
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:
             continue
