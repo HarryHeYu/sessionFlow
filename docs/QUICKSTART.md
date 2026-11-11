@@ -2,7 +2,7 @@
 
 **Ten minutes, from nothing to continuing another agent's work — and nothing
 reads your own history until step 4.** Every command below is exercised against
-v1.3.0; the sample output is from that build.
+v1.3.1; the sample output is from that build.
 
 - **sessionFlow** (this repo, CLI command `voyager`) — indexes and searches your
   local agent history.
@@ -17,16 +17,16 @@ see your agents. Step 4 is the first one that opens your own session files.
 ## 1. Install the core (1 min)
 
 ```sh
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"
 ```
 
 `[all]` pulls in the DSH (`zstandard`) and MCP (`mcp`) extras. Drop it for a bare
-install. The `@v1.3.0` pins a release tag so a reinstall reproduces the same
+install. The `@v1.3.1` pins a release tag so a reinstall reproduces the same
 build; drop it to follow `main`. No `pipx`? Use pip — `python -m pip` on
 Windows, where `pip` is often not on `PATH`:
 
 ```sh
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"
 ```
 
 **Not on PyPI.** The `voyager` name there is an unrelated library, so a bare
@@ -184,7 +184,7 @@ When the task you want is the one you are looking at:
 voyager continue --thread <thread> --no-launch -o ./handoff-<thread>.md
 ```
 
-What `continue` does, in this order, in v1.3.0:
+What `continue` does, in this order, in v1.3.1:
 
 1. **refreshes the index first** — an incremental scan of your provider
    directories. `VOYAGER_NO_SYNC=1` in the environment skips it, which is what you
@@ -400,7 +400,7 @@ calling the install healthy. Run `scan` (or `demo`) first.
   stronger on some agents than others. See the platform table in the README.
 
 Version relationship: the core and the plugin are **versioned independently** —
-this page installs core **v1.3.0**, and the current plugin is **v1.1.0**. They
+this page installs core **v1.3.1**, and the current plugin is **v1.2.0**. They
 are not required to share a number; what binds them is **bridge schema 1**, which
 the plugin declares and the core reports (`voyager integration-info --json`). A
 newer core that kept the schema would need no plugin release, and the plugin

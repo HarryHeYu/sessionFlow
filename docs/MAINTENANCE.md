@@ -1,4 +1,4 @@
-# Maintenance Guide — sessionFlow v1.3.0
+# Maintenance Guide — sessionFlow v1.3.1
 
 Post-release reference. Nothing here starts new development; it records what is
 known, what is supported, and what a maintainer should check.
@@ -31,19 +31,20 @@ known, what is supported, and what a maintainer should check.
 | Python | 3.10 – 3.13 (CI covers all four on both OS families) |
 | OS | Windows, Linux. macOS is supported by the code and the path handling but is **not in CI**. |
 | Agents indexed | Codex, Claude Code, DSH, Grok CLI, ZCode, Kiro, Cursor, Antigravity |
-| Distribution | GitHub tag install (`@v1.3.0`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
+| Distribution | GitHub tag install (`@v1.3.1`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
 
 ## Compatibility Matrix
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| v1.3.0 | v1.1.0 | 1 | current release; plugin needs no upgrade |
-| v1.2.0 | v1.1.0 | 1 | still supported; index readable by v1.3.0 with no migration |
+| v1.3.1 | v1.2.0 | 1 | current release (released 2026-11-11); plugin v1.2.0 needs no upgrade |
+| v1.3.0 | v1.2.0 | 1 | still supported; index readable by v1.3.1 with no migration |
+| v1.2.0 | v1.1.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.1.0 | v1.1.0 | 1 | upgrade path verified: no row and no schema object changes |
 
-Bundle compatibility: v1.2.0 bundles are readable by v1.3.0. They carry no
+Bundle compatibility: v1.2.0 bundles are readable by v1.3.1. They carry no
 fingerprint, so `evidence verify` answers `UNVERIFIABLE` and offers the digest to
-adopt. v1.3.0 never invents a fingerprint for a legacy reference.
+adopt. v1.3.1 never invents a fingerprint for a legacy reference.
 
 ## Maintenance Checklist
 

@@ -147,12 +147,12 @@ voyager --version        # must print 1.3.1
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
 
-> **`main` is ahead of the latest tag.** Three correctness fixes landed after
-> `v1.3.0` and are **not** in it: DSH 0.2.1-rc.3's renamed transcript
-> (`session.v4.jsonl.zstd`) was invisible to discovery, Windows wrote stdout in
-> the ANSI code page while the DSH bridge decoded UTF-8, and queries shorter than
-> three characters returned nothing. Install `@main` if you need them before the
-> next patch release; they are listed under `[Unreleased]` in `CHANGELOG.md`.
+> **`v1.3.1` is the current release.** All three of the fixes below ship in it —
+> no need to install `@main`: DSH 0.2.1-rc.3's renamed transcript
+> (`session.v4.jsonl.zstd`) is now discovered, Windows writes stdout as UTF-8 to
+> match the DSH bridge's decoding, and queries shorter than three characters
+> return results. Upgrade with `@v1.3.1` (see above); the changes are listed
+> under `[1.3.1]` in `CHANGELOG.md`.
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
@@ -635,7 +635,7 @@ DeepSeek Harness integration: <https://github.com/HarryHeYu/dsh-sessionflow>
 plugin that exposes search, current work, continuation and merge as six
 `sessionflow_*` tools, so a DSH agent can pick up work from Codex, Claude Code,
 Grok and the rest without leaving the harness. Its current release is **plugin
-v1.1.0**, tested against **core v1.3.0** over **bridge schema 1** — the two repos
+v1.2.0**, tested against **core v1.3.1** over **bridge schema 1** — the two repos
 are versioned independently, and the schema is what actually binds them.
 
 It is a *client* of this repo, not a second implementation: the core stays the

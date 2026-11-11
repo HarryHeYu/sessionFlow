@@ -6,8 +6,8 @@
 > is kept as-is. The live plan is now driven by the release gate and by GitHub
 > issues, not by new phases.
 >
-> - **P0 / candidate rebuild in progress:** Core `v1.3.1` is a release candidate
->   — **not tagged, not released**. The stdin UTF-8 defect
+> - **P0 / done: Core `v1.3.1` RELEASED** — tag `v1.3.1` (commit `81d7e3b`),
+>   GitHub Release published 2026-11-11, wheel + sdist attached. The stdin UTF-8 defect
 >   ([sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21),
 >   reported by @SunnyRad in dsh-sessionflow PR #5 and reproduced at byte level)
 >   is **fixed and merged** as
@@ -15,11 +15,8 @@
 >   together with a separate `api serve` parser fix. The hard-coded
 >   `E:/code/voyager` test paths
 >   ([sessionFlow#20](https://github.com/HarryHeYu/sessionFlow/issues/20)) were
->   also fixed (`b64e964`). **The release is unblocked at the code level.** What
->   remains: rebuild wheel/sdist **from the final HEAD** (`b64e964`), recompute
->   SHA-256, rerun `twine check`, the full test suite, the `v1.3.0 → v1.3.1`
->   upgrade path, and the Plugin `v1.2.0` pairing. **The tag and GitHub Release
->   still require explicit maintainer confirmation — not done this round.**
+>   also fixed (`b64e964`). >   The `v1.3.0 → v1.3.1`
+>   upgrade path and the Plugin `v1.2.0` pairing are verified. **Install `@v1.3.1`.**
 > - **P0 / done:** dsh-sessionflow PR #5 merged (`b3fc6b9`), author attribution
 >   preserved. Plugin is still at `v1.2.0`; no new plugin version was released.
 > - **P1:** OpenCode Adapter Phase 3 (real SQLite schema review, incremental
@@ -29,10 +26,10 @@
 > - **P2:** Native Resume live verification (keep `NOT_VERIFIED` until observed),
 >   VSIX packaging, macOS CI, DSH canary, Windows CI.
 >
-> Order: finish the v1.3.1 gate first (stdin fix → rebuild wheel/sdist from the
-> final HEAD → recompute SHA-256 → rerun tests, upgrade path and the plugin
-> pairing), then start P1. **Do not open several cross-repo protocol changes in
-> parallel.** The tag and GitHub Release remain a separate maintainer decision.
+> Order: v1.3.1 is released, so start P1 (OpenCode Adapter Phase 3, Provider
+> Capability Matrix, DSH provenance classifier, Bridge/Tool contract hardening,
+> Evidence Verification tool). **Do not open several cross-repo protocol changes
+> in parallel.**
 
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
 **Phase 1b shipped (`5e8271c`); Phase 2 COMPLETE — 2a WorkThread (`b580001`/`934dfd5`), 2b lease (`c41f99b`), 2c deferred items closed (MCP voyager_thread + deterministic --repo thread resolution; multi-signal auto-clustering re-scoped as a later enhancement under #3).**
