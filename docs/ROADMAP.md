@@ -12,9 +12,11 @@
 >   forced to UTF-8, so UTF-8 CJK queries silently return 0 rows
 >   ([sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21)).
 >   Reported by @SunnyRad in dsh-sessionflow PR #5 and reproduced at byte level.
->   A separate fix PR is reserved for the contributor; the maintainer does not
->   implement it in parallel. **Candidate artifacts built before that fix must
->   not be published as the final release.**
+>   [Core PR #19](https://github.com/HarryHeYu/sessionFlow/pull/19) from
+>   @SunnyRad is already open with the fix (and a separate `api serve` parser
+>   defect); it is **not merged** and still needs review + CI. The maintainer
+>   does not implement it in parallel. **Candidate artifacts built before that
+>   fix must not be published as the final release.**
 > - **P0 / done:** dsh-sessionflow PR #5 merged (`b3fc6b9`), author attribution
 >   preserved. Plugin is still at `v1.2.0`; no new plugin version was released.
 > - **P1:** OpenCode Adapter Phase 3 (real SQLite schema review, incremental

@@ -11,8 +11,10 @@
 >   缺陷已纳入门槛：JSON-lines `api` 从 stdin 读请求时用的是 Windows 旧代码页，
 >   而 stdout/stderr 已强制 UTF-8，UTF-8 中文查询会静默返回 0 行
 >   （[sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21)）。
->   由 @SunnyRad 在 dsh-sessionflow PR #5 报告，已做字节级复现；修复 PR 留给
->   贡献者，维护者不并行实现同一改动。**修复前构建的候选产物不得当作最终发布包。**
+>   由 @SunnyRad 在 dsh-sessionflow PR #5 报告，已做字节级复现；
+>   [Core PR #19](https://github.com/HarryHeYu/sessionFlow/pull/19) 已提交修复
+>   （另含一个独立的 `api serve` parser 缺陷），**未合并**，仍需 Review 与 CI；
+>   维护者不并行实现同一改动。**修复前构建的候选产物不得当作最终发布包。**
 > - **P0 / 已完成：** dsh-sessionflow PR #5 已 Squash Merge（`b3fc6b9`），保留作者
 >   归属。Plugin 仍是 `v1.2.0`，未发新版。
 > - **P1：** OpenCode Adapter Phase 3（真实 SQLite Schema 复核、增量扫描、WAL
