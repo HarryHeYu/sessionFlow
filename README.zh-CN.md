@@ -19,9 +19,9 @@
 |---|---|
 | **是什么** | 在编码 Agent 已经写到磁盘上的会话历史之上，加一层本地索引 + 接续层。 |
 | **为什么用** | 你的历史分散在八种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
-| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"` —— [详见](#安装) |
+| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"` —— [详见](#安装) |
 | **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
-| **当前版本** | [v1.3.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.3.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **当前版本** | [v1.3.1](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.3.1) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
 
 ### 它主要解决三件事
@@ -108,21 +108,21 @@ JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成*
 
 ```sh
 # 用 pipx 装成独立 CLI（推荐，不用折腾虚拟环境）
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"
 
 # 或者用 pip 装到用户目录（Windows 上用 `python -m pip`，`pip` 常常不在 PATH 里）
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"
 ```
 
 **Voyager 没有发布到 PyPI。** PyPI 上的 `voyager` 是一个毫不相干的最近邻搜索库，
 所以裸跑 `pip install voyager` 会装错项目 —— 请一律使用上面的 `@ git+…` 形式。
 改用正式包名的进度见 `CHANGELOG.md`。
 
-`@v1.3.0` 是发布 tag，重装才能装到同一份代码，插件报错信息里推荐的也是它；
-去掉 `@v1.3.0` 就是跟 `main` 走。确认装到的版本：
+`@v1.3.1` 是发布 tag，重装才能装到同一份代码，插件报错信息里推荐的也是它；
+去掉 `@v1.3.1` 就是跟 `main` 走。确认装到的版本：
 
 ```sh
-voyager --version        # 应当输出 1.3.0
+voyager --version        # 应当输出 1.3.1
 ```
 
 > **从 v1.2.0（或 v1.1.0）升级不需要迁移。** 索引原样读取：不改任何行，
@@ -138,9 +138,9 @@ voyager --version        # 应当输出 1.3.0
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"          # 核心
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"          # 核心
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"     # + MCP server
 ```
 
 想改 Voyager 本身：
@@ -148,7 +148,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # v1.3.0 上实测：1303 passed / 6 skipped
+python -m pytest tests/ -q     # v1.3.1 上实测：1379 passed / 6 skipped
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -460,7 +460,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # v1.3.0 上实测：1303 passed / 6 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP / 证据引用
+python -m pytest tests/ -q                # v1.3.1 上实测：1379 passed / 6 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP / 证据引用
 python scripts/run_tests_core_only.py     # 模拟 core-only：把可选依赖变成不可导入后重跑，被门禁的用例转为 skipped
 ```
 

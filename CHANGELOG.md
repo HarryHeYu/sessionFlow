@@ -3,15 +3,7 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
-## [Unreleased]
-
-### Tests
-- **Two `test_scan_streaming.py` concurrency cases hard-coded
-  `E:/code/voyager` into child `sys.path`**, so they failed with
-  `ModuleNotFoundError` on any machine without that exact path (reported as
-  [issue #20](https://github.com/HarryHeYu/sessionFlow/issues/20)). They now
-  derive `REPO_ROOT` from `__file__` and pass it to children via `PYTHONPATH`,
-  matching `tests/test_scan_crash.py`. No product code changed.
+## [1.3.1] — 2026-11-11
 
 ### Fixed
 
@@ -35,10 +27,6 @@ All notable changes to Voyager are documented here. Format loosely follows
   reading a single request, so the shipped VS Code sidebar could never have
   worked. Both parsers now accept `serve` as a no-op verb; an unknown verb is
   still a usage error.
-
-## [1.3.1] — 2026-11-09
-
-### Fixed
 
 - **DSH 0.2.1-rc.3 renamed its transcript to `session.v4.jsonl.zstd`, and the
   adapter only looked for `session.jsonl.zstd`.** Every session written after
@@ -78,6 +66,15 @@ All notable changes to Voyager are documented here. Format loosely follows
   a windowless hook host no longer allocates a console for it.
   `~/.voyager/bin` has to precede the real `grok.exe` on `PATH` or this
   launcher is not the process the shell waits on.
+
+### Tests
+
+- **Two `test_scan_streaming.py` concurrency cases hard-coded
+  `E:/code/voyager` into child `sys.path`**, so they failed with
+  `ModuleNotFoundError` on any machine without that exact path (reported as
+  [issue #20](https://github.com/HarryHeYu/sessionFlow/issues/20)). They now
+  derive `REPO_ROOT` from `__file__` and pass it to children via `PYTHONPATH`,
+  matching `tests/test_scan_crash.py`. No product code changed.
 
 ## [1.3.0] — 2026-10-20
 
