@@ -35,6 +35,7 @@ from voyager.adapters.codex import CodexAdapter
 from voyager.cli import run_scan
 from voyager.store import Store
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
@@ -554,7 +555,6 @@ def test_two_concurrent_streaming_scans_converge(tmp_path, monkeypatch):
     child = (
         "import sys\n"
         "from pathlib import Path\n"
-        "sys.path.insert(0, %r)\n"
         "from voyager.store import Store\n"
         "from voyager.cli import run_scan\n"
         "import voyager.adapters.codex as m\n"
@@ -566,15 +566,18 @@ def test_two_concurrent_streaming_scans_converge(tmp_path, monkeypatch):
         "run_scan(s, providers=['codex'], quiet=True)\n"
         "s.close()\n"
         "print('CHILD_OK')\n"
-    ) % (str(Path(r"E:/code/voyager")), str(codex_tree),
+    ) % (str(codex_tree),
          str(codex_tree.parent / "_absent_history.db"),
          str(codex_tree.parent / "_absent_state.db"),
          str(codex_tree.parent / "_absent_dev.db"),
          str(index))
 
+    import os
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(REPO_ROOT)   # child must import THIS checkout
     procs = [subprocess.Popen([sys.executable, "-c", child],
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, cwd=str(tmp_path))
+                              text=True, cwd=str(tmp_path), env=env)
              for _ in range(2)]
     for p in procs:
         _out, err = p.communicate(timeout=180)
@@ -622,6 +625,7 @@ def test_concurrent_creation_of_a_fresh_index_does_not_fail(tmp_path):
     read), so the only thing wrong is that a concurrent setup is not tolerated.
     This test drives the real ``Store`` from two real processes.
     """
+    import os
     import subprocess
     import sys
     from voyager.store import Store
@@ -629,12 +633,14 @@ def test_concurrent_creation_of_a_fresh_index_does_not_fail(tmp_path):
     CHILD = (
         "import sys\n"
         "from pathlib import Path\n"
-        "sys.path.insert(0, %r)\n"
         "from voyager.store import Store\n"
         "s = Store(Path(sys.argv[1]))\n"
         "s.close()\n"
         "print('OK')\n"
-    ) % str(Path(r"E:/code/voyager"))
+    )
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(REPO_ROOT)   # child must import THIS checkout
 
     # Several trials: the failure is a race, so a single run proves nothing
     # either way.  Ten pairs is enough to catch a ~1-in-6 rate.
@@ -642,7 +648,7 @@ def test_concurrent_creation_of_a_fresh_index_does_not_fail(tmp_path):
         db = tmp_path / ("fresh%d.db" % trial)
         procs = [subprocess.Popen([sys.executable, "-c", CHILD, str(db)],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True, cwd=str(tmp_path))
+                                  text=True, cwd=str(tmp_path), env=env)
                  for _ in range(2)]
         failures = []
         for p in procs:

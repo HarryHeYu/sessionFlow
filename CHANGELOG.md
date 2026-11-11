@@ -5,6 +5,14 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Tests
+- **Two `test_scan_streaming.py` concurrency cases hard-coded
+  `E:/code/voyager` into child `sys.path`**, so they failed with
+  `ModuleNotFoundError` on any machine without that exact path (reported as
+  [issue #20](https://github.com/HarryHeYu/sessionFlow/issues/20)). They now
+  derive `REPO_ROOT` from `__file__` and pass it to children via `PYTHONPATH`,
+  matching `tests/test_scan_crash.py`. No product code changed.
+
 ### Fixed
 
 - **The `api` bridge decoded stdin in the ANSI code page, so a CJK query
