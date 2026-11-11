@@ -4,6 +4,27 @@
 >
 > Voyager 把散落在各 Agent 里的历史，编译成下一个 Agent 真正需要的上下文。
 
+> **当前状态与下一阶段（2026-11-11）。** 下面的 Phase 记录是历史档案，保持原样。
+> 现行计划由发布门槛与 GitHub Issue 驱动，不再新增 Phase。
+>
+> - **P0 / 阻塞：** Core `v1.3.1` 是 RC，**未打 tag、未发 Release**。新确认的
+>   缺陷已纳入门槛：JSON-lines `api` 从 stdin 读请求时用的是 Windows 旧代码页，
+>   而 stdout/stderr 已强制 UTF-8，UTF-8 中文查询会静默返回 0 行
+>   （[sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21)）。
+>   由 @SunnyRad 在 dsh-sessionflow PR #5 报告，已做字节级复现；修复 PR 留给
+>   贡献者，维护者不并行实现同一改动。**修复前构建的候选产物不得当作最终发布包。**
+> - **P0 / 已完成：** dsh-sessionflow PR #5 已 Squash Merge（`b3fc6b9`），保留作者
+>   归属。Plugin 仍是 `v1.2.0`，未发新版。
+> - **P1：** OpenCode Adapter Phase 3（真实 SQLite Schema 复核、增量扫描、WAL
+>   与错误恢复、工具调用映射；合成测试必须标明是合成）、Provider Capability
+>   Matrix、DSH provenance 分类、Bridge/工具契约加固、Evidence Verification 工具。
+> - **P2：** Native Resume 实机验证（未观察到前保持 `NOT_VERIFIED`）、VSIX 打包、
+>   macOS CI、DSH canary、Windows CI。
+>
+> 执行顺序：先收口 v1.3.1 门槛（stdin 修复 → 从最终 HEAD 重建 wheel/sdist →
+> 重算 SHA-256 → 重跑测试、升级路径与 Plugin 配对验证），再启动 P1。**不要同时
+> 并行推进多个跨仓协议改动。** 打 tag 与发 GitHub Release 仍需维护者单独确认。
+
 **状态：** Phase 1 已落地（`voyager merge`，commit `ff13096`）。
 **Phase 1b shipped（`5e8271c`）；Phase 2 已落地（2a WorkThread `b580001`/`934dfd5`；2b 租约 `c41f99b`；2c 首轮审计延期的两项已收口——MCP voyager_thread 与 `continue --repo` 确定性 thread 解析（`51c1054`））。**
 **Phase 3 shipped（`d931b02`）；Phase 4 已落地（`96fc752`）；Phase 5 已落地（`2f01a7f`）；**

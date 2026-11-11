@@ -2,6 +2,33 @@
 
 > Voyager compiles scattered agent histories into the context the next agent actually needs.
 
+> **Current state & next stage (2026-11-11).** The historical phase record below
+> is kept as-is. The live plan is now driven by the release gate and by GitHub
+> issues, not by new phases.
+>
+> - **P0 / blocked:** Core `v1.3.1` is a release candidate — **not tagged, not
+>   released**. A newly confirmed defect is now a gate item: the JSON-lines
+>   `api` reads stdin with the Windows legacy code page while stdout/stderr are
+>   forced to UTF-8, so UTF-8 CJK queries silently return 0 rows
+>   ([sessionFlow#21](https://github.com/HarryHeYu/sessionFlow/issues/21)).
+>   Reported by @SunnyRad in dsh-sessionflow PR #5 and reproduced at byte level.
+>   A separate fix PR is reserved for the contributor; the maintainer does not
+>   implement it in parallel. **Candidate artifacts built before that fix must
+>   not be published as the final release.**
+> - **P0 / done:** dsh-sessionflow PR #5 merged (`b3fc6b9`), author attribution
+>   preserved. Plugin is still at `v1.2.0`; no new plugin version was released.
+> - **P1:** OpenCode Adapter Phase 3 (real SQLite schema review, incremental
+>   scan, WAL/error recovery, tool-call mapping — synthetic tests stay labelled
+>   as synthetic), Provider Capability Matrix, DSH provenance classifier,
+>   Bridge/Tool contract hardening, Evidence Verification tool.
+> - **P2:** Native Resume live verification (keep `NOT_VERIFIED` until observed),
+>   VSIX packaging, macOS CI, DSH canary, Windows CI.
+>
+> Order: finish the v1.3.1 gate first (stdin fix → rebuild wheel/sdist from the
+> final HEAD → recompute SHA-256 → rerun tests, upgrade path and the plugin
+> pairing), then start P1. **Do not open several cross-repo protocol changes in
+> parallel.** The tag and GitHub Release remain a separate maintainer decision.
+
 **Status:** Phase 1 shipped (`voyager merge`, commit `ff13096`).
 **Phase 1b shipped (`5e8271c`); Phase 2 COMPLETE — 2a WorkThread (`b580001`/`934dfd5`), 2b lease (`c41f99b`), 2c deferred items closed (MCP voyager_thread + deterministic --repo thread resolution; multi-signal auto-clustering re-scoped as a later enhancement under #3).**
 **Phase 3 shipped (`d931b02`); Phase 4 shipped (`96fc752`); Phase 5 shipped (`2f01a7f`); **
