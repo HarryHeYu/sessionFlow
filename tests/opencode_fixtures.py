@@ -168,6 +168,145 @@ def make_v2(path: Path, *, title="修复补丁", n_sessions=1,
     return path
 
 
+# --- intermediate v2.0.x schema: parts INLINE in session_message.data ------
+
+#: No ``session_part`` table. Message content lives in ``data``: a ``user`` row
+#: has a ``text`` string, an ``assistant`` row has a ``content`` array of
+#: text / reasoning / tool items. This mirrors a real install's structure; the
+#: values below are synthetic and contain no user data.
+V20_INLINE_DDL = """
+CREATE TABLE project (
+  id text PRIMARY KEY, worktree text NOT NULL, vcs text, name text,
+  icon_url text, icon_url_override text, icon_color text,
+  time_created integer NOT NULL, time_updated integer NOT NULL,
+  time_initialized integer, time_active integer NOT NULL DEFAULT 0,
+  time_archived integer, sandboxes text NOT NULL, commands text
+);
+CREATE TABLE session_v2 (
+  id text PRIMARY KEY, project_id text NOT NULL, workspace_id text,
+  parent_id text, fork_session_id text, fork_boundary text,
+  slug text NOT NULL, directory text NOT NULL, path text, title text,
+  version text NOT NULL, share_url text,
+  summary_additions integer, summary_deletions integer, summary_files integer,
+  summary_diffs text, metadata text, cost real NOT NULL DEFAULT 0,
+  tokens_input integer NOT NULL DEFAULT 0,
+  tokens_output integer NOT NULL DEFAULT 0,
+  tokens_reasoning integer NOT NULL DEFAULT 0,
+  tokens_cache_read integer NOT NULL DEFAULT 0,
+  tokens_cache_write integer NOT NULL DEFAULT 0,
+  revert text, permission text, agent text, model text,
+  time_created integer NOT NULL, time_updated integer NOT NULL,
+  time_busy integer, time_idle integer, time_viewed integer,
+  idle_outcome text, time_compacting integer, time_archived integer,
+  time_suspended integer, resume_attempts integer NOT NULL DEFAULT 0
+);
+CREATE TABLE session_message (
+  id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
+  seq integer NOT NULL, time_created integer NOT NULL,
+  time_updated integer NOT NULL, data text NOT NULL
+);
+"""
+
+
+def _inline_tool(name="bash", call_id="call_1", status="completed",
+                 inp=None, output="done", exit_code=0, error=None):
+    """A v2.0.x inline tool item: exit lives in ``state.metadata.exit``."""
+    state = {"status": status,
+             "input": inp if inp is not None else {"command": "pytest -q"},
+             "metadata": {"status": status, "truncated": False,
+                          "exit": exit_code}}
+    if status == "completed":
+        state["content"] = [{"type": "text", "text": output}]
+    if status == "error":
+        state.pop("metadata", None)
+        state["error"] = {"type": "tool.execution", "message": error or "boom"}
+    return {"type": "tool", "id": call_id, "name": name, "executed": True,
+            "state": state, "time": {"created": T0 + 30, "completed": T0 + 40}}
+
+
+def make_v20_inline(path: Path, *, title="内联形状", n_sessions=1,
+                    text="补丁已完成", tool=True, unicode=True,
+                    n_messages=0, wal=False, empty_user=False,
+                    running_tool=False, meta=True) -> Path:
+    """Build a v2.0.x database: inline ``data.content``, no ``session_part``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(path))
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+        con.executescript(V20_INLINE_DDL)
+        con.execute(
+            "INSERT INTO project (id, worktree, vcs, name, time_created, "
+            "time_updated, sandboxes) VALUES (?,?,?,?,?,?,'[]')",
+            ("prj_1", "/repo/inline", "git", "inline", T0, T0))
+        for s in range(n_sessions):
+            sid = "ses_inline_%03d" % s
+            con.execute(
+                "INSERT INTO session_v2 (id, project_id, slug, directory, "
+                "title, version, time_created, time_updated, model, "
+                "tokens_input, tokens_output) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (sid, "prj_1", "slug", "/repo/inline", title, "2.0.29",
+                 T0 + s * 1000, T0 + s * 1000 + 900,
+                 json.dumps({"id": "claude-sonnet-4",
+                             "providerID": "anthropic", "variant": "default"}),
+                 120, 40))
+            seq = 0
+            # user: text is a plain string in this shape (files/agents arrays)
+            con.execute(
+                "INSERT INTO session_message VALUES (?,?,?,?,?,?,?)",
+                ("msg_%s_u0" % s, sid, "user", seq, T0, T0,
+                 json.dumps({"text": "" if empty_user else text,
+                             "files": [], "agents": [],
+                             "time": {"created": T0}}, ensure_ascii=False)))
+            seq += 1
+            # assistant: content array holds the parts inline
+            content = [{"type": "reasoning", "text": "先看一下测试",
+                        "time": {"created": T0 + 10}},
+                       {"type": "text", "text": "正在处理"}]
+            if tool:
+                content.append(_inline_tool(
+                    status="running" if running_tool else "completed"))
+            if unicode:
+                content.append({"type": "text", "text": "日本語 한국어 🚀"})
+            con.execute(
+                "INSERT INTO session_message VALUES (?,?,?,?,?,?,?)",
+                ("msg_%s_a0" % s, sid, "assistant", seq, T0 + 10, T0 + 10,
+                 json.dumps({"agent": "build",
+                             "model": {"id": "claude-sonnet-4",
+                                       "providerID": "anthropic"},
+                             "time": {"created": T0 + 10,
+                                      "completed": T0 + 20},
+                             "content": content}, ensure_ascii=False)))
+            seq += 1
+            if meta:
+                # provider-generated rows must stay meta, never a human turn
+                con.execute(
+                    "INSERT INTO session_message VALUES (?,?,?,?,?,?,?)",
+                    ("msg_%s_sys" % s, sid, "system", seq, T0 + 11, T0 + 11,
+                     json.dumps({"text": "system note", "time": {"created": T0 + 11}},
+                                ensure_ascii=False)))
+                seq += 1
+                con.execute(
+                    "INSERT INTO session_message VALUES (?,?,?,?,?,?,?)",
+                    ("msg_%s_cmp" % s, sid, "compaction", seq, T0 + 12, T0 + 12,
+                     json.dumps({"summary": "compacted summary", "reason": "auto",
+                                 "status": "completed",
+                                 "time": {"created": T0 + 12}},
+                                ensure_ascii=False)))
+                seq += 1
+            for i in range(n_messages):
+                con.execute(
+                    "INSERT INTO session_message VALUES (?,?,?,?,?,?,?)",
+                    ("msg_%s_f%d" % (s, i), sid, "user", seq,
+                     T0 + 100 + i, T0 + 100 + i,
+                     json.dumps({"text": "filler %d" % i, "files": [],
+                                 "time": {"created": T0 + 100 + i}})))
+                seq += 1
+        con.commit()
+    finally:
+        con.close()
+    return path
+
+
 def make_legacy(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(path))

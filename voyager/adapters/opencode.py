@@ -19,8 +19,16 @@ What was verified upstream (anomalyco/opencode, release v2.2.6 2026-11-06;
   They are not separate rows, so joining by ``call_id`` is not how results
   are found here.  ``call_id`` is still recorded as the tool_call_id.
 * Pre-v2 databases use ``session`` / ``message`` / ``part`` with a different
-  column set (``packages/core/test/v1-migration.test.ts``).  Both shapes are
-  probed; neither is assumed.
+  column set (``packages/core/test/v1-migration.test.ts``).  All shapes are
+  probed; none is assumed.
+* **An intermediate v2.0.x shape has no ``session_part`` table at all.** Message
+  content is stored *inline* in ``session_message.data``: ``user`` rows carry a
+  ``text`` string; ``assistant`` rows carry a ``content`` array whose items are
+  ``text`` / ``reasoning`` / ``tool`` parts, and a tool's exit code sits in
+  ``state.metadata.exit`` rather than ``state.exit``.  This shape is detected
+  structurally (``session_v2`` + ``session_message`` **and no** ``session_part``),
+  never by a product version string.  It was found on a real install, so it is
+  not a hypothetical variant.
 
 What this adapter does NOT do:
 
@@ -32,9 +40,11 @@ What this adapter does NOT do:
 * No guessing. An unknown schema, a corrupt file or a locked database is
   reported by name; a missing tool result is left NULL rather than invented.
 
-Verification level: UNIT_VERIFIED (synthetic SQLite fixtures). No real
-OpenCode install was observed in this round — see
-``docs/audits/2026-11-opencode-phase3-report.md``.
+Verification level: UNIT_VERIFIED on synthetic fixtures for all three shapes,
+plus a **real-install read** of a v2.0.x database (discovery, message/role
+mapping, inline tool calls, timestamps) recorded in the Phase 3 gate report.
+Native resume and cross-agent continuation are still ``NOT_FOUND`` /
+``NOT_VERIFIED`` and must not be read as verified from discovery succeeding.
 """
 
 from __future__ import annotations
@@ -91,7 +101,16 @@ def data_dir(home: Optional[Path] = None) -> Path:
 
 
 def _candidate_dbs(home: Optional[Path] = None) -> List[Path]:
-    """Ordered, deduplicated candidate paths. Never creates anything."""
+    """Ordered, deduplicated candidate paths. Never creates anything.
+
+    An explicit override (``VOYAGER_OPENCODE_DB`` / upstream ``OPENCODE_DB``)
+    is **authoritative**: when one is set we return only the named database(s)
+    and do not probe the default data directory or channel builds. That keeps
+    an operator-named file from causing an unrequested read of a real HOME
+    database — which is exactly what a test or CI run that sets an override
+    must never do. With no override, the default database plus any
+    ``opencode-<channel>.db`` beside it are candidates.
+    """
     out: List[Path] = []
 
     def add(p: Path) -> None:
@@ -99,6 +118,7 @@ def _candidate_dbs(home: Optional[Path] = None) -> List[Path]:
         if p not in out:
             out.append(p)
 
+    overridden = False
     for name in _ENV_OVERRIDES:
         value = os.environ.get(name)
         if not value or value == ":memory:":
@@ -106,6 +126,9 @@ def _candidate_dbs(home: Optional[Path] = None) -> List[Path]:
             continue
         p = Path(value).expanduser()
         add(p if p.is_absolute() else data_dir(home) / p)
+        overridden = True
+    if overridden:
+        return out
 
     d = data_dir(home)
     add(d / _DB_NAME)
@@ -125,8 +148,10 @@ def _candidate_dbs(home: Optional[Path] = None) -> List[Path]:
 # Schema probing
 # ---------------------------------------------------------------------------
 
-#: (table -> required columns). Two shapes: the current v2 schema and the
-#: pre-v2 one that migration.ts still recognises by the name "session".
+#: (table -> required columns). Three shapes: the current v2 schema (parts in a
+#: separate table), the intermediate v2.0.x schema (parts inline in
+#: ``session_message.data``), and the pre-v2 one that migration.ts still
+#: recognises by the name "session".
 SCHEMAS: Dict[str, Dict[str, Tuple[str, ...]]] = {
     "v2": {
         "session_v2": ("id", "project_id", "directory", "title",
@@ -136,12 +161,29 @@ SCHEMAS: Dict[str, Dict[str, Tuple[str, ...]]] = {
         "session_part": ("message_id", "session_id", "ordinal", "type",
                          "call_id", "data"),
     },
+    # v2.0.x: identical message table, but the parts live inline in `data` and
+    # there is no session_part table. Required columns are the same as v2 minus
+    # the parts table; `SCHEMA_FORBID` below keeps the two apart.
+    "v2-inline": {
+        "session_v2": ("id", "project_id", "directory", "title",
+                       "time_created", "time_updated"),
+        "session_message": ("id", "session_id", "type", "seq",
+                            "time_created", "data"),
+    },
     "legacy": {
         "session": ("id", "project_id", "directory", "title",
                     "time_created", "time_updated"),
         "message": ("id", "session_id", "time_created", "data"),
         "part": ("message_id", "session_id", "time_created", "data"),
     },
+}
+
+#: Tables whose *absence* is part of a shape's definition. Checked after the
+#: required-column match, so a database that does carry `session_part` is never
+#: misread as the inline shape. This is a structural discriminator, not a
+#: version check: a v2.2.x database with the parts table matches "v2" first.
+SCHEMA_FORBID: Dict[str, Tuple[str, ...]] = {
+    "v2-inline": ("session_part",),
 }
 
 PROBE_ABSENT = "absent"
@@ -169,6 +211,10 @@ def detect_schema(con: sqlite3.Connection) -> Optional[str]:
         "SELECT name FROM sqlite_master WHERE type='table'")}
     for name, required in SCHEMAS.items():
         if not set(required).issubset(tables):
+            continue
+        # A shape may require the *absence* of a table (v2-inline has no
+        # session_part). Structural, not version-based.
+        if set(SCHEMA_FORBID.get(name, ())) & tables:
             continue
         ok = True
         for table, cols in required.items():
@@ -198,7 +244,7 @@ def probe(path: Path) -> Tuple[str, Optional[str]]:
         # answer the schema query and fail on the first table scan.
         con.execute("SELECT count(*) FROM sqlite_master").fetchone()
         shape = detect_schema(con)
-        if shape == "v2":
+        if shape in ("v2", "v2-inline"):
             con.execute("SELECT count(*) FROM session_v2").fetchone()
         elif shape == "legacy":
             con.execute("SELECT count(*) FROM session").fetchone()
@@ -276,6 +322,31 @@ def _content_text(content: Any) -> Optional[str]:
             elif block.get("uri"):
                 parts.append(str(block["uri"]))
     return "\n".join(p for p in parts if p) or None
+
+
+def _inline_parts(mdata: Dict[str, Any]) -> List[dict]:
+    """Parts stored inline in a v2.0.x assistant message's ``data.content``.
+
+    Each item is already shaped like a part (``type`` plus ``text`` or
+    ``state``). Only dict items are kept; anything else is dropped rather than
+    guessed at. Array order is the upstream write order, which is the stable
+    order for these parts.
+    """
+    content = mdata.get("content")
+    if not isinstance(content, list):
+        return []
+    return [item for item in content if isinstance(item, dict)]
+
+
+def _tool_exit(state: Dict[str, Any]) -> Optional[int]:
+    """A tool exit code, wherever the build put it. ``0`` is a real code."""
+    candidates = (state.get("exit"), state.get("exit_code"),
+                  _as_dict(state.get("metadata")).get("exit"))
+    for value in candidates:
+        code = _exit_code(value)
+        if code is not None:
+            return code
+    return None
 
 
 def _command_and_path(tool_input: Any) -> Tuple[Optional[str], Optional[str]]:
@@ -401,7 +472,8 @@ class OpencodeAdapter(Adapter):
             except sqlite3.Error:
                 pass                    # project table is optional for us
 
-            session_table = "session_v2" if shape == "v2" else "session"
+            session_table = ("session_v2" if shape in ("v2", "v2-inline")
+                             else "session")
             rows = con.execute(
                 "SELECT * FROM %s ORDER BY time_created, id" % session_table
             ).fetchall()
@@ -467,7 +539,7 @@ class OpencodeAdapter(Adapter):
             # so read both and de-duplicate by (text, ts) below.
             if mtype == "user":
                 text = text_of(mdata.get("text")) if mdata.get("text") else ""
-                if not text:
+                if not text and shape != "v2-inline":
                     for p in self._parts(con, shape, m.get("id"), native):
                         if p.get("type") == "text" and p.get("text"):
                             text = str(p["text"])
@@ -485,7 +557,10 @@ class OpencodeAdapter(Adapter):
                          "location-switched"):
                 # Provider-generated pseudo-user text must not be promoted to a
                 # human instruction (provenance safety: keep it as meta).
-                text = text_of(mdata.get("text") or mdata.get("description"))
+                # `summary` is what a v2.0.x compaction row carries; using it
+                # only when present keeps this honest (no invented text).
+                text = text_of(mdata.get("text") or mdata.get("description")
+                               or mdata.get("summary"))
                 if text:
                     ev(kind="meta", role="system", content=text, ts=mtime,
                        origin="provider_system",
@@ -506,8 +581,14 @@ class OpencodeAdapter(Adapter):
                 continue
 
             if mtype == "assistant" or mtype is None or shape == "legacy":
+                if shape == "v2-inline":
+                    # v2.0.x has no session_part table: the parts array lives
+                    # inline in `data.content` (text / reasoning / tool items).
+                    parts = _inline_parts(mdata)
+                else:
+                    parts = self._parts(con, shape, m.get("id"), native)
                 before = len(events)
-                for p in self._parts(con, shape, m.get("id"), native):
+                for p in parts:
                     ptype = p.get("type")
                     ptime = _ms(_as_dict(p.get("time")).get("created")) or mtime
                     if ptype == "text" and p.get("text"):
@@ -532,8 +613,10 @@ class OpencodeAdapter(Adapter):
                 # Some builds store assistant content inline in the message
                 # data instead of (or in addition to) session_part. Only use
                 # it when the parts table gave us nothing for this message —
-                # otherwise the same text would be indexed twice.
-                if len(events) == before and isinstance(mdata.get("content"), list):
+                # otherwise the same text would be indexed twice. The inline
+                # shape already read `data.content` above, so skip it there.
+                if (shape != "v2-inline" and len(events) == before
+                        and isinstance(mdata.get("content"), list)):
                     for p in mdata["content"]:
                         pd = _as_dict(p)
                         if pd.get("type") == "text" and pd.get("text"):
@@ -571,7 +654,7 @@ class OpencodeAdapter(Adapter):
                 "source_path": db, "extra_sources": _side_files(db)}
 
     def _messages(self, con, shape, native):
-        if shape == "v2":
+        if shape in ("v2", "v2-inline"):
             sql = ("SELECT * FROM session_message WHERE session_id=? "
                    "ORDER BY seq, time_created, id")
         else:
@@ -622,7 +705,7 @@ class OpencodeAdapter(Adapter):
            tool_input=(json.dumps(inp, ensure_ascii=False, default=str)
                        if inp is not None else None),
            command=cmd, file_path=fp,
-           exit_code=_exit_code(state.get("exit") or state.get("exit_code")),
+           exit_code=_tool_exit(state),
            origin="provider_system", raw_event=raw)
 
         # The result is in the SAME part's state, not a separate row. Emit a

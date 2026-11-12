@@ -20,7 +20,8 @@ from pathlib import Path
 import pytest
 
 from opencode_fixtures import (T0, append_message, make_corrupt, make_legacy,
-                               make_unknown, make_v2, open_writer)
+                               make_unknown, make_v2, make_v20_inline,
+                               open_writer)
 
 
 @pytest.fixture
@@ -459,3 +460,118 @@ def test_large_session_fixture_completes(oc_env, adapter, monkeypatch):
     bundles = adapter.scan(lambda p, f: True)
     assert len(bundles) == 1
     assert len(bundles[0]["events"]) >= 5000
+
+
+# --- v2.0.x inline shape (no session_part; content in data.content) --------
+
+def test_v20_inline_schema_is_recognised(oc_env):
+    from voyager.adapters import opencode as oc
+    db = make_v20_inline(oc_env / "opencode.db")
+    assert oc.probe(db) == (oc.PROBE_OK, "v2-inline")
+
+
+def test_parts_schema_wins_over_inline_when_session_part_exists(oc_env):
+    """A v2.2.x database also has session_message; it must stay 'v2'."""
+    from voyager.adapters import opencode as oc
+    db = make_v2(oc_env / "opencode.db")
+    assert oc.probe(db) == (oc.PROBE_OK, "v2")
+
+
+def test_v20_inline_session_and_events(oc_env, adapter, monkeypatch):
+    db = make_v20_inline(oc_env / "opencode.db")
+    monkeypatch.setenv("VOYAGER_OPENCODE_DB", str(db))
+    bundles = adapter.scan(lambda p, f: True)
+    assert len(bundles) == 1
+    b = bundles[0]
+    s, evs = b["session"], b["events"]
+    assert s["id"] == "opencode:ses_inline_000"
+    assert s["title"] == "内联形状"
+    assert s["metadata"]["schema"] == "v2-inline"
+    assert s["can_resume"] is False and s["can_fork"] is False
+    kinds = [e["kind"] for e in evs]
+    assert kinds.count("user") == 1
+    assert kinds.count("assistant") >= 2          # text parts, incl. CJK
+    assert kinds.count("reasoning") == 1
+    assert kinds.count("tool_call") == 1
+    assert kinds.count("tool_result") == 1
+    # CJK text survives
+    assert any("日本語" in (e.get("content") or "") for e in evs)
+    # user turn is the human prompt; system/compaction stay meta
+    assert [e for e in evs if e["kind"] == "user"][0]["content"] == "补丁已完成"
+    metas = [e for e in evs if e["kind"] == "meta"]
+    assert any("system note" in (e.get("content") or "") for e in metas)
+    assert any("compacted summary" in (e.get("content") or "") for e in metas)
+    assert all(e["origin"] == "provider_system" for e in metas)
+
+
+def test_v20_inline_tool_exit_comes_from_state_metadata(oc_env, adapter,
+                                                        monkeypatch):
+    db = make_v20_inline(oc_env / "opencode.db")
+    monkeypatch.setenv("VOYAGER_OPENCODE_DB", str(db))
+    evs = adapter.scan(lambda p, f: True)[0]["events"]
+    call = [e for e in evs if e["kind"] == "tool_call"][0]
+    assert call["tool_name"] == "bash"
+    assert call["tool_call_id"] == "call_1"
+    assert call["command"] == "pytest -q"
+    # exit 0 lives in state.metadata.exit and must survive as 0, not None
+    assert call["exit_code"] == 0
+    result = [e for e in evs if e["kind"] == "tool_result"][0]
+    assert "done" in (result.get("tool_output") or "")
+
+
+def test_v20_inline_running_tool_gets_no_invented_result(oc_env, adapter,
+                                                         monkeypatch):
+    db = make_v20_inline(oc_env / "opencode.db", running_tool=True)
+    monkeypatch.setenv("VOYAGER_OPENCODE_DB", str(db))
+    evs = adapter.scan(lambda p, f: True)[0]["events"]
+    assert [e for e in evs if e["kind"] == "tool_call"]
+    assert not [e for e in evs if e["kind"] == "tool_result"]
+
+
+def test_v20_inline_empty_user_text_is_skipped(oc_env, adapter, monkeypatch):
+    db = make_v20_inline(oc_env / "opencode.db", empty_user=True)
+    monkeypatch.setenv("VOYAGER_OPENCODE_DB", str(db))
+    evs = adapter.scan(lambda p, f: True)[0]["events"]
+    assert not [e for e in evs if e["kind"] == "user"]
+
+
+def test_v20_inline_wal_rescan_sees_a_new_turn(oc_env, adapter, monkeypatch):
+    db = make_v20_inline(oc_env / "opencode.db")
+    monkeypatch.setenv("VOYAGER_OPENCODE_DB", str(db))
+    writer = open_writer(db)
+    try:
+        first = adapter.scan(lambda p, f: True)
+        n_before = len([e for e in first[0]["events"] if e["kind"] == "user"])
+        append_message(writer, "ses_inline_000", "第二个问题")
+        second = adapter.scan(lambda p, f: True)
+        n_after = len([e for e in second[0]["events"] if e["kind"] == "user"])
+        assert n_after == n_before + 1
+        assert any("第二个问题" in (e.get("content") or "")
+                   for e in second[0]["events"])
+    finally:
+        writer.close()
+
+
+def test_v20_inline_scan_is_idempotent(oc_env, adapter, monkeypatch):
+    db = make_v20_inline(oc_env / "opencode.db")
+    monkeypatch.setenv("VOYAGER_OPENCODE_DB", str(db))
+    a = adapter.scan(lambda p, f: True)
+    b = adapter.scan(lambda p, f: True)
+    assert [(x["session"]["id"], len(x["events"])) for x in a] == \
+           [(x["session"]["id"], len(x["events"])) for x in b]
+    assert [e["seq"] for e in a[0]["events"]] == \
+           [e["seq"] for e in b[0]["events"]]
+
+
+def test_explicit_override_does_not_probe_the_default_database(oc_env,
+                                                               monkeypatch):
+    """An operator-named DB must not cause an unrequested default-HOME read."""
+    from voyager.adapters import opencode as oc
+    make_v2(oc_env / "opencode.db")              # the default the user did NOT name
+    other = oc_env.parent / "named.db"
+    make_v20_inline(other)
+    monkeypatch.setenv("VOYAGER_OPENCODE_DB", str(other))
+    candidates = oc._candidate_dbs()
+    assert candidates and all("named.db" == p.name for p in candidates)
+    assert oc_env / "opencode.db" not in candidates
+    assert oc_env / "opencode.db" not in oc.OpencodeAdapter().discover()
