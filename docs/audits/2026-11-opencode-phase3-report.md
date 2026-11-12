@@ -10,9 +10,9 @@
 Checked on 2026-11-10 against `anomalyco/opencode` release **v2.2.6**
 (2026-11-06). `packages/core/src/session/sql.ts` at that tag is
 **byte-identical** to v1.19.5 (the version the Phase 2 design note used), so
-the schema did not move between them. Sources are copied into
-`E:\sessionflow-scratch\taskB\upstream\` for this session (scratch, not a
-repository artifact).
+the schema did not move between them.
+Upstream sources were read from a scratch checkout of that tag, outside the
+repository; they are not committed as an artifact.
 
 | Fact | Source |
 |---|---|
