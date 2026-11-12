@@ -222,12 +222,16 @@ DECLARED: Dict[str, Dict[str, Tuple[str, str]]] = {
         "context_budget": (NOT_FOUND, "no injection path"),
         "truncation_behavior": (NOT_FOUND, "no injection path"),
     },
-    # OpenCode: read-only SQLite indexing of session_v2 / session_message /
-    # session_part. Every state below is what the SYNTHETIC suite supports;
-    # no real install was observed, so nothing is LIVE_VERIFIED.
+    # OpenCode: read-only SQLite indexing of session_v2 / session_message and,
+    # where present, session_part. Two of the three shapes (v2.2.x parts,
+    # v2.0.x inline) were exercised on synthetic fixtures; discovery and
+    # message mapping were also observed once on a real v2.0.29 install (see
+    # docs/audits/2026-11-opencode-v20x-real-gate.md). States stay at
+    # UNIT_VERIFIED: one install/version/platform is not enough to promote a
+    # cell, and nothing here is LIVE_VERIFIED.
     "opencode": {
-        "session_discovery": (UNIT_VERIFIED, _ADAPTER + "; read-only SQLite, synthetic fixtures"),
-        "session_indexing": (UNIT_VERIFIED, _ADAPTER + "; both v2 and legacy shapes exercised"),
+        "session_discovery": (UNIT_VERIFIED, _ADAPTER + "; read-only SQLite, synthetic fixtures; one real v2.0.29 install observed"),
+        "session_indexing": (UNIT_VERIFIED, _ADAPTER + "; v2.2.x, v2.0.x-inline and legacy shapes exercised"),
         # Reading a session is not resuming one. There is no resume command,
         # startup hook or transcript writer for this provider.
         "native_resume": (NOT_FOUND, "read-only index only; no resume surface implemented or verified"),
@@ -236,8 +240,8 @@ DECLARED: Dict[str, Dict[str, Tuple[str, str]]] = {
         "native_session_id_at_start": (NOT_FOUND, "no startup surface"),
         "native_auto_attach": (NOT_FOUND, "no startup surface"),
         "live_zero_touch_continuity": (NOT_FOUND, "no startup surface"),
-        "transcript_import": (UNIT_VERIFIED, _ADAPTER + "; synthetic SQLite, not a real install"),
-        "tool_event_support": (UNIT_VERIFIED, "tool call/result from session_part.state in fixtures"),
+        "transcript_import": (UNIT_VERIFIED, _ADAPTER + "; synthetic SQLite; no real import performed"),
+        "tool_event_support": (UNIT_VERIFIED, "tool call/result from session_part.state or inline content[].state, in fixtures"),
         "cwd_repo_discovery": (UNIT_VERIFIED, "session.directory + project.worktree in fixtures"),
         "context_budget": (NOT_FOUND, "no injection path"),
         "truncation_behavior": (NOT_FOUND, "no injection path"),
