@@ -429,12 +429,15 @@ voyager continue --thread thr_xxxx     # 或 voyager switch claude --thread ...
 所以在那张验证表出现对应行之前，请把这一列的每个 `✅` 都当作 `NOT VERIFIED`。
 （`*_continuity_verdict.md` 覆盖的是 hook 注入，那是另一种能力。）
 
-OpenCode 从它的 SQLite 数据库**只读**索引（同时支持当前 `session_v2` 和旧版
-`session`/`message`/`part` 两套表结构）。消息、工具调用与结果会进入
-`search`/`show`/`repo`，也能给另一个 Agent 提供接续上下文——但这**不是**
-native resume，也没有为其实现 resume 命令、启动 hook 或 transcript writer。
-目前只用合成 fixture 验证过（`tests/test_opencode.py`），尚未在真实安装上观察。
-可用 `VOYAGER_OPENCODE_DB` 指向指定数据库。
+OpenCode 从它的 SQLite 数据库**只读**索引，覆盖它实际存在的三种表结构：
+`session_v2` + `session_part`（v2.2.x）、`session_v2` + 消息内容内联在
+`session_message.data`（v2.0.x），以及旧版 `session`/`message`/`part`。消息、
+工具调用与结果会进入 `search`/`show`/`repo`，也能给另一个 Agent 提供接续上下文
+——但这**不是** native resume，也没有为其实现 resume 命令、启动 hook 或
+transcript writer。三种表结构都有合成 fixture 覆盖（`tests/test_opencode.py`）；
+此外在一台真实的 v2.0.29 安装上观察过一次发现与消息映射，记录在
+`docs/audits/2026-11-opencode-v20x-real-gate.md`。这只是一个安装、一个平台，
+因此 native resume 与跨 Agent 接续仍未验证。可用 `VOYAGER_OPENCODE_DB` 指向指定数据库。
 
 Cursor 与 Antigravity 适配器标记为实验性：Cursor 只读解析它的 KV 存储，
 Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。

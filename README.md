@@ -623,13 +623,18 @@ treat every `✅` there as `NOT VERIFIED` until the verification table above
 carries a row saying otherwise. (The `*_continuity_verdict.md` files cover hook
 injection, which is a different capability.)
 
-OpenCode is indexed **read-only** from its SQLite database (both the current
-`session_v2` schema and the pre-v2 `session`/`message`/`part` shape). That
-gives you messages, tool calls and results in `search`/`show`/`repo` and lets
-another agent continue from the context — it is **not** native resume, and no
-resume command, startup hook or transcript writer exists for it. Verified only
-against synthetic fixtures (`tests/test_opencode.py`); a real install has not
-been observed yet. Set `VOYAGER_OPENCODE_DB` to point at a specific database.
+OpenCode is indexed **read-only** from its SQLite database, in all three shapes
+it ships: `session_v2` with a `session_part` table (v2.2.x), `session_v2` with
+the message content inline in `session_message.data` (v2.0.x), and the pre-v2
+`session`/`message`/`part` layout. That gives you messages, tool calls and
+results in `search`/`show`/`repo` and lets another agent continue from the
+context — it is **not** native resume, and no resume command, startup hook or
+transcript writer exists for it. All three shapes are covered by synthetic
+fixtures (`tests/test_opencode.py`); discovery and message mapping were also
+observed once on a real v2.0.29 install, recorded in
+`docs/audits/2026-11-opencode-v20x-real-gate.md`. That is one install on one
+platform, so native resume and cross-agent continuation stay unverified. Set
+`VOYAGER_OPENCODE_DB` to point at a specific database.
 
 Cursor and Antigravity adapters are marked experimental: Cursor reads its
 key-value store read-only and Antigravity decodes protobuf blobs

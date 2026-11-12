@@ -30,7 +30,7 @@ known, what is supported, and what a maintainer should check.
 |---|---|
 | Python | 3.10 – 3.13 (CI covers all four on both OS families) |
 | OS | Windows, Linux. macOS is supported by the code and the path handling but is **not in CI**. |
-| Agents indexed | Codex, Claude Code, DSH, Grok CLI, ZCode, Kiro, Cursor, Antigravity |
+| Agents indexed | Codex, Claude Code, DSH, Grok CLI, ZCode, Kiro, Cursor, Antigravity, OpenCode |
 | Distribution | GitHub tag install (`@v1.3.1`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
 
 ## Compatibility Matrix
