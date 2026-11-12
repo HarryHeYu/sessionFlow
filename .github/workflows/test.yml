@@ -71,8 +71,11 @@ jobs:
       - name: Release metadata consistency
         # pyproject, CHANGELOG, README (both languages), release notes and git
         # tags must name the same release. Fails the job on drift.
+        # --strict: NEEDS_ONLINE is a failure here, not a pass with a footnote.
+        # No --online in CI: a network read of ls-remote on every matrix leg is
+        # a flake source; the release gate runs it once, with --require-plugin.
         shell: bash
-        run: python scripts/check_consistency.py
+        run: python scripts/check_consistency.py --strict
 
   core-only:
     # The core install must work with zero optional dependencies: `pip install
