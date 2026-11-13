@@ -205,9 +205,9 @@ branch on it:
 | `INVALID_REFERENCE` | 4 | the reference is malformed — e.g. a digest that is not 8 hex characters |
 
 `--json` gives the same thing machine-readable. `voyager evidence verify --help`
-does **not** list these states or codes; this table and the command's own output
-do, and [the walkthrough](docs/QUICKSTART.md) has one runnable example per state
-on the synthetic demo index.
+prints these five states with their exit codes, and
+[the walkthrough](docs/QUICKSTART.md) has one runnable example per state on the
+synthetic demo index.
 
 **What `MATCH` means, and what it does not.** It means the indexed event is the
 one the reference was made from. It does **not** mean the claim is true — nothing

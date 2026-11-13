@@ -1,4 +1,4 @@
-# Maintenance Guide — sessionFlow v1.3.1
+# Maintenance Guide — sessionFlow v1.4.0
 
 Post-release reference. Nothing here starts new development; it records what is
 known, what is supported, and what a maintainer should check.
@@ -20,7 +20,7 @@ known, what is supported, and what a maintainer should check.
 | 9 | **SQLite concurrent-index flake.** | Rare failure in `test_concurrent_creation_of_a_fresh_index`. | **INCONCLUSIVE**: not reproduced in bounded re-runs (40 fresh-index pairs, 160 child processes). Deliberately not masked with sleeps or unbounded retries. |
 | 10 | **Native resume is unverified** end to end on every provider. | The command is built and wired; no resume has been observed succeeding. | `NOT_VERIFIED` — never claimed as working. Verifying it needs a paid provider session and writes into a real environment. |
 | 11 | **Model-driven tool selection has no repeatable end-to-end suite.** | It has been *observed* in recorded real-model runs — 3/3 when the prompt names the agent or asks "what was I working on", 1/3 on a bare "continue" — but that is one model, one fixture, three attempts. | `OBSERVED, NOT REPEATABLE`. Contract tests cover the six tools; they do not cover the model choosing them. Do not quote a success rate. |
-| 12 | **`voyager evidence verify --help` does not list the five outcomes or the exit codes.** | A user writing a script has to read the README (or trigger each state) to learn them. The runtime output *does* state its own limits on every path. | Known, deliberate for now: changing help text is a code change, and no release is open to carry it. Documented in the README; fix belongs in the next release. |
+| 12 | **`voyager evidence verify --help` did not list the five outcomes or the exit codes.** | A user writing a script had to read the README (or trigger each state) to learn them. | **FIXED.** The help lists all five outcomes, their exit codes and the `MATCH` caveat. The row is kept so the number stays stable for existing references. |
 | 13 | **Provenance classification covers only codex / claude / zcode.** | `provenance.CLASSIFIERS` has no entry for dsh, grok, cursor, kiro or antigravity, so `classify()` returns `UNKNOWN` for every one of their events. A DSH-only index reports `0.0% classified`, and `provenance enrich --apply` cannot change that. | `DESIGN GAP, NOT A BUG`: no toggle or rescan helps. The grok case is tracked as `GROK_MESSAGE_PROVENANCE_COVERAGE` in code; the DSH case was undocumented until dsh-sessionflow#2 reported it. Adding a classifier requires a structural field in the provider record — do not guess one. |
 | 14 | **`NOT_FOUND_IN_CURRENT_AUDIT` reads as "provider not installed".** | It is the declared state of the five machine-dependent *startup* dimensions, and `verify` reports their strongest value as the provider's `declared`. DSH has no native startup surface, so a machine with 46 indexed DSH sessions still shows `NOT_FOUND_IN_CURRENT_AUDIT` while `session_discovery` is `LIVE_VERIFIED`. | Naming/presentation, not detection: `installed: true` is computed from the path and is correct. A clearer label (or a per-dimension view) is the fix; do not change path probing. |
 
@@ -37,7 +37,8 @@ known, what is supported, and what a maintainer should check.
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| v1.3.1 | v1.2.0 | 1 | current release (released 2026-11-11); plugin v1.2.0 needs no upgrade |
+| v1.4.0 | v1.2.0 | 1 | current release (released 2026-11-13); plugin v1.2.0 needs no upgrade — no new op, no seventh tool |
+| v1.3.1 | v1.2.0 | 1 | still supported; index readable by v1.4.0 with no migration |
 | v1.3.0 | v1.2.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.2.0 | v1.1.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.1.0 | v1.1.0 | 1 | upgrade path verified: no row and no schema object changes |
@@ -54,6 +55,9 @@ Run before tagging any future release:
 # PY must be an interpreter that HAS pytest — the base interpreter does not.
 # A venv works: python -m venv .venv && .venv/bin/python -m pip install -e ".[all,dev]"
 PY=/path/to/venv/bin/python
+# Scratch on the repository's drive, never the OS temp directory: on
+# Windows a literal /tmp resolves against the current drive and leaves junk.
+SCRATCH=/path/to/scratch
 
 # 1. version and changelog agree
 grep -m1 '^version' pyproject.toml
@@ -64,18 +68,18 @@ git status --short && git rev-parse --short HEAD origin/main
 
 # 3. full suite (one run at a time — concurrent runs contend on the shared index)
 PYTHONPATH= PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest tests/ -q \
-    --basetemp=/tmp/sf-bt-$(date +%s)
+    --basetemp="$SCRATCH/pytest-$(date +%s)"
 
 # 4. plugin
 cd /e/code/dsh-sessionflow && npm test
 
 # 5. build and install from the artefact, not the worktree
 cd /e/code/voyager
-python -m build --wheel --sdist --outdir /tmp/sf-dist
+python -m build --wheel --sdist --outdir "$SCRATCH/dist"
 # then: clean venv, pip install the wheel, `voyager --version` must match
 
 # 6. upgrade path: build an index with the PREVIOUS tag, read it with this one
-git archive <previous-tag> | tar -x -C /tmp/sf-prev
+git archive <previous-tag> | tar -x -C "$SCRATCH/prev"
 # write synthetic rows with it, then read/verify with the current tree
 ```
 
@@ -83,17 +87,52 @@ git archive <previous-tag> | tar -x -C /tmp/sf-prev
 `PYTHONPATH`: with it in place, bulk `unlink()` raises and tests fail for a reason
 that has nothing to do with the code.
 
-Release mechanics:
+Release mechanics — the `release` workflow is **automatic**:
 
-1. bump `pyproject.toml` **and** the CHANGELOG heading together;
-2. push, wait for CI to be green **on that commit**;
-3. `git tag -a vX.Y.Z -m "..."` and push the tag;
-4. `gh release create vX.Y.Z --title ... --notes-file ... <wheel> <sdist>`;
-5. build the artefacts **from the tag** (`git archive vX.Y.Z`), not from the
-   worktree, so the attachment and the tag cannot drift;
-6. install from the tag in a clean venv and confirm `--version`;
-7. **only then** repoint the READMEs — docs must never point at a tag that does
-   not exist yet.
+`on: push: tags: v*` runs `.github/workflows/release.yml`. It checks out the
+exact tag, runs the full suite, builds wheel + sdist, runs `twine check` and the
+distribution check, creates the Release as a **draft**, attaches both assets and
+then **publishes** it (`gh release edit --draft=false --latest` for a stable
+tag). There is no manual approval step and no hand-written `gh release create`.
+PyPI publishing is NOT part of the workflow. **Pushing a tag publishes publicly
+— verify the tag tree before you push it.**
+
+1. bump `pyproject.toml` **and** the CHANGELOG heading together; add
+   `docs/releases/vX.Y.Z.md` and the compatibility-matrix row.
+2. Push the release-candidate branch and get CI green on that commit. The
+   default consistency check requires every README install pin and the "current
+   release" row to name a **tag that exists**. `vX.Y.Z` does not exist yet, so
+   those pins still name the previous release and the strict check passes.
+3. **Before tagging**, apply the prepared pin patch (both READMEs and the
+   distribution row above) and commit it **locally**. Do not push that commit by
+   itself.
+4. Run the pre-tag gate, which simulates the post-tag consistency state without
+   weakening CI's strict check, refuses if the tag already exists locally or on
+   origin, fails closed when the remote state is unknown, and creates nothing:
+
+   ```sh
+   python scripts/check_release_ready.py --version X.Y.Z --repo . \
+       --plugin-root ../dsh-sessionflow
+   ```
+
+5. `git tag -a vX.Y.Z -m "..."` on that pin commit.
+6. Push **the commit and the tag together in one command** so the tag exists
+   when `test.yml` runs `check_consistency.py`: `git push origin main vX.Y.Z`.
+   The tag tree then carries the correct vX.Y.Z install instructions **and**
+   the strict check passes. Pushing only the commit first turns CI red; pushing
+   only the tag first publishes from a tree whose README still names the old
+   version.
+7. Watch the `release` workflow run to completion, then verify the notes and
+   both assets before announcing. Re-running is safe once a Release is
+   published (it is left untouched), but the first run is a full public
+   publish. The artefacts come from the tag tree, never the worktree.
+
+**Why the ordering matters.** A tag cannot be moved. If the tagged tree's README
+still says `@v1.3.1`, the published source tells users to install 1.3.1, and
+`release.yml` only compares `pyproject` with the tag — nothing in the workflow
+detects that. The only remedy is a new patch tag, never a moved one. Older
+instructions to "repoint the READMEs only after tagging" described the manual
+release era and produced exactly this mismatch; do not follow them.
 
 Never: move or delete a published tag, edit a published release's assets, or
 `--force` push.

@@ -98,8 +98,9 @@ true on a date; it is not a description of the product and is not updated.
 `releases/` holds `v1.0.0-rc1.md`, `v1.0.0-rc2.md`, `v1.0.0.md`,
 `v1.1.0-readiness.md`, `v1.1.0-hardening-audit.md`,
 `v1.1.0-community-readiness.md`, `v1.1.0.md`, `v1.1.1.md`,
-`v1.1.1-reliability-hardening.md`, `v1.2.0.md`, `v1.3.0.md`,
-`scan-reliability-and-perf-debt.md` and `p7-architecture-audit.md`. The release
+`v1.1.1-reliability-hardening.md`, `v1.2.0.md`, `v1.3.0.md`, `v1.3.1.md`,
+`v1.4.0.md`, `scan-reliability-and-perf-debt.md` and
+`p7-architecture-audit.md`. The release
 notes the workflow reads for a tag are `v<version>.md`; the rest are round
 reports. `v1.2.0.md` and `v1.3.0.md` were backfilled on 2026-11-09 and say so.
 
