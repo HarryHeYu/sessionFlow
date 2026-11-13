@@ -1851,15 +1851,26 @@ def cmd_thread(args) -> int:
 def cmd_checkpoint(args) -> int:
     """WorkThread checkpoint management commands."""
     from .checkpoint import (
-        init_checkpoint_schema, checkpoint_create, checkpoint_list,
+        init_checkpoint_schema, init_checkpoint_schema_for_read,
+        checkpoint_create, checkpoint_list,
         checkpoint_get, checkpoint_update, checkpoint_export, checkpoint_import,
         get_latest_checkpoint, checkpoint_summary,
     )
 
-    store = Store(args.db)
-    init_checkpoint_schema(store)
-
     action = args.checkpoint_cmd
+    # Read paths honour the same guarantee as every other read (issue #42,
+    # the same class as #35): no index file -> an in-memory store whose
+    # checkpoint schema is created in memory only, so nothing lands on disk;
+    # a file-backed db is read as it is, and one predating checkpoints
+    # degrades to the empty answer instead of being migrated by a read.
+    # Mutating subcommands keep the read-write constructor and the real
+    # schema initialisation.
+    read_only = action in ("list", "show", "export")
+    store = open_read(args.db) if read_only else Store(args.db)
+    if read_only:
+        init_checkpoint_schema_for_read(store)
+    else:
+        init_checkpoint_schema(store)
 
     # Auto-detect thread from cwd if not specified
     thread_id = None
