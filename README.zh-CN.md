@@ -18,7 +18,7 @@
 |  |  |
 |---|---|
 | **是什么** | 在编码 Agent 已经写到磁盘上的会话历史之上，加一层本地索引 + 接续层。 |
-| **为什么用** | 你的历史分散在八种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
+| **为什么用** | 你的历史分散在九种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
 | **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"` —— [详见](#安装) |
 | **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
 | **当前版本** | [v1.4.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.4.0) · Python ≥ 3.10 · Windows / macOS / Linux |
@@ -44,6 +44,7 @@
 - Claude Code 对话（project JSONL）
 - DSH 运行记录（zstd JSONL）
 - ZCode / Cursor / Kiro / Grok / Antigravity（SQLite、VSCDB、JSON……）
+- OpenCode（只读 SQLite：v2 / inline / legacy 三种形态）
 
 sessionFlow 把它们归并成**一份本地索引**——纯本地运行，无账号、无云端、
 无遥测。

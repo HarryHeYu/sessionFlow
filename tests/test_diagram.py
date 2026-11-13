@@ -50,8 +50,11 @@ def test_committed_assets_match_the_layout(diagram):
 
 
 def test_diagram_still_shows_every_platform_and_use_case(diagram):
-    assert len(diagram.PROVIDERS) == 8, "README claims 8 platforms"
+    assert len(diagram.PROVIDERS) == 9, "README claims 9 platforms"
     assert len(diagram.OUTPUTS) == 6
     assert all(fmt for _, fmt in diagram.PROVIDERS)
+    names = [name for name, _ in diagram.PROVIDERS]
+    assert "OpenCode" in names, "OpenCode shipped in v1.4.0 and must be drawn"
+    assert len(set(names)) == len(names), "duplicate provider card"
     assert "voyager scan" in diagram.FOOTER_2
     assert "no telemetry" in diagram.FOOTER_1
