@@ -184,6 +184,16 @@ When the task you want is the one you are looking at:
 voyager continue --thread <thread> --no-launch -o ./handoff-<thread>.md
 ```
 
+One behaviour to expect before you run it (decision D7): if the thread's
+newest live session can be **natively resumed**, `continue` prints that
+resume command instead of writing a package — and `-o` is quietly not used,
+because no package is compiled. That is the shortcut working, not a failure;
+add `--bundle` (or use `merge`) when you want the compiled package even so:
+
+```sh
+voyager continue --thread <thread> --bundle --no-launch -o ./handoff-<thread>.md
+```
+
 What `continue` does, in this order, in v1.3.1:
 
 1. **refreshes the index first** — an incremental scan of your provider
@@ -194,8 +204,9 @@ What `continue` does, in this order, in v1.3.1:
    --steal` is the explicit override.
 3. **writes the package.** `handoff` and the handoff path of `continue` write
    `handoff-<provider>-<session>.md` into the **current directory**; `merge` and
-   forced bundles write under `~/.voyager/bundles/`. `-o` always wins, and
-   `--bundles-dir` redirects the directory for one run.
+   forced bundles write under `~/.voyager/bundles/`. `-o` always wins **when a
+   package is compiled** — on the native-resume shortcut nothing is written
+   (see above), and `--bundles-dir` redirects the directory for one run.
 4. prints the launch command. `--launch` runs it instead.
 
 Cross-agent handoff is the same engine with a named target:
