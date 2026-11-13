@@ -371,6 +371,19 @@ _STATUS_EVENT = {
 _MISSING = object()
 
 
+#: SQLite error texts that mean "this file exists but is not a usable
+#: database". A DatabaseError carrying one of these is a property of the
+#: file, and no retry can help. Any other DatabaseError (ProgrammingError
+#: from our own SQL, IntegrityError, ...) is a bug in the caller, not a
+#: property of the file, and must surface as itself rather than be masked
+#: as "the index is unreadable".
+_UNUSABLE_FILE_SIGNATURES = (
+    "not a database",
+    "malformed",
+    "encrypted",
+)
+
+
 class IndexUnreadableError(RuntimeError):
     """The index file exists but SQLite cannot use it (corrupt, not a db).
 
@@ -420,11 +433,18 @@ class Store:
                     raise
                 time.sleep(0.05 * (attempt + 1))
             except sqlite3.DatabaseError as e:
-                # OperationalError is a subclass of DatabaseError, so this arm
-                # only fires for the unusable-file cases ("file is not a
-                # database", "database disk image is malformed"): no retry can
-                # help. Convert to the typed error instead of letting a raw
-                # traceback reach every command that opens the store (#34).
+                # OperationalError (the retryable arm above) is a subclass of
+                # DatabaseError, so this arm fires for the other children.
+                # Only the unusable-file signatures say something about the
+                # FILE -- convert those to the typed error instead of letting
+                # a raw traceback reach every command that opens the store
+                # (#34). Anything else is a bug in the caller and re-raises
+                # unchanged: a ProgrammingError masked as "index unreadable"
+                # would send a user to db check / backup restore over what is
+                # really our defect.
+                msg = str(e).lower()
+                if not any(sig in msg for sig in _UNUSABLE_FILE_SIGNATURES):
+                    raise
                 try:
                     self.con.close()
                 except sqlite3.Error:

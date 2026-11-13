@@ -70,3 +70,21 @@ def test_cli_scan_on_a_corrupt_index_is_a_clean_error(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "error:" in captured.err
     assert "Traceback" not in captured.err + captured.out
+
+
+def test_a_caller_bug_is_not_masked_as_an_unreadable_index(tmp_path, monkeypatch):
+    """A ProgrammingError is OUR defect, not a property of the file.
+
+    The conversion must stay scoped to the unusable-file signatures; masking
+    a code bug as "index unreadable" would send the user to db check and a
+    backup restore over nothing.
+    """
+    db = tmp_path / "index.db"
+    db.write_bytes(b"")                      # a valid empty sqlite file
+
+    def boom(self):
+        raise sqlite3.ProgrammingError("unknown placeholder :?9 -- our bug")
+
+    monkeypatch.setattr(Store, "_setup", boom)
+    with pytest.raises(sqlite3.ProgrammingError):
+        Store(db)
