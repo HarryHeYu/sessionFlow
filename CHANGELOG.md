@@ -38,6 +38,11 @@ All notable changes to Voyager are documented here. Format loosely follows
   says so rather than staying silent. Read-only probes only -- nothing is
   chmodded or removed. Found by the v1.4.0 cold-start acceptance (#29);
   fixes #36 (Linux).
+- The QUICKSTART §6 example now says what `-o` does on the D7
+  native-resume path: when the thread's newest live session can be
+  natively resumed, `continue` prints the resume command and compiles
+  nothing, so `-o` is not used; `--bundle` forces the package. Found by
+  the v1.4.0 cold-start acceptance (#29); fixes #37.
 
 ## [1.4.0] — 2026-11-13
 
