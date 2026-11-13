@@ -1,4 +1,4 @@
-# Maintenance Guide — sessionFlow v1.4.0
+# Maintenance Guide — sessionFlow v1.4.1
 
 Post-release reference. Nothing here starts new development; it records what is
 known, what is supported, and what a maintainer should check.
@@ -31,13 +31,14 @@ known, what is supported, and what a maintainer should check.
 | Python | 3.10 – 3.13 (CI covers all four on both OS families) |
 | OS | Windows, Linux. macOS is supported by the code and the path handling but is **not in CI**. |
 | Agents indexed | Codex, Claude Code, DSH, Grok CLI, ZCode, Kiro, Cursor, Antigravity, OpenCode |
-| Distribution | GitHub tag install (`@v1.4.0`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
+| Distribution | GitHub tag install (`@v1.4.1`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
 
 ## Compatibility Matrix
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| v1.4.0 | v1.2.0 | 1 | current release (released 2026-11-13); plugin v1.2.0 needs no upgrade — no new op, no seventh tool |
+| v1.4.1 | v1.2.0 | 1 | current release (patch, 2026-11-14); plugin v1.2.0 needs no upgrade — no new op, no schema change |
+| v1.4.0 | v1.2.0 | 1 | released 2026-11-13; plugin v1.2.0 needs no upgrade — no new op, no seventh tool |
 | v1.3.1 | v1.2.0 | 1 | still supported; index readable by v1.4.0 with no migration |
 | v1.3.0 | v1.2.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.2.0 | v1.1.0 | 1 | still supported; index readable by v1.3.1 with no migration |
