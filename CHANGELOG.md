@@ -83,9 +83,11 @@ All notable changes to Voyager are documented here. Format loosely follows
   `integration_info().ops` lists no `evidence_verify` op. DSH plugin **v1.2.0**
   keeps its six tools; no seventh tool is shipped or claimed.
 - The README architecture illustration still shows the eight pre-OpenCode
-  platforms. Regenerating it (`scripts/make_diagram.py`, which needs Pillow and
-  a re-checked layout) is tracked separately as P3-b; the prose that accompanies
-  it is left consistent with the image rather than contradicting it.
+  platforms. Regenerating it is a real layout change, not a list edit —
+  `scripts/make_diagram.py` asserts that the two card columns are the same
+  height, and a ninth provider card breaks that (600 vs 532 px, measured). It is
+  tracked separately as P3-b, and the prose next to the image is left consistent
+  with the image rather than contradicting it.
 
 ### Compatibility
 
