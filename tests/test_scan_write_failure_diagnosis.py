@@ -104,3 +104,23 @@ def test_scan_names_the_unwritable_sidecar(tmp_path):
     r = _scan(home)
     assert r.returncode == 0, r.stderr
     assert "2 sessions" in r.stdout
+
+
+def test_the_probe_limitation_is_said_out_loud(tmp_path, monkeypatch):
+    """os.access reads mode bits only; when it finds nothing, say so.
+
+    Root passes W_OK on a 0444 file and ACLs/immutable flags live below the
+    mode bits: a silent empty probe would look like "no diagnosis" again.
+    Portable: pure unit test, no filesystem modes involved.
+    """
+    import sqlite3
+
+    from voyager.scanner import _describe_write_failure
+
+    db = tmp_path / "index.db"
+    db.write_bytes(b"")
+    monkeypatch.setattr("voyager.scanner.os.access", lambda f, m: True)
+    msg = _describe_write_failure(
+        db, sqlite3.OperationalError("attempt to write a readonly database"))
+    assert "readonly" in msg
+    assert "mode-bit probe" in msg

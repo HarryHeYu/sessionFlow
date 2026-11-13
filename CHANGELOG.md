@@ -8,12 +8,15 @@ All notable changes to Voyager are documented here. Format loosely follows
 ### Fixed
 
 - A scan that cannot write now names the unwritable file (the index db or
-  its `-wal`/`-shm` sidecars) in the summary line, next to the existing
-  retry-later message. SQLite reports only "attempt to write a readonly
-  database", which sent a user with a writable db and a stale read-only
-  `-shm` in circles. Read-only probes only -- nothing is chmodded or
-  removed. Found by the v1.4.0 cold-start acceptance (#29); fixes #36
-  (Linux).
+  its `-wal`/`-shm` sidecars) in the summary line, and scopes the retry
+  promise to "once the cause above is resolved" instead of implying an
+  unconditional auto-retry. SQLite reports only "attempt to write a
+  readonly database", which sent a user with a writable db and a stale
+  read-only `-shm` in circles. When the mode-bit probe finds every file
+  writable (root, ACLs, immutable flags can hide below the mode bits), it
+  says so rather than staying silent. Read-only probes only -- nothing is
+  chmodded or removed. Found by the v1.4.0 cold-start acceptance (#29);
+  fixes #36 (Linux).
 
 ## [1.4.0] — 2026-11-13
 

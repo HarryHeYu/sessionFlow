@@ -74,6 +74,16 @@ def _describe_write_failure(db_path: Path, exc: BaseException) -> str:
             pass
     if unwritable:
         parts.append("unwritable: " + ", ".join(sorted(set(unwritable))))
+    elif "readonly" in str(exc).lower() or "read-only" in str(exc).lower():
+        # os.access reads mode bits only: root passes W_OK on a 0444 file,
+        # and ACLs / immutable flags / mount options can deny a write the
+        # bits allow (or allow one they deny). When the SQLite verdict says
+        # read-only but the probe finds nothing, say the probe is bounded
+        # instead of staying silent -- the user still has the verdict, and
+        # now also knows where NOT to keep looking.
+        parts.append("(mode-bit probe found every index file writable; the"
+                     " block is below the mode bits -- root, an ACL, an"
+                     " immutable flag or a mount-level restriction)")
     return "; ".join(parts)
 
 
@@ -410,9 +420,9 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
         print(f"\nscan complete: {stats['sessions']} sessions, {stats['events']} events "
               f"(new/refreshed: {grand_new}, unchanged: {grand_skip})")
         if write_failures:
-            print(f"{write_failures} session(s) could not be written and will be"
-                  " retried on the next scan; the index is consistent and"
-                  " nothing was half-written")
+            print(f"{write_failures} session(s) could not be written; the index"
+                  " is consistent and nothing was half-written. The next scan"
+                  " retries them once the cause above is resolved.")
             if first_failure_reason:
                 print(f"  first write failure: {first_failure_reason}")
         print(f"index: {store.db_path}")
