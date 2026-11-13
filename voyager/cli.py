@@ -1605,8 +1605,15 @@ def _print_lease(store: Store, tid: str) -> None:
 
 
 def cmd_thread(args) -> int:
-    store = Store(args.db)
     action = args.thread_cmd
+    # Read-only thread surfaces must honour the same guarantee as every other
+    # read path: when the index is absent the caller gets an empty in-memory
+    # store and nothing is written to disk (issue #35 -- `thread list` used to
+    # create an empty index.db in a fresh home). Only the mutating subcommands
+    # open the read-write constructor.
+    read_only = action in ("list", "show", "activity", "summarize", "timeline",
+                           "stale")
+    store = open_read(args.db) if read_only else Store(args.db)
     if action == "list":
         status = getattr(args, "status", "active")
         rows = store.thread_list(status)
