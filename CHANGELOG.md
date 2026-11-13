@@ -3,6 +3,18 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Fixed
+
+- The read-only `thread` subcommands (`list`, `show`, `activity`,
+  `summarize`, `timeline`, `stale`) no longer create an empty `index.db`
+  in a fresh home: they now use the same read path as `list`/`search` and
+  honour the documented "a read does not create a database" guarantee.
+  Found by the v1.4.0 cold-start acceptance (#29); fixes #35. (`thread
+  checkpoint list/show` still open the read-write store to run its schema
+  initialisation -- same class, left as a follow-up.)
+
 ## [1.4.0] — 2026-11-13
 
 ### Added
