@@ -20,7 +20,8 @@ from .adapters.base import enabled_adapters, git_info
 from .auto import resolve_work_thread
 from .scanner import (MAX_WRITE_FAILURES,
                       WRITE_FAILURE_GRACE_SECONDS, run_scan)
-from .store import Store, default_db_path, lease_state, open_read
+from .store import (IndexUnreadableError, Store, default_db_path,
+                    lease_state, open_read)
 from .integrations.hook import cmd_hook_startup
 from .util import (fmt_ts, same_repo_loose, parse_when as _parse_when,
                    force_utf8_stdio)
@@ -2534,7 +2535,18 @@ def main(argv=None) -> int:
     _expand_path_args(args)
     if not getattr(args, "cmd", None):
         return _print_onboarding()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except IndexUnreadableError as e:
+        # A corrupt/unusable index: the situation `doctor` and `db check`
+        # already render as a clean error. Every command that merely opens
+        # the store lands here instead of a traceback (#34). The corrupt
+        # file is not modified and is not removed here -- recovery is
+        # `db check` / a backup restore, by hand.
+        print("error: {0}".format(e), file=sys.stderr)
+        print("  run `voyager db check` for details and restore from a"
+              " backup (`voyager db backup`).", file=sys.stderr)
+        return 1
 
 
 def _print_onboarding() -> int:

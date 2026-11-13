@@ -371,6 +371,18 @@ _STATUS_EVENT = {
 _MISSING = object()
 
 
+class IndexUnreadableError(RuntimeError):
+    """The index file exists but SQLite cannot use it (corrupt, not a db).
+
+    Deliberately not a retryable condition: a file that is not a database is
+    not a lock or a race, so re-running setup cannot help. The CLI renders
+    this as the same one-line guidance ``doctor`` and ``db check`` already
+    give, instead of a traceback on every command that merely opens the store
+    (issue #34). The corrupt file itself is evidence for ``db check`` and a
+    backup restore and is never rewritten or removed here.
+    """
+
+
 class Store:
     #: How many times to retry setup when another process is doing the same
     #: thing to the same brand-new index.
@@ -407,6 +419,19 @@ class Store:
                 if attempt == self._SETUP_RETRIES - 1:
                     raise
                 time.sleep(0.05 * (attempt + 1))
+            except sqlite3.DatabaseError as e:
+                # OperationalError is a subclass of DatabaseError, so this arm
+                # only fires for the unusable-file cases ("file is not a
+                # database", "database disk image is malformed"): no retry can
+                # help. Convert to the typed error instead of letting a raw
+                # traceback reach every command that opens the store (#34).
+                try:
+                    self.con.close()
+                except sqlite3.Error:
+                    pass
+                raise IndexUnreadableError(
+                    "index database at {0} is unreadable: {1}".format(
+                        self.db_path, e)) from e
 
     def _setup(self) -> None:
         # WAL + relaxed sync: bulk re-indexing does hundreds of MB in

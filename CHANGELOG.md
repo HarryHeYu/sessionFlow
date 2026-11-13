@@ -3,6 +3,17 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Fixed
+
+- A corrupt/unusable index now produces a one-line error pointing at
+  `voyager db check` (exit 1) on **every** command that opens the store,
+  instead of a raw `sqlite3.DatabaseError` traceback (`list`, `status`,
+  `search`, `scan`, `continue`, `thread list`). The corrupt file itself is
+  never rewritten or removed. Found by the v1.4.0 cold-start acceptance
+  (#29); fixes #34.
+
 ## [1.4.0] — 2026-11-13
 
 ### Added
