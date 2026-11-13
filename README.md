@@ -21,9 +21,9 @@ is one client of it, and the core is a general-purpose local tool.)
 |---|---|
 | **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
 | **Why use it** | Your history is split across nine formats. sessionFlow makes it one thing you can search, summarize, export and continue — and every claim in a continuation bundle names the event it came from, so you can check it. |
-| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"` — [details](#install) |
+| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
-| **Current release** | [v1.4.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.4.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **Current release** | [v1.4.1](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.4.1) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Community** | Listed in the third-party [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/data/plugins/HarryHeYu__dsh-sessionflow.yml) directory — a listing, not a certification |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
@@ -123,10 +123,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"
 
 # or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
@@ -134,12 +134,12 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@v1.4.0` pins a release tag, which is what makes a reinstall reproducible
-and is what the DSH plugin's own error messages recommend. Drop the `@v1.4.0`
+The `@v1.4.1` pins a release tag, which is what makes a reinstall reproducible
+and is what the DSH plugin's own error messages recommend. Drop the `@v1.4.1`
 to follow `main` instead. Check the installed version with:
 
 ```sh
-voyager --version        # must print 1.4.0
+voyager --version        # must print 1.4.1
 ```
 
 > **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
@@ -147,21 +147,24 @@ voyager --version        # must print 1.4.0
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
 
-> **`v1.4.0` is the current release.** It adds OpenCode as a ninth indexed agent
-> — read-only SQLite, all three of its on-disk shapes — and fixes the release
-> build, which had been rejecting its own sdist. Upgrade with `@v1.4.0` (see
-> above); the changes are listed under `[1.4.0]` in `CHANGELOG.md`. Native
-> resume for OpenCode is not implemented (`NOT_FOUND`), the Evidence `verify`
-> API op is not part of this release, and the DSH plugin remains at v1.2.0
+> **`v1.4.1` is the current release.** A cold-start reliability patch on top of
+> v1.4.0 (OpenCode stays the ninth indexed agent): a corrupt index now fails
+> with a one-line `db check` pointer instead of a traceback, read-only
+> `thread` and `checkpoint` subcommands no longer create an index, and a scan
+> that cannot write names the unwritable db/-wal/-shm file. Upgrade with
+> `@v1.4.1` (see above); the changes are listed under `[1.4.1]` in
+> `CHANGELOG.md`. Native resume for OpenCode is still not implemented
+> (`NOT_FOUND`), the Evidence `verify` API op is not part of this release, and
+> the DSH plugin remains at v1.2.0
 > with its six tools.
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"          # core
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"          # core
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"     # + MCP server
 ```
 
 Working on Voyager itself:
@@ -169,7 +172,7 @@ Working on Voyager itself:
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # editable + extras + pytest
-python -m pytest tests/ -q     # 1434 passed, 6 skipped (measured at v1.4.0)
+python -m pytest tests/ -q     # 1450 passed, 8 skipped (measured at v1.4.1)
 ```
 
 Python ≥ 3.10. Windows / macOS / Linux. If `voyager` is not on your PATH,
@@ -650,7 +653,7 @@ DeepSeek Harness integration: <https://github.com/HarryHeYu/dsh-sessionflow>
 plugin that exposes search, current work, continuation and merge as six
 `sessionflow_*` tools, so a DSH agent can pick up work from Codex, Claude Code,
 Grok and the rest without leaving the harness. Its current release is **plugin
-v1.2.0**, tested against **core v1.4.0** over **bridge schema 1** — the two repos
+v1.2.0**, tested against **core v1.4.1** over **bridge schema 1** — the two repos
 are versioned independently, and the schema is what actually binds them.
 
 It is a *client* of this repo, not a second implementation: the core stays the
@@ -682,7 +685,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # 1434 passed, 6 skipped at v1.4.0 — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, evidence, provider hooks
+python -m pytest tests/ -q                # 1450 passed, 8 skipped at v1.4.1 — adapters, store, continuity, budget, leases, switch, skill, API, MCP, integration, evidence, provider hooks
 python scripts/run_tests_core_only.py     # core-only simulated: a subset that skips the DB-backed suites
 ```
 
