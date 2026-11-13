@@ -55,6 +55,9 @@ Run before tagging any future release:
 # PY must be an interpreter that HAS pytest — the base interpreter does not.
 # A venv works: python -m venv .venv && .venv/bin/python -m pip install -e ".[all,dev]"
 PY=/path/to/venv/bin/python
+# Scratch on the repository's drive, never the OS temp directory: on
+# Windows a literal /tmp resolves against the current drive and leaves junk.
+SCRATCH=/path/to/scratch
 
 # 1. version and changelog agree
 grep -m1 '^version' pyproject.toml
@@ -65,18 +68,18 @@ git status --short && git rev-parse --short HEAD origin/main
 
 # 3. full suite (one run at a time — concurrent runs contend on the shared index)
 PYTHONPATH= PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest tests/ -q \
-    --basetemp=/tmp/sf-bt-$(date +%s)
+    --basetemp="$SCRATCH/pytest-$(date +%s)"
 
 # 4. plugin
 cd /e/code/dsh-sessionflow && npm test
 
 # 5. build and install from the artefact, not the worktree
 cd /e/code/voyager
-python -m build --wheel --sdist --outdir /tmp/sf-dist
+python -m build --wheel --sdist --outdir "$SCRATCH/dist"
 # then: clean venv, pip install the wheel, `voyager --version` must match
 
 # 6. upgrade path: build an index with the PREVIOUS tag, read it with this one
-git archive <previous-tag> | tar -x -C /tmp/sf-prev
+git archive <previous-tag> | tar -x -C "$SCRATCH/prev"
 # write synthetic rows with it, then read/verify with the current tree
 ```
 

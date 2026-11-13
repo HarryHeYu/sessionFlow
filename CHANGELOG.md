@@ -59,9 +59,12 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 - Directed: **36** OpenCode tests (27 for the existing shapes + 9 for the
   inline shape), on anonymised fixtures that carry no user text, path or digest.
-- Full suite: **1422 passed, 6 skipped** (Windows, Python 3.13, `[all,dev]`
+- Full suite: **1434 passed, 6 skipped** (Windows, Python 3.13, `[all,dev]`
   installed — the same configuration the release workflow uses). The 6 skips are
   platform/environment rows, each with a stated reason; none is an OpenCode test.
+- New opt-in `scripts/check_release_ready.py` pre-tag gate (12 tests): it verifies
+  the tree a new tag will point at without weakening the strict, real-tag-only
+  consistency check CI runs. It creates no tag and publishes nothing.
 - One real install was observed (v2.0.29, byte-for-byte isolated copy):
   `probe` → `ok/v2-inline`, 8/8 sessions indexed, per-kind event counts
   identical to an independent read-only `sqlite3` oracle (user 68, text 206,
@@ -86,8 +89,9 @@ All notable changes to Voyager are documented here. Format loosely follows
   platforms. Regenerating it is a real layout change, not a list edit —
   `scripts/make_diagram.py` asserts that the two card columns are the same
   height, and a ninth provider card breaks that (600 vs 532 px, measured). It is
-  tracked separately as P3-b, and the prose next to the image is left consistent
-  with the image rather than contradicting it.
+  tracked separately as [issue #27](https://github.com/HarryHeYu/sessionFlow/issues/27),
+  and the prose next to the image is left consistent with the image rather than
+  contradicting it.
 
 ### Compatibility
 
