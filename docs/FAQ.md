@@ -51,9 +51,10 @@ See [ROADMAP.md](ROADMAP.md).
 
 **Can I finish a chat in Claude and keep the same history visible in Codex?**
 
-Not as the same native session. The eight agents store history in eight
-formats (JSONL, zstd JSONL, SQLite, protobuf, VS Code KV); tool names
-do not map; hidden tool state and cached reasoning stay behind.
+Not as the same native session. The nine agents store history in incompatible
+formats (JSONL, zstd JSONL, several unrelated SQLite schemas, protobuf,
+VS Code KV); tool names do not map; hidden tool state and cached reasoning
+stay behind.
 Voyager's path is: refresh the index, compile a Continuation Bundle
 from the canonical events, start a *new* Codex session that reads it.
 Same-provider continue still uses native resume. Writing a synthetic

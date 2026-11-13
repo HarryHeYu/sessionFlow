@@ -20,7 +20,7 @@ is one client of it, and the core is a general-purpose local tool.)
 |  |  |
 |---|---|
 | **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
-| **Why use it** | Your history is split across eight formats. sessionFlow makes it one thing you can search, summarize, export and continue — and every claim in a continuation bundle names the event it came from, so you can check it. |
+| **Why use it** | Your history is split across nine formats. sessionFlow makes it one thing you can search, summarize, export and continue — and every claim in a continuation bundle names the event it came from, so you can check it. |
 | **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.0"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
 | **Current release** | [v1.4.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.4.0) · Python ≥ 3.10 · Windows / macOS / Linux |
@@ -84,9 +84,9 @@ agents already wrote, normalizes them into one SQLite index you can search,
 resume from, hand off to another agent, or query straight from inside an
 agent over MCP / the DSH plugin.
 
-![Voyager architecture: 8 agents, 8 storage formats, one index](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/architecture.png)
+![Voyager architecture: 9 agents, 9 storage formats, one index](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/architecture.png)
 
-Eight agents keep eight different formats; Voyager normalizes them into one
+Nine agents keep nine different formats; Voyager normalizes them into one
 SQLite index you can search, resume from, hand off to another agent, or query
 straight from inside an agent over MCP.
 
