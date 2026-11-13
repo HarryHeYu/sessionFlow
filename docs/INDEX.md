@@ -68,6 +68,7 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-v1.3.1-final-release-report.md](audits/2026-11-v1.3.1-final-release-report.md) | AUDIT | maintainer | frozen — v1.3.1 release readiness: gates, artifact hashes, rollback, publish steps |
 | [audits/2026-11-opencode-phase3-report.md](audits/2026-11-opencode-phase3-report.md) | DESIGN | maintainer | frozen — Phase 3 implementation: schema corrections, UNIT_VERIFIED scope, NOT_VERIFIED gaps |
 | [audits/2026-11-opencode-v20x-real-gate.md](audits/2026-11-opencode-v20x-real-gate.md) | AUDIT | maintainer | frozen — v2.0.x inline-schema compatibility: real-install Gate A/B/C, no user data, no LIVE_VERIFIED claim |
+| [audits/2026-11-cold-start-acceptance.md](audits/2026-11-cold-start-acceptance.md) | AUDIT | maintainer | frozen — 2026-11-14 v1.4.0 cold-start acceptance matrix (Windows/Linux; macOS NOT VERIFIED); defects #34–#37 |
 
 ## Performance evidence
 
