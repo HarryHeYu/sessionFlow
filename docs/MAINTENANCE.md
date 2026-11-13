@@ -84,17 +84,52 @@ git archive <previous-tag> | tar -x -C /tmp/sf-prev
 `PYTHONPATH`: with it in place, bulk `unlink()` raises and tests fail for a reason
 that has nothing to do with the code.
 
-Release mechanics:
+Release mechanics — the `release` workflow is **automatic**:
 
-1. bump `pyproject.toml` **and** the CHANGELOG heading together;
-2. push, wait for CI to be green **on that commit**;
-3. `git tag -a vX.Y.Z -m "..."` and push the tag;
-4. `gh release create vX.Y.Z --title ... --notes-file ... <wheel> <sdist>`;
-5. build the artefacts **from the tag** (`git archive vX.Y.Z`), not from the
-   worktree, so the attachment and the tag cannot drift;
-6. install from the tag in a clean venv and confirm `--version`;
-7. **only then** repoint the READMEs — docs must never point at a tag that does
-   not exist yet.
+`on: push: tags: v*` runs `.github/workflows/release.yml`. It checks out the
+exact tag, runs the full suite, builds wheel + sdist, runs `twine check` and the
+distribution check, creates the Release as a **draft**, attaches both assets and
+then **publishes** it (`gh release edit --draft=false --latest` for a stable
+tag). There is no manual approval step and no hand-written `gh release create`.
+PyPI publishing is NOT part of the workflow. **Pushing a tag publishes publicly
+— verify the tag tree before you push it.**
+
+1. bump `pyproject.toml` **and** the CHANGELOG heading together; add
+   `docs/releases/vX.Y.Z.md` and the compatibility-matrix row.
+2. Push the release-candidate branch and get CI green on that commit. The
+   default consistency check requires every README install pin and the "current
+   release" row to name a **tag that exists**. `vX.Y.Z` does not exist yet, so
+   those pins still name the previous release and the strict check passes.
+3. **Before tagging**, apply the prepared pin patch (both READMEs and the
+   distribution row above) and commit it **locally**. Do not push that commit by
+   itself.
+4. Run the pre-tag gate, which simulates the post-tag consistency state without
+   weakening CI's strict check, refuses if the tag already exists locally or on
+   origin, fails closed when the remote state is unknown, and creates nothing:
+
+   ```sh
+   python scripts/check_release_ready.py --version X.Y.Z --repo . \
+       --plugin-root ../dsh-sessionflow
+   ```
+
+5. `git tag -a vX.Y.Z -m "..."` on that pin commit.
+6. Push **the commit and the tag together in one command** so the tag exists
+   when `test.yml` runs `check_consistency.py`: `git push origin main vX.Y.Z`.
+   The tag tree then carries the correct vX.Y.Z install instructions **and**
+   the strict check passes. Pushing only the commit first turns CI red; pushing
+   only the tag first publishes from a tree whose README still names the old
+   version.
+7. Watch the `release` workflow run to completion, then verify the notes and
+   both assets before announcing. Re-running is safe once a Release is
+   published (it is left untouched), but the first run is a full public
+   publish. The artefacts come from the tag tree, never the worktree.
+
+**Why the ordering matters.** A tag cannot be moved. If the tagged tree's README
+still says `@v1.3.1`, the published source tells users to install 1.3.1, and
+`release.yml` only compares `pyproject` with the tag — nothing in the workflow
+detects that. The only remedy is a new patch tag, never a moved one. Older
+instructions to "repoint the READMEs only after tagging" described the manual
+release era and produced exactly this mismatch; do not follow them.
 
 Never: move or delete a published tag, edit a published release's assets, or
 `--force` push.
