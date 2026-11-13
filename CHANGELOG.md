@@ -22,10 +22,12 @@ All notable changes to Voyager are documented here. Format loosely follows
   tool whose state is still `running` produces a call and **no** invented
   result. Events are ordered by `seq` with a deterministic tiebreak, so a
   re-scan is idempotent.
-- **OpenCode's capability row in `voyager verify --matrix`.** Every state is
-  `UNIT_VERIFIED` except native resume, which is `NOT_FOUND` (the adapter
-  exposes no resume command), and cross-agent continuation, which is
-  `NOT_VERIFIED`.
+- **OpenCode's capability row in `voyager verify --matrix`.** Discovery,
+  indexing, transcript import, tool events and cwd/repo discovery are
+  `UNIT_VERIFIED`; native resume and every startup dimension are
+  `NOT_FOUND_IN_CURRENT_AUDIT`, because the adapter implements no resume
+  command, startup hook or injection path. Nothing in the row is
+  `LIVE_VERIFIED`.
 
 ### Fixed
 
@@ -72,9 +74,10 @@ All notable changes to Voyager are documented here. Format loosely follows
 - The real-install gate covers **one install, one version (v2.0.29), one
   platform (Windows)**. `session_discovery` and `session_indexing` therefore
   stay `UNIT_VERIFIED`, not `LIVE_VERIFIED`.
-- **Native resume is `NOT_FOUND`** — the adapter exposes no resume command and
-  none was observed. **Cross-agent continuation is `NOT_VERIFIED`.** Neither is
-  claimed just because discovery worked.
+- **Native resume is `NOT_FOUND_IN_CURRENT_AUDIT`** — the adapter implements no
+  resume command, startup hook or context-injection path, and none was
+  observed. Reading a session is not resuming one, and no state in the row is
+  promoted to `LIVE_VERIFIED` because discovery worked on one install.
 - **The Evidence `verify` API op is not in this release.** The Core side is
   still an unmerged pull request, so `evidence verify` remains CLI-only and
   `integration_info().ops` lists no `evidence_verify` op. DSH plugin **v1.2.0**
