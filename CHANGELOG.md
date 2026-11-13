@@ -3,6 +3,18 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Fixed
+
+- A scan that cannot write now names the unwritable file (the index db or
+  its `-wal`/`-shm` sidecars) in the summary line, next to the existing
+  retry-later message. SQLite reports only "attempt to write a readonly
+  database", which sent a user with a writable db and a stale read-only
+  `-shm` in circles. Read-only probes only -- nothing is chmodded or
+  removed. Found by the v1.4.0 cold-start acceptance (#29); fixes #36
+  (Linux).
+
 ## [1.4.0] — 2026-11-13
 
 ### Added

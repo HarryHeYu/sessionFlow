@@ -16,6 +16,7 @@ written.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -48,6 +49,32 @@ def _note_write_failure(name: str, exc: BaseException, count: int) -> None:
     if count <= 3:
         print(f"  ! {name}: write failed ({exc}); will retry on the next scan",
               file=sys.stderr)
+
+
+def _describe_write_failure(db_path: Path, exc: BaseException) -> str:
+    """Name the underlying error and any index file we cannot write to.
+
+    SQLite reports ``attempt to write a readonly database`` without saying
+    WHICH file is unwritable. Measured on v1.4.0 (issue #36): with the db
+    writable and a stale read-only ``-shm`` -- created with the db's mode
+    while the db was read-only -- a user checks the db, finds it writable,
+    and is stuck, while the summary keeps promising a retry that cannot
+    succeed. Read-only probes only: nothing is chmodded or removed here;
+    restoring access and re-scanning is the user's move, and it works.
+    """
+    parts = [f"{type(exc).__name__}: {exc}"]
+    unwritable = []
+    for f in (db_path,
+              Path(str(db_path) + "-wal"),
+              Path(str(db_path) + "-shm")):
+        try:
+            if f.exists() and not os.access(f, os.W_OK):
+                unwritable.append(f.name)
+        except OSError:
+            pass
+    if unwritable:
+        parts.append("unwritable: " + ", ".join(sorted(set(unwritable))))
+    return "; ".join(parts)
 
 
 def _note_derived_failure(what: str, exc: BaseException) -> None:
@@ -103,6 +130,7 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
     grand_new = grand_skip = grand_evt = grand_changed = 0
     write_failures = 0
     first_write_failure = None
+    first_failure_reason = None
 
     def _write_failure_is_systemic() -> bool:
         """True only when failures are both numerous AND persistent."""
@@ -112,10 +140,11 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
                 >= WRITE_FAILURE_GRACE_SECONDS)
 
     def _count_write_failure(name, exc):
-        nonlocal write_failures, first_write_failure
+        nonlocal write_failures, first_write_failure, first_failure_reason
         write_failures += 1
         if first_write_failure is None:
             first_write_failure = _time.time()
+            first_failure_reason = _describe_write_failure(store.db_path, exc)
         _note_write_failure(name, exc, write_failures)
         if _write_failure_is_systemic():
             print(f"  ! {write_failures} session writes failed over"
@@ -384,5 +413,7 @@ def run_scan(store: Store, providers: Optional[List[str]] = None,
             print(f"{write_failures} session(s) could not be written and will be"
                   " retried on the next scan; the index is consistent and"
                   " nothing was half-written")
+            if first_failure_reason:
+                print(f"  first write failure: {first_failure_reason}")
         print(f"index: {store.db_path}")
     return res
