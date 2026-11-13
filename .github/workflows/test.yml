@@ -71,8 +71,29 @@ jobs:
       - name: Release metadata consistency
         # pyproject, CHANGELOG, README (both languages), release notes and git
         # tags must name the same release. Fails the job on drift.
+        #
+        # check_consistency.py is deliberately unchanged: it always requires
+        # README pins to name a REAL released tag. But a tag must be created on
+        # the tree whose README already says "install v<version>", so during
+        # the short untagged release-candidate window that strict check cannot
+        # pass. Use the pre-tag gate instead: it runs the SAME
+        # check_consistency.check() with the pending tag simulated, then adds
+        # pin/version/tag-absence assertions. Once the tag exists, the strict
+        # command runs again, unchanged.
         shell: bash
-        run: python scripts/check_consistency.py
+        run: |
+          VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' pyproject.toml | head -1)"
+          if [ -z "$VERSION" ]; then
+            echo "cannot read version from pyproject.toml" >&2
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "v${VERSION} is a real tag: strict released-tag check"
+            python scripts/check_consistency.py
+          else
+            echo "v${VERSION} is not tagged yet: pre-tag simulated-tag gate"
+            python scripts/check_release_ready.py --version "${VERSION}"
+          fi
 
   core-only:
     # The core install must work with zero optional dependencies: `pip install

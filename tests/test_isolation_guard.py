@@ -331,3 +331,62 @@ def test_a_fully_redirected_environment_passes(fake_protected, tmp_path):
            "XDG_CONFIG_HOME": str(safe / ".config"),
            "XDG_DATA_HOME": str(safe / ".local/share")}
     assert iso_guard.guard_env(env) is None
+
+
+# --- the OpenCode adapter reads XDG_DATA_HOME and an explicit DB override ---
+# These are new discovery inputs. An explicit OPENCODE_DB=<real path> bypasses
+# every directory redirection, so its literal value must be judged; and
+# XDG_DATA_HOME must be judged on the opencode/ directory it derives.
+
+def test_an_explicit_opencode_db_in_real_data_is_refused(fake_protected,
+                                                        tmp_path):
+    profile, _ = fake_protected
+    real_db = profile / ".local" / "share" / "opencode" / "opencode.db"
+    env = {"HOME": str(tmp_path / "safe"),
+           "USERPROFILE": str(tmp_path / "safe"),
+           "VOYAGER_OPENCODE_DB": str(real_db)}
+    # The fabricated root does not include .local, so use a real data root that
+    # the fixture does protect: .codex. The point is the *variable* is checked.
+    env["VOYAGER_OPENCODE_DB"] = str(profile / ".codex" / "opencode.db")
+    with pytest.raises(iso_guard.IsolationViolation) as ei:
+        iso_guard.guard_env(env)
+    assert "OPENCODE_DB" in str(ei.value)
+
+
+def test_an_explicit_opencode_db_in_a_safe_tree_passes(fake_protected,
+                                                       tmp_path):
+    safe = tmp_path / "safe"
+    env = {"HOME": str(safe), "USERPROFILE": str(safe),
+           "XDG_DATA_HOME": str(safe / ".local/share"),
+           "VOYAGER_OPENCODE_DB": str(safe / "fixture.db")}
+    assert iso_guard.guard_env(env) is None
+
+
+def test_xdg_data_home_deriving_a_real_opencode_dir_is_refused(monkeypatch,
+                                                               tmp_path):
+    """The DERIVED path is the dangerous one, not XDG_DATA_HOME's own value.
+
+    A root at ``<xdg>/opencode`` means ``XDG_DATA_HOME=<xdg>`` is not itself a
+    protected root — only the directory the adapter will open is. Without the
+    derived check this environment would be waved through.
+    """
+    safe = tmp_path / "safe"
+    real_root = tmp_path / "real" / ".local" / "share" / "opencode"
+    real_root.mkdir(parents=True)
+    monkeypatch.setattr(iso_guard, "real_data_roots", lambda: (real_root,))
+
+    env = {"HOME": str(safe), "USERPROFILE": str(safe),
+           "XDG_DATA_HOME": str(real_root.parent)}
+    assert not iso_guard.is_inside_real_data(real_root.parent), (
+        "the variable's own value must be safe; only its derived dir is not")
+    with pytest.raises(iso_guard.IsolationViolation) as ei:
+        iso_guard.guard_env(env)
+    assert "XDG_DATA_HOME" in str(ei.value)
+    assert "opencode" in str(ei.value)
+
+
+def test_the_discovery_env_lists_both_opencode_overrides():
+    assert "OPENCODE_DB" in iso_guard._DISCOVERY_ENV
+    assert "VOYAGER_OPENCODE_DB" in iso_guard._DISCOVERY_ENV
+    assert "XDG_DATA_HOME" in iso_guard._DERIVED_DATA_DIRS
+    assert "opencode" in iso_guard._DERIVED_DATA_DIRS["XDG_DATA_HOME"]
