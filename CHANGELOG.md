@@ -20,6 +20,14 @@ All notable changes to Voyager are documented here. Format loosely follows
   Found by the v1.4.0 cold-start acceptance (#29); fixes #35. (`thread
   checkpoint list/show` still open the read-write store to run its schema
   initialisation -- same class, left as a follow-up.)
+- `voyager thread checkpoint list/show/export` honour the same read
+  guarantees as every other read path (the follow-up named in the entry
+  above): nothing is created when no index exists, the checkpoint schema
+  is initialised **in memory only**, a database predating checkpoints
+  degrades to the empty answer instead of being migrated by a read, and
+  persistent DDL never runs behind a read. Mutating checkpoint
+  subcommands keep writing. Found during the #38–#41 merge round;
+  fixes #42.
 - A scan that cannot write now names the unwritable file (the index db or
   its `-wal`/`-shm` sidecars) in the summary line, and scopes the retry
   promise to "once the cause above is resolved" instead of implying an
