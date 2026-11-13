@@ -3,6 +3,92 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [1.4.0] — 2026-11-13
+
+### Added
+
+- **OpenCode is an indexed agent.** Its SQLite database is read **read-only**
+  (`mode=ro` + `PRAGMA query_only`), in all three shapes it ships, detected
+  structurally rather than by a version string: `session_v2` + `session_part`
+  (v2.2.x); `session_v2` with the message content inline in
+  `session_message.data` and **no** `session_part` table (v2.0.x); and the
+  pre-v2 `session` / `message` / `part` layout. A database that carries
+  `session_part` always resolves to the parts shape, so a v2.2.x install is
+  never mis-read as inline.
+  Messages, tool calls, tool results, reasoning and provider-generated rows map
+  to the same event kinds every other adapter emits. Provider-generated rows
+  (`system` / `synthetic` / `compaction`) stay `meta` with
+  `origin=provider_system` and are never promoted to a human instruction. A
+  tool whose state is still `running` produces a call and **no** invented
+  result. Events are ordered by `seq` with a deterministic tiebreak, so a
+  re-scan is idempotent.
+- **OpenCode's capability row in `voyager verify --matrix`.** Every state is
+  `UNIT_VERIFIED` except native resume, which is `NOT_FOUND` (the adapter
+  exposes no resume command), and cross-agent continuation, which is
+  `NOT_VERIFIED`.
+
+### Fixed
+
+- **The release workflow rejected its own sdist, so no tag could build.** The
+  distribution check asked `"scratch" in name.lower()`, which matches
+  `tests/test_scratch_hygiene.py` — a legitimate file the sdist is *supposed*
+  to carry. `v1.2.0`, `v1.3.0` and `v1.3.1` all failed at that step with
+  `sdist carries scratch/private content: ['voyager-1.3.1/tests/
+  test_scratch_hygiene.py']`. Both branches now match a **path segment**
+  (`(?:^|/)scratch(?:/|$)`), so a real scratch directory is still refused and a
+  filename that merely contains the word is not. The regression test executes
+  the workflow's own leaked-name predicates instead of restating them, and a
+  file-level mutation back to the old form turns it red.
+- **An explicit `VOYAGER_OPENCODE_DB` / `OPENCODE_DB` is authoritative.** It
+  used to *add* a candidate while the default data directory was still probed,
+  so naming one database could still open another — including a real user
+  database the operator had not asked for. An explicit override now excludes
+  the default; `opencode-<channel>.db` files are only enumerated when no
+  override is set.
+- **Documentation that contradicted the code.** The READMEs said no real
+  OpenCode install had been observed and named two shapes (it is three, and one
+  real v2.0.29 install has been observed — one install, one platform);
+  `MAINTENANCE` listed eight indexed agents; and the "`evidence verify --help`
+  does not list the five outcomes" entry was stale — the help has listed all
+  five, with their exit codes and the `MATCH` caveat, since 1.3.x.
+
+### Tests
+
+- Directed: **36** OpenCode tests (27 for the existing shapes + 9 for the
+  inline shape), on anonymised fixtures that carry no user text, path or digest.
+- Full suite: **1392 passed, 36 skipped** (Windows, Python 3.13, all extras).
+  The 36 skips are optional-dependency and platform rows, each with a stated
+  reason; none is an OpenCode test.
+- One real install was observed (v2.0.29, byte-for-byte isolated copy):
+  `probe` → `ok/v2-inline`, 8/8 sessions indexed, per-kind event counts
+  identical to an independent read-only `sqlite3` oracle (user 68, text 206,
+  reasoning 2053, tool call 2617, tool result 2617), and the real
+  `.db` / `-wal` / `-shm` hashes plus all 20 table row counts unchanged.
+  Record: `docs/audits/2026-11-opencode-v20x-real-gate.md`.
+
+### Verified, not claimed
+
+- The real-install gate covers **one install, one version (v2.0.29), one
+  platform (Windows)**. `session_discovery` and `session_indexing` therefore
+  stay `UNIT_VERIFIED`, not `LIVE_VERIFIED`.
+- **Native resume is `NOT_FOUND`** — the adapter exposes no resume command and
+  none was observed. **Cross-agent continuation is `NOT_VERIFIED`.** Neither is
+  claimed just because discovery worked.
+- **The Evidence `verify` API op is not in this release.** The Core side is
+  still an unmerged pull request, so `evidence verify` remains CLI-only and
+  `integration_info().ops` lists no `evidence_verify` op. DSH plugin **v1.2.0**
+  keeps its six tools; no seventh tool is shipped or claimed.
+- The README architecture illustration still shows the eight pre-OpenCode
+  platforms. Regenerating it (`scripts/make_diagram.py`, which needs Pillow and
+  a re-checked layout) is tracked separately as P3-b; the prose that accompanies
+  it is left consistent with the image rather than contradicting it.
+
+### Compatibility
+
+- Bridge schema stays **1**; no row, column or index change, so an existing
+  index is read as-is and rolling back to 1.3.1 is safe.
+- DSH plugin **v1.2.0** works unchanged (it requires schema 1).
+
 ## [1.3.1] — 2026-11-11
 
 ### Fixed

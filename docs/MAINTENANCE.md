@@ -1,4 +1,4 @@
-# Maintenance Guide — sessionFlow v1.3.1
+# Maintenance Guide — sessionFlow v1.4.0
 
 Post-release reference. Nothing here starts new development; it records what is
 known, what is supported, and what a maintainer should check.
@@ -20,7 +20,7 @@ known, what is supported, and what a maintainer should check.
 | 9 | **SQLite concurrent-index flake.** | Rare failure in `test_concurrent_creation_of_a_fresh_index`. | **INCONCLUSIVE**: not reproduced in bounded re-runs (40 fresh-index pairs, 160 child processes). Deliberately not masked with sleeps or unbounded retries. |
 | 10 | **Native resume is unverified** end to end on every provider. | The command is built and wired; no resume has been observed succeeding. | `NOT_VERIFIED` — never claimed as working. Verifying it needs a paid provider session and writes into a real environment. |
 | 11 | **Model-driven tool selection has no repeatable end-to-end suite.** | It has been *observed* in recorded real-model runs — 3/3 when the prompt names the agent or asks "what was I working on", 1/3 on a bare "continue" — but that is one model, one fixture, three attempts. | `OBSERVED, NOT REPEATABLE`. Contract tests cover the six tools; they do not cover the model choosing them. Do not quote a success rate. |
-| 12 | **`voyager evidence verify --help` does not list the five outcomes or the exit codes.** | A user writing a script has to read the README (or trigger each state) to learn them. The runtime output *does* state its own limits on every path. | Known, deliberate for now: changing help text is a code change, and no release is open to carry it. Documented in the README; fix belongs in the next release. |
+| 12 | **`voyager evidence verify --help` did not list the five outcomes or the exit codes.** | A user writing a script had to read the README (or trigger each state) to learn them. | **FIXED.** The help lists all five outcomes, their exit codes and the `MATCH` caveat. The row is kept so the number stays stable for existing references. |
 | 13 | **Provenance classification covers only codex / claude / zcode.** | `provenance.CLASSIFIERS` has no entry for dsh, grok, cursor, kiro or antigravity, so `classify()` returns `UNKNOWN` for every one of their events. A DSH-only index reports `0.0% classified`, and `provenance enrich --apply` cannot change that. | `DESIGN GAP, NOT A BUG`: no toggle or rescan helps. The grok case is tracked as `GROK_MESSAGE_PROVENANCE_COVERAGE` in code; the DSH case was undocumented until dsh-sessionflow#2 reported it. Adding a classifier requires a structural field in the provider record — do not guess one. |
 | 14 | **`NOT_FOUND_IN_CURRENT_AUDIT` reads as "provider not installed".** | It is the declared state of the five machine-dependent *startup* dimensions, and `verify` reports their strongest value as the provider's `declared`. DSH has no native startup surface, so a machine with 46 indexed DSH sessions still shows `NOT_FOUND_IN_CURRENT_AUDIT` while `session_discovery` is `LIVE_VERIFIED`. | Naming/presentation, not detection: `installed: true` is computed from the path and is correct. A clearer label (or a per-dimension view) is the fix; do not change path probing. |
 
@@ -37,7 +37,8 @@ known, what is supported, and what a maintainer should check.
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| v1.3.1 | v1.2.0 | 1 | current release (released 2026-11-11); plugin v1.2.0 needs no upgrade |
+| v1.4.0 | v1.2.0 | 1 | current release (released 2026-11-13); plugin v1.2.0 needs no upgrade — no new op, no seventh tool |
+| v1.3.1 | v1.2.0 | 1 | still supported; index readable by v1.4.0 with no migration |
 | v1.3.0 | v1.2.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.2.0 | v1.1.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.1.0 | v1.1.0 | 1 | upgrade path verified: no row and no schema object changes |
