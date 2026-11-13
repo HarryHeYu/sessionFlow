@@ -264,8 +264,8 @@ voyager --db ~/.voyager/demo.db evidence verify codex:demo-auth-01 1 zzzz       
 ```
 
 Add `--json` for the same answer as an object (`status`, `exit_code`, `session_id`,
-`seq`, `digest`, `found`, …). `voyager evidence verify --help` does **not** list
-these five states or their codes — this table and the command's own output do.
+`seq`, `digest`, `found`, …). `voyager evidence verify --help` prints these five
+states with their exit codes.
 
 **This is not fact-checking.** `MATCH` says the indexed event is the one the
 reference was made from; it does not say the claim is true. The fingerprint is

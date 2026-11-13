@@ -181,9 +181,8 @@ voyager evidence verify codex:01ab… 3 c5009a39
 | `UNVERIFIABLE` | 3 | 引用里没带 digest，只能核对位置 |
 | `INVALID_REFERENCE` | 4 | 引用本身不合法——例如 digest 不是 8 位十六进制 |
 
-`--json` 给出同样的机器可读结果。`voyager evidence verify --help` **不列**这五种
-状态和退出码；这张表、命令自己的输出，以及
-[上手指南](docs/QUICKSTART.md)里每条状态一个可运行示例，才是它们的出处。
+`--json` 给出同样的机器可读结果。`voyager evidence verify --help` 会列出这五种
+状态及其退出码；[上手指南](docs/QUICKSTART.md)里每条状态还有一个可运行示例。
 
 **`MATCH` 是什么意思，不是什么。** 它的意思是"索引里这个事件就是当初那条引用
 所指向的事件"。它**不**表示这条结论为真——这里没有任何东西做那个判断——它也不是

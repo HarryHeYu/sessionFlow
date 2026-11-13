@@ -47,10 +47,11 @@ All notable changes to Voyager are documented here. Format loosely follows
   override is set.
 - **Documentation that contradicted the code.** The READMEs said no real
   OpenCode install had been observed and named two shapes (it is three, and one
-  real v2.0.29 install has been observed — one install, one platform);
-  `MAINTENANCE` listed eight indexed agents; and the "`evidence verify --help`
-  does not list the five outcomes" entry was stale — the help has listed all
-  five, with their exit codes and the `MATCH` caveat, since 1.3.x.
+  real v2.0.29 install has been observed — one install, one platform), and
+  `MAINTENANCE` listed eight indexed agents. Three documents — both READMEs and
+  `docs/QUICKSTART.md` — plus a `MAINTENANCE` known-issue entry also claimed
+  `voyager evidence verify --help` does not list the five outcomes; it does, with
+  their exit codes and the `MATCH` caveat, and has since 1.3.x.
 
 ### Tests
 
