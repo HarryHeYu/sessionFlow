@@ -7,6 +7,12 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Fixed
 
+- A corrupt/unusable index now produces a one-line error pointing at
+  `voyager db check` (exit 1) on **every** command that opens the store,
+  instead of a raw `sqlite3.DatabaseError` traceback (`list`, `status`,
+  `search`, `scan`, `continue`, `thread list`). The corrupt file itself is
+  never rewritten or removed. Found by the v1.4.0 cold-start acceptance
+  (#29); fixes #34.
 - The read-only `thread` subcommands (`list`, `show`, `activity`,
   `summarize`, `timeline`, `stale`) no longer create an empty `index.db`
   in a fresh home: they now use the same read path as `list`/`search` and
