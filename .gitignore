@@ -4,6 +4,7 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+/pip/
 .voyager/
 *.db
 *.db-journal
