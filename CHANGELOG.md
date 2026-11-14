@@ -3,6 +3,20 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Fixed
+
+- Machine-derived repo scope is now strict: a sibling directory's WorkThread
+  (`E:/x/demo-old` while working in `E:/x/demo`) can no longer enter
+  `status` / `current_work` / `continue_context` / `switch` / `continue` /
+  the session-start hook / the launcher / MCP discovery through
+  `same_repo_loose`'s substring rule, and a lone sibling thread is no longer
+  presented as the only current thread. A typed CLI `--repo` short name
+  keeps its loose matching (unchanged, pinned by a test). Found by the
+  continuity review of issue #31; the ambiguity contract itself is
+  unchanged.
+
 ## [1.4.1] — 2026-11-14
 
 ### Fixed
