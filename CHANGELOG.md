@@ -3,7 +3,11 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
-## [Unreleased]
+## [1.5.0] — 2026-11-14
+
+### Added
+
+- **Evidence Verify API op** (`evidence_verify`), by @SunnyRad ([PR #24](https://github.com/HarryHeYu/sessionFlow/pull/24); closes [#22](https://github.com/HarryHeYu/sessionFlow/issues/22)). A thin, read-only pass-through to `evidence.verify()` over the JSON-lines API: the five verdicts — `MATCH` / `MISMATCH` / `NOT_FOUND` / `UNVERIFIABLE` / `INVALID_REFERENCE` — are returned verbatim in `result.status`, decoupled from process exit codes, so a `callOp()` client keeps every state instead of seeing them flattened into a generic failure. `MATCH` says the indexed event is the one the reference was made from — reference consistency, **not** truth. `BRIDGE_SCHEMA_VERSION` stays 1 and `integration_info().ops` grows 9→10; an older Core answers `unknown op: 'evidence_verify'` — a capability error, distinct from an evidence `NOT_FOUND` (verified live against the published v1.4.1 wheel).
 
 ### Fixed
 

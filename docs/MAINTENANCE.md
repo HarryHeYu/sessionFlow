@@ -1,4 +1,4 @@
-# Maintenance Guide — sessionFlow v1.4.1
+# Maintenance Guide — sessionFlow v1.5.0
 
 Post-release reference. Nothing here starts new development; it records what is
 known, what is supported, and what a maintainer should check.
@@ -14,7 +14,7 @@ known, what is supported, and what a maintainer should check.
 | 3 | **No source content hashing.** Only `mtime` + `size` are compared. | A `touch` reads as "possibly changed"; an edit preserving size reads as "unchanged". | Deferred (cost: full re-read of every provider file per scan). |
 | 4 | **`(session, seq)` does not survive an edit in the middle of a transcript.** | The seq still resolves — to a different event. | Mitigated: the fingerprint reports MISMATCH instead of silently re-pointing. |
 | 5 | **Unicode is not normalised** in the fingerprint. | NFC vs NFD spellings of the same text hash differently. | Deferred: normalising ties the digest to a Unicode DB version, and a false MISMATCH is the safe direction. |
-| 6 | **`evidence verify` is CLI-only.** | No API/MCP wrapper. `--json` is the machine surface. | Deferred until something consumes it. |
+| 6 | **`evidence verify` is CLI-only.** | ~~No API/MCP wrapper.~~ The API op `evidence_verify` shipped in v1.5.0 (`callOp()` path); an MCP wrapper is still open. | API op landed in v1.5.0 (PR #24); MCP tool tracked for a later release. |
 | 7 | **Dashboard search is snapshot-scoped.** | The page filters what it rendered; whole-index search is `voyager search`. | By design (static HTML, no server). |
 | 8 | **Browser verification runs locally, not in CI.** | CI jobs skip where a browser cannot start, with a stated reason. | `CI_BROWSER_NOT_VERIFIED` — declared, not hidden. |
 | 9 | **SQLite concurrent-index flake.** | Rare failure in `test_concurrent_creation_of_a_fresh_index`. | **INCONCLUSIVE**: not reproduced in bounded re-runs (40 fresh-index pairs, 160 child processes). Deliberately not masked with sleeps or unbounded retries. |
@@ -31,13 +31,14 @@ known, what is supported, and what a maintainer should check.
 | Python | 3.10 – 3.13 (CI covers all four on both OS families) |
 | OS | Windows, Linux. macOS is supported by the code and the path handling but is **not in CI**. |
 | Agents indexed | Codex, Claude Code, DSH, Grok CLI, ZCode, Kiro, Cursor, Antigravity, OpenCode |
-| Distribution | GitHub tag install (`@v1.4.1`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
+| Distribution | GitHub tag install (`@v1.5.0`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
 
 ## Compatibility Matrix
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| v1.4.1 | v1.2.0 | 1 | current release (patch, 2026-11-14); plugin v1.2.0 needs no upgrade — no new op, no schema change |
+| v1.5.0 | v1.2.0 | 1 | current release (2026-11-14); `evidence_verify` op added (ops 9→10); machine-derived repo scope strict; plugin v1.2.0 needs no upgrade — schema 1 unchanged, seventh tool comes with plugin v1.3.0 |
+| v1.4.1 | v1.2.0 | 1 | released 2026-11-14 (patch); plugin v1.2.0 needs no upgrade — no new op, no schema change |
 | v1.4.0 | v1.2.0 | 1 | released 2026-11-13; plugin v1.2.0 needs no upgrade — no new op, no seventh tool |
 | v1.3.1 | v1.2.0 | 1 | still supported; index readable by v1.4.0 with no migration |
 | v1.3.0 | v1.2.0 | 1 | still supported; index readable by v1.3.1 with no migration |
