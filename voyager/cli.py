@@ -899,8 +899,10 @@ def cmd_status(args) -> int:
     import json as _json
     store = open_read(args.db)
     from .auto import discover_continuity
+    user_typed = getattr(args, "repo", None)
     disc = discover_continuity(store, cwd=os.getcwd(),
-                               repo=getattr(args, "repo", None))
+                               repo=user_typed,
+                               repo_strict=user_typed is None)
     enum = _continuity_status_enum(disc)
     if args.json:
         print(_json.dumps({**disc, "status": enum}, ensure_ascii=False,
@@ -1138,7 +1140,8 @@ def cmd_continue(args) -> int:
         else:
             repo = (git_info(os.getcwd()).get("repo_root")
                     or os.getcwd().replace("\\", "/"))
-        resolved = resolve_work_thread(store, repo=repo)
+        resolved = resolve_work_thread(store, repo=repo,
+                                       repo_strict=repo_ref is None)
         if resolved["status"] == "ambiguous":
             _print_thread_ambiguity(repo, resolved)
             store.close()
@@ -1455,7 +1458,8 @@ def cmd_switch(args) -> int:
         from .adapters.base import git_info
         repo = repo_ref or (git_info(os.getcwd()).get("repo_root")
                             or os.getcwd().replace("\\", "/"))
-        resolved = resolve_work_thread(store, repo=repo)
+        resolved = resolve_work_thread(store, repo=repo,
+                                       repo_strict=repo_ref is None)
         if resolved["status"] == "no_thread":
             print("error: no active WorkThread for this repo ({0}).".format(repo))
             print("Create one: voyager thread create --repo {0} --attach <ids>".format(repo))
@@ -1880,7 +1884,7 @@ def cmd_checkpoint(args) -> int:
     # If no thread specified, try to detect from current continuity state
     if not thread_id:
         from .auto import discover_continuity
-        disc = discover_continuity(store, cwd=os.getcwd())
+        disc = discover_continuity(store, cwd=os.getcwd(), repo_strict=True)
         thread = disc.get("active_thread")
         if thread:
             thread_id = thread["id"]

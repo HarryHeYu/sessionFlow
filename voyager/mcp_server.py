@@ -347,6 +347,7 @@ def voyager_current(cwd: str = "", provider: str = "",
     from .auto import discover_continuity
     store = Store()
     disc = discover_continuity(store, cwd=cwd or None, provider=provider or None,
+                               repo_strict=True,
                                native_session_id=native_session_id or None)
     store.close()
     if disc["status"] == "ambiguous":
@@ -470,7 +471,7 @@ def voyager_switch(target: str, cwd: str = "", goal: str = "",
     from .auto import discover_continuity
     from .continuity import handoff_thread
     store = Store()
-    disc = discover_continuity(store, cwd=cwd or None)
+    disc = discover_continuity(store, cwd=cwd or None, repo_strict=True)
 
     if thread_id:
         t = store.thread_get(thread_id)
