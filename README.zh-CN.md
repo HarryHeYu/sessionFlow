@@ -123,7 +123,7 @@ python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFl
 去掉 `@v1.5.0` 就是跟 `main` 走。确认装到的版本：
 
 ```sh
-voyager --version        # 应当输出 1.4.0
+voyager --version        # 应当输出 1.5.0
 ```
 
 > **从 v1.2.0（或 v1.1.0）升级不需要迁移。** 索引原样读取：不改任何行，
