@@ -38,7 +38,8 @@ def prelaunch(
         # Perform incremental scan
         from .auto import discover_continuity
         
-        disc = discover_continuity(store, cwd=cwd, repo=None)
+        disc = discover_continuity(store, cwd=cwd, repo=None,
+                                   repo_strict=True)
         
         if not disc.get("continuity_available"):
             result["status"] = "no_thread"

@@ -568,3 +568,104 @@ def test_mcp_context_thread_id_is_accepted_too(tmp_path, monkeypatch):
     assert "# Continuation Bundle" in r or "# Context" in r
     r2 = mcp_server.voyager_context(cwd=REPO, thread_id="thr_nope")
     assert r2 == "no such WorkThread: thr_nope"
+
+
+# --- machine-derived repo scope: sibling directories must not match (#31) ---
+
+LOCAL = "E:/x/demo"
+SIBLING = "E:/x/demo-old"
+
+
+def _sibling_setup(tmp_path):
+    """Local thread at LOCAL + sibling thread at SIBLING (substring-matched)."""
+    path = tmp_path / "sib.db"
+    _seed(path, [("a", "local work", LOCAL, 2000.0),
+                 ("b", "sibling work", SIBLING, 1000.0)])
+    return path
+
+
+def test_machine_repo_scope_excludes_the_sibling_directory(tmp_path):
+    """repo_strict=True: a sibling dir's thread is out of scope for cwd/git.
+
+    Reproduced live on v1.4.1 (6767cab): status in E:/x/demo listed the
+    E:/x/demo-old thread because same_repo_loose's substring rule matches
+    'e:/x/demo' inside 'e:/x/demo-old'. Machine-derived repo paths (cwd
+    fallback / git toplevel) get strict matching; a typed short name keeps
+    loose (the next test pins that).
+    """
+    db = _sibling_setup(tmp_path)
+    store = Store(db)
+    try:
+        resolved = resolve_work_thread(store, repo=LOCAL, repo_strict=True)
+        assert resolved["status"] == "success"
+        assert [c["title"] for c in resolved["candidates"]] == ["local work"]
+    finally:
+        store.close()
+
+
+def test_lone_sibling_thread_is_no_thread_for_a_machine_repo(tmp_path):
+    """The sharpest shape: no local thread at all -> no_thread, NOT success.
+
+    Red on v1.4.1: the sibling thread came back as 'success' with
+    has_thread=True and no flag -- another project's thread presented as
+    the answer to 'what is the current work HERE'.
+    """
+    db = tmp_path / "lone-sib.db"
+    _seed(db, [("b", "sibling work", SIBLING, 1000.0)])   # no local thread at all
+    store = Store(db)
+    try:
+        resolved = resolve_work_thread(store, repo=LOCAL, repo_strict=True)
+        assert resolved["status"] == "no_thread"
+        assert resolved["thread"] is None
+    finally:
+        store.close()
+
+
+def test_current_work_does_not_report_a_foreign_thread_as_current(tmp_path):
+    """api.current_work with a machine-derived repo must not adopt a sibling."""
+    db = tmp_path / "lone-sib.db"
+    _seed(db, [("b", "sibling work", SIBLING, 1000.0)])
+    out = handle_request({"id": 1, "op": "current_work",
+                          "params": {"repo": LOCAL}}, db=db)
+    assert out.get("error") is None, out
+    res = out["result"]
+    assert res["has_thread"] is False, res
+    assert "thread_ambiguous" not in res
+
+
+def test_discover_continuity_machine_scope_excludes_the_sibling(tmp_path):
+    """The session-start surface agrees with the resolver under repo_strict."""
+    from voyager.auto import discover_continuity
+    db = tmp_path / "lone-sib2.db"
+    _seed(db, [("b", "sibling work", SIBLING, 1000.0)])
+    store = Store(db)
+    try:
+        disc = discover_continuity(store, cwd=LOCAL, repo_strict=True)
+        assert disc["status"] == "no_thread"
+        assert disc["continuity_available"] is False
+    finally:
+        store.close()
+
+
+def test_user_typed_short_name_still_matches_loose(tmp_path):
+    """D19's reason for loose matching survives: a typed short name matches."""
+    db = _sibling_setup(tmp_path)
+    store = Store(db)
+    try:
+        resolved = resolve_work_thread(store, repo="demo")   # typed, no flag
+        roots = [c["repo_root"] for c in resolved["candidates"]]
+        assert LOCAL in roots
+    finally:
+        store.close()
+
+
+def test_ambiguity_default_and_order_are_unchanged(two):
+    """Nothing in the ambiguity contract moves because of the strict flag."""
+    store = Store(two)
+    try:
+        resolved = resolve_work_thread(store, repo=REPO)
+        assert resolved["status"] == "ambiguous"
+        assert resolved["thread"]["title"] == "Work A"  # newest is the default
+        assert [c["title"] for c in resolved["candidates"]] == ["Work A", "Work B"]
+    finally:
+        store.close()
