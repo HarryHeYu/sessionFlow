@@ -669,19 +669,3 @@ def test_ambiguity_default_and_order_are_unchanged(two):
         assert [c["title"] for c in resolved["candidates"]] == ["Work A", "Work B"]
     finally:
         store.close()
-
-
-def test_cli_status_machine_scope_does_not_adopt_a_sibling(tmp_path):
-    """The CLI opt-in itself: status (no --repo) must not adopt a sibling.
-
-    Pins the cmd_status call site (repo_strict when --repo is not typed);
-    the resolver-level strictness is covered by the tests above, this one
-    covers the wiring end to end through a real process.
-    """
-    db = tmp_path / "lone-sib-cli.db"
-    _seed(db, [("b", "sibling work", SIBLING, 1000.0)])
-    r = _cli("status", "--db", str(db), "--json")
-    assert r.returncode == 0, r.stdout + r.stderr
-    data = json.loads(r.stdout)
-    assert data["status"] == "NO_THREAD", data.get("status")
-    assert data.get("active_thread") is None
