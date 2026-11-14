@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .store import Store
-from .util import same_repo_loose
+from .util import same_repo, same_repo_loose
 
 # A pending attach older than this is marked stale (the continuation it
 # waited for was either abandoned or already handled manually).
@@ -156,7 +156,8 @@ MAX_THREAD_CANDIDATES = 20
 
 
 def resolve_work_thread(store: Store, repo: Optional[str] = None,
-                        thread_id: Optional[str] = None) -> Dict[str, Any]:
+                        thread_id: Optional[str] = None,
+                        *, repo_strict: bool = False) -> Dict[str, Any]:
     """Which WorkThread is the current work for this repo?  The one answer.
 
     Recency may suggest a **default**; it never establishes **intent**.  This is
@@ -183,7 +184,18 @@ def resolve_work_thread(store: Store, repo: Optional[str] = None,
     * ``not_found`` — the caller named a ``thread_id`` that does not exist.
     * ``out_of_scope`` — the named thread exists but belongs to another repo.
       The named thread is still honoured: the caller asked for it by name.
+
+    ``repo_strict`` selects how ``repo`` matches a thread's ``repo_root``:
+    strict path-suffix matching (``same_repo``) when the caller's repo was
+    **machine-derived** (cwd fallback, git toplevel, the bridge), loose
+    matching (``same_repo_loose``, raw substring) when a **human typed** it
+    on a command line (D19's reason for loose to exist). Default False keeps
+    every existing caller's behaviour; issue #31 is the defect this fixes —
+    a sibling directory's thread used to enter scope via substring matching
+    and could even be presented as the only current thread.
     """
+    match = same_repo if repo_strict else same_repo_loose
+
     def _row(t) -> Dict[str, Any]:
         """A thread row that always carries `members`.
 
@@ -209,13 +221,13 @@ def resolve_work_thread(store: Store, repo: Optional[str] = None,
                     "not_found": True, "out_of_scope": False}
         t = _row(t)
         out_of_scope = bool(repo and t["repo_root"]
-                            and not same_repo_loose(t["repo_root"], repo))
+                            and not match(t["repo_root"], repo))
         return {"status": "success", "thread": t, "candidates": [_cand(t)],
                 "candidates_truncated": False, "explicit": True,
                 "not_found": False, "out_of_scope": out_of_scope}
 
     cands = [t for t in store.thread_list("active")
-             if not repo or (t["repo_root"] and same_repo_loose(t["repo_root"], repo))]
+             if not repo or (t["repo_root"] and match(t["repo_root"], repo))]
     cands.sort(key=lambda t: (t["updated_at"] or 0, t["id"] or ""), reverse=True)
     truncated = len(cands) > MAX_THREAD_CANDIDATES
     shown = cands[:MAX_THREAD_CANDIDATES]
@@ -238,7 +250,8 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
                         provider: Optional[str] = None,
                         native_session_id: Optional[str] = None,
                         thread_id: Optional[str] = None,
-                        repo: Optional[str] = None) -> Dict[str, Any]:
+                        repo: Optional[str] = None,
+                        repo_strict: bool = False) -> Dict[str, Any]:
     """Deterministic continuity lookup for "I'm an agent, sitting in this
     repo — is there work to continue?".
 
@@ -258,7 +271,8 @@ def discover_continuity(store: Store, cwd: Optional[str] = None,
                     or (cwd or os.getcwd()).replace("\\", "/"))
 
     # One resolver for the whole codebase: see resolve_work_thread.
-    resolved = resolve_work_thread(store, repo=repo, thread_id=thread_id)
+    resolved = resolve_work_thread(store, repo=repo, thread_id=thread_id,
+                                   repo_strict=repo_strict)
 
     result: Dict[str, Any] = {
         "repo_root": repo,
@@ -387,6 +401,7 @@ def get_continuation_context(store: Optional[Store] = None,
             run_scan(store, force=False, quiet=True)
 
         disc = discover_continuity(store, cwd=cwd, provider=provider,
+                                   repo_strict=True,
                                    native_session_id=native_session_id,
                                    thread_id=thread_id, repo=repo)
         thread = disc.get("active_thread")

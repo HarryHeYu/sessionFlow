@@ -66,6 +66,9 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-opencode-adapter-design.md](audits/2026-11-opencode-adapter-design.md) | DESIGN | maintainer | frozen — Phase 3 input: verified schema, options, risks, acceptance criteria |
 | [audits/2026-11-phase-2-report.md](audits/2026-11-phase-2-report.md) | AUDIT | maintainer | frozen — Phase 2 delivery: docs, consistency checker, contract evidence, issue triage |
 | [audits/2026-11-v1.3.1-final-release-report.md](audits/2026-11-v1.3.1-final-release-report.md) | AUDIT | maintainer | frozen — v1.3.1 release readiness: gates, artifact hashes, rollback, publish steps |
+| [audits/2026-11-opencode-phase3-report.md](audits/2026-11-opencode-phase3-report.md) | DESIGN | maintainer | frozen — Phase 3 implementation: schema corrections, UNIT_VERIFIED scope, NOT_VERIFIED gaps |
+| [audits/2026-11-opencode-v20x-real-gate.md](audits/2026-11-opencode-v20x-real-gate.md) | AUDIT | maintainer | frozen — v2.0.x inline-schema compatibility: real-install Gate A/B/C, no user data, no LIVE_VERIFIED claim |
+| [audits/2026-11-cold-start-acceptance.md](audits/2026-11-cold-start-acceptance.md) | AUDIT | maintainer | frozen — 2026-11-14 v1.4.0 cold-start acceptance matrix (Windows/Linux; macOS NOT VERIFIED); defects #34–#37 |
 
 ## Performance evidence
 
@@ -96,8 +99,9 @@ true on a date; it is not a description of the product and is not updated.
 `releases/` holds `v1.0.0-rc1.md`, `v1.0.0-rc2.md`, `v1.0.0.md`,
 `v1.1.0-readiness.md`, `v1.1.0-hardening-audit.md`,
 `v1.1.0-community-readiness.md`, `v1.1.0.md`, `v1.1.1.md`,
-`v1.1.1-reliability-hardening.md`, `v1.2.0.md`, `v1.3.0.md`,
-`scan-reliability-and-perf-debt.md` and `p7-architecture-audit.md`. The release
+`v1.1.1-reliability-hardening.md`, `v1.2.0.md`, `v1.3.0.md`, `v1.3.1.md`,
+`v1.4.0.md`, `v1.4.1.md`, `scan-reliability-and-perf-debt.md` and
+`p7-architecture-audit.md`. The release
 notes the workflow reads for a tag are `v<version>.md`; the rest are round
 reports. `v1.2.0.md` and `v1.3.0.md` were backfilled on 2026-11-09 and say so.
 

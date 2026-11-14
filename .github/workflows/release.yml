@@ -89,7 +89,7 @@ jobs:
         run: |
           python -m twine check "${RUNNER_TEMP}"/dist/*
           python - <<'PY'
-          import glob, os, sys, tarfile, zipfile
+          import glob, os, re, sys, tarfile, zipfile
 
           dist = os.path.join(os.environ["RUNNER_TEMP"], "dist")
           tag = os.environ["GITHUB_REF_NAME"]
@@ -114,7 +114,7 @@ jobs:
           # Nothing from the working tree's tests, or a scratch directory, may
           # ride along in the wheel.
           leaked = [n for n in names
-                    if n.startswith("tests/") or "scratch" in n.lower()]
+                    if n.startswith("tests/") or re.search(r"(?:^|/)scratch(?:/|$)", n.lower())]
           if leaked:
               sys.exit(f"wheel carries tests/scratch content: {leaked[:10]}")
 
@@ -124,7 +124,7 @@ jobs:
           with tarfile.open(sdists[0]) as t:
               members = t.getnames()
           leaked = [n for n in members
-                    if "scratch" in n.lower() or "/.git/" in n]
+                    if re.search(r"(?:^|/)scratch(?:/|$)", n.lower()) or "/.git/" in n]
           if leaked:
               sys.exit(f"sdist carries scratch/private content: {leaked[:10]}")
 

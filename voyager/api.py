@@ -272,7 +272,8 @@ def search(db: Optional[Path] = None, query: str = "", provider: Optional[str] =
 
 
 def _resolve_thread(store: Store, repo: Optional[str] = None,
-                    thread_id: Optional[str] = None) -> Dict[str, Any]:
+                    thread_id: Optional[str] = None,
+                    repo_strict: bool = False) -> Dict[str, Any]:
     """The shared WorkThread resolution.
 
     Delegates to :func:`voyager.auto.resolve_work_thread` so the session-start
@@ -281,7 +282,8 @@ def _resolve_thread(store: Store, repo: Optional[str] = None,
     import graph as thin as it was.
     """
     from .auto import resolve_work_thread
-    return resolve_work_thread(store, repo=repo, thread_id=thread_id)
+    return resolve_work_thread(store, repo=repo, thread_id=thread_id,
+                               repo_strict=repo_strict)
 
 
 def _newest_thread_for_repo(store: Store, repo: Optional[str]):
@@ -361,7 +363,11 @@ def current_work(db: Optional[Path] = None, repo: Optional[str] = None,
     """
     store = open_read(db)
     try:
-        resolved = _resolve_thread(store, repo=repo, thread_id=thread_id)
+        # The bridge's repo is machine-derived (cwd / git toplevel), so the
+        # strict scope applies: a sibling directory's thread must not be
+        # adopted as this repo's current work (#31).
+        resolved = _resolve_thread(store, repo=repo, thread_id=thread_id,
+                                   repo_strict=True)
         thread = resolved["thread"]
         out: Dict[str, Any] = {"repo": repo, "has_thread": thread is not None}
 
@@ -441,7 +447,8 @@ def continue_context(db: Optional[Path] = None,
     try:
         refs = list(session_refs or [])
         if not refs:
-            resolved = _resolve_thread(store, repo=repo, thread_id=thread_id)
+            resolved = _resolve_thread(store, repo=repo, thread_id=thread_id,
+                                       repo_strict=True)
             if resolved["not_found"]:
                 return {"error": "no such WorkThread: %s" % thread_id,
                         "thread_requested": thread_id, "thread_not_found": True}

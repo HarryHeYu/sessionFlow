@@ -261,9 +261,36 @@ def checkpoint_create(
     return checkpoint_id
 
 
+def _checkpoints_table_present(conn) -> bool:
+    names = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    return "checkpoints" in names
+
+
+def init_checkpoint_schema_for_read(store: Store) -> None:
+    """Create the checkpoint schema ONLY where nothing persists it.
+
+    A read path must not run persistent DDL (issue #42): on the in-memory
+    fallback (no index file) the schema lives in memory only, so the empty
+    answer comes from the real code paths and nothing lands on disk; on a
+    file-backed db the tables are read as they are, and a database old
+    enough to predate checkpoints degrades to empty answers instead of
+    being migrated by a read.
+    """
+    if str(store.db_path) == ":memory:":
+        add_checkpoint_schema(store.con)
+
+
 def checkpoint_get(store: Store, checkpoint_id: str) -> Optional[Checkpoint]:
-    """Get a checkpoint by ID."""
+    """Get a checkpoint by ID.
+
+    A db old enough to predate the checkpoint table has *no* checkpoints --
+    that is an empty answer, not an error, and the table is not created
+    here (the caller's read path never runs persistent DDL, issue #42).
+    """
     conn = store.con
+    if not _checkpoints_table_present(conn):
+        return None
     row = conn.execute(
         "SELECT * FROM checkpoints WHERE id = ?", (checkpoint_id,)
     ).fetchone()
@@ -280,8 +307,14 @@ def checkpoint_list(
     phase: Optional[str] = None,
     limit: int = 10,
 ) -> List[Tuple[str, Checkpoint]]:
-    """List checkpoints, optionally filtered by thread_id and phase."""
+    """List checkpoints, optionally filtered by thread_id and phase.
+
+    A db predating the checkpoint table simply has none: return empty
+    rather than migrating it from a read (issue #42).
+    """
     conn = store.con
+    if not _checkpoints_table_present(conn):
+        return []
     query = "SELECT * FROM checkpoints WHERE 1=1"
     params = []
 

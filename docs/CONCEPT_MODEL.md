@@ -17,7 +17,7 @@ the code is the contract and this document is the bug.
 
 ### 1. Provider
 
-The eight providers sessionFlow integrates with, as the `provider` value used by
+The nine providers sessionFlow integrates with, as the `provider` value used by
 `--platform` and stored on every session.
 
 | Provider | Agent | Source shape |
@@ -30,6 +30,7 @@ The eight providers sessionFlow integrates with, as the `provider` value used by
 | `kiro` | Kiro IDE | workspace-session JSON under `%APPDATA%` |
 | `antigravity` | Antigravity | conversation SQLite (protobuf payloads) |
 | `dsh` | DSH | zstd JSONL under `~/.dsh/sessions` |
+| `opencode` | OpenCode | read-only SQLite (`session_v2` / inline / legacy) — one artifact, many sessions |
 
 Defined once in `voyager/capability_matrix.py::PROVIDERS` and implemented as one
 module each in `voyager/adapters/`.
@@ -46,7 +47,7 @@ from one read.
 | Type | Providers | Consequence |
 |---|---|---|
 | One file per session | `codex`, `claude`, `grok`, `kiro`, `dsh` | a failed write costs one session; the file can be re-read alone |
-| One artifact, many sessions | `zcode`, `cursor`, `antigravity` | the whole artifact must be read before anything is written; a partial write must not be stamped complete |
+| One artifact, many sessions | `zcode`, `cursor`, `antigravity`, `opencode` | the whole artifact must be read before anything is written; a partial write must not be stamped complete |
 
 The second row is the source of defects D5 and D7 and of issue #18. The rule it
 implies — never stamp a shared artifact until every session in it is written — is

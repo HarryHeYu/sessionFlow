@@ -55,6 +55,8 @@ from pathlib import Path
 _HOME_DATA_DIRS = (
     ".voyager", ".codex", ".claude", ".dsh", ".grok", ".zcode",
     ".cursor", ".gemini", ".config",
+    # OpenCode uses the XDG data root under HOME when XDG_DATA_HOME is unset.
+    ".local/share/opencode",
 )
 
 #: Agent data under ``%APPDATA%`` on Windows.  Kiro is the one adapter that
@@ -229,7 +231,12 @@ def guard_scan_roots(*roots, what: str = "scan root"):
 #: adapters actually read; the rest are here so a future adapter that adds
 #: them cannot reintroduce the same hole unnoticed.
 _DISCOVERY_ENV = ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
-                  "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME")
+                  "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+                  # Explicit database overrides bypass every directory
+                  # redirection above: OPENCODE_DB / VOYAGER_OPENCODE_DB can
+                  # name a file directly. Their literal value is checked, and
+                  # XDG_DATA_HOME is checked for the derived opencode dir.
+                  "OPENCODE_DB", "VOYAGER_OPENCODE_DB")
 
 #: Which data directories each variable *derives*.  Checking the variable's
 #: own value is not enough: ``HOME=C:\\Users\\me`` does not look like agent
@@ -240,6 +247,10 @@ _DERIVED_DATA_DIRS = {
     "HOME": _HOME_DATA_DIRS,
     "USERPROFILE": _HOME_DATA_DIRS,
     "APPDATA": _APPDATA_DATA_DIRS,
+    # OpenCode resolves $XDG_DATA_HOME/opencode/opencode.db. A redirected
+    # XDG_DATA_HOME whose derived opencode/ still lands in the real profile
+    # must be refused, not waved through as "just a temp directory".
+    "XDG_DATA_HOME": ("opencode",),
 }
 
 

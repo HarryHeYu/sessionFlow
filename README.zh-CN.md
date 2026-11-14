@@ -18,10 +18,10 @@
 |  |  |
 |---|---|
 | **是什么** | 在编码 Agent 已经写到磁盘上的会话历史之上，加一层本地索引 + 接续层。 |
-| **为什么用** | 你的历史分散在八种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
-| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"` —— [详见](#安装) |
+| **为什么用** | 你的历史分散在九种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
+| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"` —— [详见](#安装) |
 | **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
-| **当前版本** | [v1.3.1](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.3.1) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **当前版本** | [v1.4.1](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.4.1) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
 
 ### 它主要解决三件事
@@ -44,6 +44,7 @@
 - Claude Code 对话（project JSONL）
 - DSH 运行记录（zstd JSONL）
 - ZCode / Cursor / Kiro / Grok / Antigravity（SQLite、VSCDB、JSON……）
+- OpenCode（只读 SQLite：v2 / inline / legacy 三种形态）
 
 sessionFlow 把它们归并成**一份本地索引**——纯本地运行，无账号、无云端、
 无遥测。
@@ -108,39 +109,41 @@ JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成*
 
 ```sh
 # 用 pipx 装成独立 CLI（推荐，不用折腾虚拟环境）
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"
 
 # 或者用 pip 装到用户目录（Windows 上用 `python -m pip`，`pip` 常常不在 PATH 里）
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"
 ```
 
 **Voyager 没有发布到 PyPI。** PyPI 上的 `voyager` 是一个毫不相干的最近邻搜索库，
 所以裸跑 `pip install voyager` 会装错项目 —— 请一律使用上面的 `@ git+…` 形式。
 改用正式包名的进度见 `CHANGELOG.md`。
 
-`@v1.3.1` 是发布 tag，重装才能装到同一份代码，插件报错信息里推荐的也是它；
-去掉 `@v1.3.1` 就是跟 `main` 走。确认装到的版本：
+`@v1.4.1` 是发布 tag，重装才能装到同一份代码，插件报错信息里推荐的也是它；
+去掉 `@v1.4.1` 就是跟 `main` 走。确认装到的版本：
 
 ```sh
-voyager --version        # 应当输出 1.3.1
+voyager --version        # 应当输出 1.4.0
 ```
 
 > **从 v1.2.0（或 v1.1.0）升级不需要迁移。** 索引原样读取：不改任何行，
 > 唯一区别是新版本给自己加了一个索引。回滚同样安全——v1.1.0 读同一个库，
 > 只是忽略那个多出来的索引。
 
-> **`v1.3.1` 是当前的正式版本。** 下面三个修复全部随它发布——不用再装 `@main`：
-> DSH 0.2.1-rc.3 改了会话文件名（`session.v4.jsonl.zstd`），现在能正常发现；
-> Windows 下 stdout 改按 UTF-8 写，与 DSH bridge 的 UTF-8 解码对齐；短于 3 个字符
-> 的查询也能返回结果。升级用上面的 `@v1.3.1` 即可；改动记在
-> `CHANGELOG.md` 的 `[1.3.1]` 下。
+> **`v1.4.1` 是当前的正式版本。** 这是 v1.4.0 之上的冷启动可靠性补丁（OpenCode
+> 仍是第九个可索引 agent）：损坏索引现在给出一行 `db check` 指引而不是裸
+> traceback，只读的 `thread` / `checkpoint` 子命令不再创建索引，无法写入的
+> scan 会点名不可写的 db/-wal/-shm 文件。升级用上面的 `@v1.4.1` 即可；改动记在
+> `CHANGELOG.md` 的 `[1.4.1]` 下。OpenCode 的 native resume 仍未实现
+> （`NOT_FOUND`），Evidence 的 `verify` API op 也不在这个版本里；DSH 插件仍是
+> v1.2.0 的六个工具。
 
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"          # 核心
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.1"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"          # 核心
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.4.1"     # + MCP server
 ```
 
 想改 Voyager 本身：
@@ -148,7 +151,7 @@ pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.
 ```sh
 git clone https://github.com/HarryHeYu/sessionFlow && cd sessionFlow
 pip install -e ".[all,dev]"    # 可编辑安装 + 可选依赖 + pytest
-python -m pytest tests/ -q     # v1.3.1 上实测：1379 passed / 6 skipped
+python -m pytest tests/ -q     # v1.4.1 上实测：1450 passed / 8 skipped
 ```
 
 要求 Python ≥ 3.10，Windows / macOS / Linux 均可。如果 `voyager` 不在 PATH 里，
@@ -181,9 +184,8 @@ voyager evidence verify codex:01ab… 3 c5009a39
 | `UNVERIFIABLE` | 3 | 引用里没带 digest，只能核对位置 |
 | `INVALID_REFERENCE` | 4 | 引用本身不合法——例如 digest 不是 8 位十六进制 |
 
-`--json` 给出同样的机器可读结果。`voyager evidence verify --help` **不列**这五种
-状态和退出码；这张表、命令自己的输出，以及
-[上手指南](docs/QUICKSTART.md)里每条状态一个可运行示例，才是它们的出处。
+`--json` 给出同样的机器可读结果。`voyager evidence verify --help` 会列出这五种
+状态及其退出码；[上手指南](docs/QUICKSTART.md)里每条状态还有一个可运行示例。
 
 **`MATCH` 是什么意思，不是什么。** 它的意思是"索引里这个事件就是当初那条引用
 所指向的事件"。它**不**表示这条结论为真——这里没有任何东西做那个判断——它也不是
@@ -224,7 +226,7 @@ voyager --db ~/.voyager/demo.db show codex:demo-auth-01   # 编译好的会话�
 先只扫一个 Agent，而不是全部：
 
 ```sh
-voyager scan --platform codex    # codex | claude | zcode | dsh，逗号分隔
+voyager scan --platform codex    # codex | claude | zcode | dsh | opencode，逗号分隔
 ```
 
 只要本机至少有一个 Agent 留有会话历史：
@@ -422,11 +424,22 @@ voyager continue --thread thr_xxxx     # 或 voyager switch claude --thread ...
 | Cursor | `state.vscdb`（SQLite） | ✅ | ✅ | ❌ | ⚠️ 在 raw 里 | ⚠️ | ❌ 仅 IDE |
 | Kiro IDE | workspace-session JSON | ✅ | ❌ 未持久化 | ❌ | ❌ | ❌ | ❌ 仅 IDE |
 | Antigravity | 会话 SQLite（protobuf） | ⚠️ 启发式 | ⚠️ 启发式 | ⚠️ 文本 | ⚠️ 快照在磁盘 | ❌ | ❌ 仅 IDE |
+| OpenCode | 只读 SQLite（`~/.local/share/opencode`） | ✅ | ✅ | ⚠️ 仅 shell | ❌ | ✅ 会话汇总 | ❌ 只读索引 |
 
 **Resume** 一列写的是 Voyager 会为该 provider 运行的命令 —— 它说明命令存在且已接好，
 **不**说明有人观察到 resume 真的成功过。目前**没有任何 provider 的 native resume 被端到端跑过**，
 所以在那张验证表出现对应行之前，请把这一列的每个 `✅` 都当作 `NOT VERIFIED`。
 （`*_continuity_verdict.md` 覆盖的是 hook 注入，那是另一种能力。）
+
+OpenCode 从它的 SQLite 数据库**只读**索引，覆盖它实际存在的三种表结构：
+`session_v2` + `session_part`（v2.2.x）、`session_v2` + 消息内容内联在
+`session_message.data`（v2.0.x），以及旧版 `session`/`message`/`part`。消息、
+工具调用与结果会进入 `search`/`show`/`repo`，也能给另一个 Agent 提供接续上下文
+——但这**不是** native resume，也没有为其实现 resume 命令、启动 hook 或
+transcript writer。三种表结构都有合成 fixture 覆盖（`tests/test_opencode.py`）；
+此外在一台真实的 v2.0.29 安装上观察过一次发现与消息映射，记录在
+`docs/audits/2026-11-opencode-v20x-real-gate.md`。这只是一个安装、一个平台，
+因此 native resume 与跨 Agent 接续仍未验证。可用 `VOYAGER_OPENCODE_DB` 指向指定数据库。
 
 Cursor 与 Antigravity 适配器标记为实验性：Cursor 只读解析它的 KV 存储，
 Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。
@@ -460,7 +473,7 @@ tests/
 ```
 
 ```sh
-python -m pytest tests/ -q                # v1.3.1 上实测：1379 passed / 6 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP / 证据引用
+python -m pytest tests/ -q                # v1.4.1 上实测：1450 passed / 8 skipped —— 适配器 / 接续引擎 / 预算 / 租约 / switch / Skill / API / MCP / 证据引用
 python scripts/run_tests_core_only.py     # 模拟 core-only：把可选依赖变成不可导入后重跑，被门禁的用例转为 skipped
 ```
 

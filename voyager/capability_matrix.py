@@ -82,6 +82,7 @@ DIMENSIONS: Tuple[str, ...] = (
 
 PROVIDERS: Tuple[str, ...] = (
     "codex", "claude", "grok", "zcode", "cursor", "kiro", "antigravity", "dsh",
+    "opencode",
 )
 
 # --- what each provider supports (the ceiling) -----------------------------
@@ -221,6 +222,30 @@ DECLARED: Dict[str, Dict[str, Tuple[str, str]]] = {
         "context_budget": (NOT_FOUND, "no injection path"),
         "truncation_behavior": (NOT_FOUND, "no injection path"),
     },
+    # OpenCode: read-only SQLite indexing of session_v2 / session_message and,
+    # where present, session_part. Two of the three shapes (v2.2.x parts,
+    # v2.0.x inline) were exercised on synthetic fixtures; discovery and
+    # message mapping were also observed once on a real v2.0.29 install (see
+    # docs/audits/2026-11-opencode-v20x-real-gate.md). States stay at
+    # UNIT_VERIFIED: one install/version/platform is not enough to promote a
+    # cell, and nothing here is LIVE_VERIFIED.
+    "opencode": {
+        "session_discovery": (UNIT_VERIFIED, _ADAPTER + "; read-only SQLite, synthetic fixtures; one real v2.0.29 install observed"),
+        "session_indexing": (UNIT_VERIFIED, _ADAPTER + "; v2.2.x, v2.0.x-inline and legacy shapes exercised"),
+        # Reading a session is not resuming one. There is no resume command,
+        # startup hook or transcript writer for this provider.
+        "native_resume": (NOT_FOUND, "read-only index only; no resume surface implemented or verified"),
+        "startup_hook": (NOT_FOUND, "no startup surface"),
+        "dynamic_context_injection": (NOT_FOUND, "no startup surface to inject into"),
+        "native_session_id_at_start": (NOT_FOUND, "no startup surface"),
+        "native_auto_attach": (NOT_FOUND, "no startup surface"),
+        "live_zero_touch_continuity": (NOT_FOUND, "no startup surface"),
+        "transcript_import": (UNIT_VERIFIED, _ADAPTER + "; synthetic SQLite; no real import performed"),
+        "tool_event_support": (UNIT_VERIFIED, "tool call/result from session_part.state or inline content[].state, in fixtures"),
+        "cwd_repo_discovery": (UNIT_VERIFIED, "session.directory + project.worktree in fixtures"),
+        "context_budget": (NOT_FOUND, "no injection path"),
+        "truncation_behavior": (NOT_FOUND, "no injection path"),
+    },
 }
 
 #: Where each provider keeps its hook registration, if it has one.
@@ -243,6 +268,8 @@ SOURCE_PATHS: Dict[str, str] = {
     "kiro": "~/.kiro",
     "antigravity": "~/.gemini/antigravity",
     "dsh": "~/.dsh/sessions",
+    # XDG_DATA_HOME/opencode, else ~/.local/share/opencode (all platforms).
+    "opencode": "~/.local/share/opencode",
 }
 
 #: Per-provider context budget declarations (roadmap Phase 4 / issue #5).
@@ -306,6 +333,14 @@ PROVIDER_CONTEXT_BUDGETS: Dict[str, Dict[str, Any]] = {
         "auto_budget_target": "full",
     },
     "dsh": {
+        "startup_context_budget": None,      # no injection path
+        "transport_limit": None,
+        "truncation_behavior": None,
+        "supports_spill_pointer": False,
+        "native_session_id_at_start": False,
+        "auto_budget_target": None,
+    },
+    "opencode": {
         "startup_context_budget": None,      # no injection path
         "transport_limit": None,
         "truncation_behavior": None,

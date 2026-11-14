@@ -152,7 +152,7 @@ Voyager 不会声称能做 session migration。用户侧的缝是一条命令（
 
 ## 格式翻译（为什么不能两两拷贝）
 
-八家 Agent，八种落盘格式，不能互换。
+九家 Agent，九种落盘格式，不能互换。
 
 | Provider | 落盘形态 | Resume CLI | 能不能*写回去* |
 |---|---|---|---|
@@ -164,16 +164,17 @@ Voyager 不会声称能做 session migration。用户侧的缝是一条命令（
 | Cursor | `state.vscdb` KV | 无 | **不能** |
 | Antigravity | SQLite + protobuf | 无 | **不能** |
 | Kiro | JSON `history[]`，无 tool | 无 | **不能** |
+| OpenCode | SQLite `session_v2`/`session_part`（v2）、内联 `session_message.data`（v2.0.x）或 `session`/`message`/`part`（legacy） | 无 | **不能**，只读 |
 
 工具名对不上（`Read` ≠ `shell_command` ≠ `read_file`）。
 不成对的 `tool_use` / `tool_result` 会让下一次 API 调用直接失败。
 Grok / Codex 的 reasoning 是加密的。
-两两转换（Claude→Codex、Codex→Grok、…）是 8×7 个 writer，上游改一行 schema 就全烂。
+两两转换（Claude→Codex、Codex→Grok、…）是 9×8 个 writer，上游改一行 schema 就全烂。
 
 所以枢纽是 Voyager 已经有的索引：
 
 ```
-8 种 provider 格式
+9 种 provider 格式
       ↓  adapter（只读）               已有
 归一化 Session / Event
       ↓  continuity 编译器            Phase 1 已有

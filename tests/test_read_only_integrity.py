@@ -66,6 +66,9 @@ def _logical(db):
     ["search", "hello"],
     ["show", "codex:ro"],
     ["stats"],
+    ["thread", "list"],
+    ["thread", "stale"],
+    ["thread", "checkpoint", "list"],
 ])
 def test_a_cli_read_does_not_create_a_missing_index(tmp_path, capsys, argv):
     db = tmp_path / "absent.db"

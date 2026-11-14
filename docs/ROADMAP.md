@@ -225,7 +225,7 @@ not a licence for two agents to share one native file.
 
 ## Format translation (why pairwise copy fails)
 
-Eight agents, eight on-disk formats. They are not interchangeable.
+Nine agents, nine on-disk formats. They are not interchangeable.
 
 | Provider | On-disk shape | Resume CLI | Safe to *write*? |
 |---|---|---|---|
@@ -237,17 +237,18 @@ Eight agents, eight on-disk formats. They are not interchangeable.
 | Cursor | `state.vscdb` KV | none | **no** |
 | Antigravity | SQLite + protobuf | none | **no** |
 | Kiro | JSON `history[]`, no tools | none | **no** |
+| OpenCode | SQLite `session_v2`/`session_part` (v2), inline `session_message.data` (v2.0.x), or `session`/`message`/`part` (legacy) | none | **no**, read-only |
 
 Tool names do not map (`Read` ≠ `shell_command` ≠ `read_file`).
 Unmatched `tool_use` / `tool_result` pairs break the next API call.
 Grok/Codex reasoning is encrypted. A pairwise converter matrix
-(Claude→Codex, Codex→Grok, …) is 8×7 writers that rot whenever a
+(Claude→Codex, Codex→Grok, …) is 9×8 writers that rot whenever a
 vendor bumps a JSONL schema.
 
 So the hub is the index Voyager already has:
 
 ```
-8 provider formats
+9 provider formats
       ↓  adapters (read-only)          shipped
 canonical Session / Event
       ↓  continuity compiler           Phase 1 shipped
@@ -411,7 +412,7 @@ Do not rebuild this. The continuity layer sits on top.
 
 | Layer | Today |
 |---|---|
-| Adapters | 8 providers → normalized `Session` / `Event` (`voyager/model.py`) |
+| Adapters | 9 providers → normalized `Session` / `Event` (`voyager/model.py`) |
 | Index | SQLite + FTS5 trigram (`voyager/store.py`), idempotent scan |
 | Per-session handoff V1 | `voyager/handoff.py`: one session → Markdown Context Package → launch `claude` / `codex` / `grok` |
 | Continue V1 | newest session; native resume when `can_resume`, else handoff |

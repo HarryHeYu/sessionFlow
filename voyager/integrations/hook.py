@@ -62,7 +62,8 @@ def startup_handler(
     # Incremental scan before compile (Phase 1b requirement)
     try:
         from ..auto import discover_continuity
-        disc = discover_continuity(store, cwd=cwd, repo=None)
+        disc = discover_continuity(store, cwd=cwd, repo=None,
+                                   repo_strict=True)
     except Exception as e:
         return {
             "status": "error",

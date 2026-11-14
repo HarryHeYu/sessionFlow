@@ -5,7 +5,7 @@ Outputs (both from ONE layout definition, so they cannot drift apart):
     docs/screenshots/architecture.png    raster, embedded in the READMEs
     docs/screenshots/architecture.svg    vector, for further tweaking
 
-The picture in one line: 8 agents with 8 storage formats feed one normalized
+The picture in one line: 9 agents with 9 storage formats feed one normalized
 local index, which is then queryable from the CLI, another agent, or an MCP
 host. Re-run after adding a platform:
 
@@ -67,10 +67,15 @@ MARGIN = 56
 COL_W = 368          # left and right column width (identical: equal weight)
 MID_W = 416          # sized for the worst-case font, see FIT_ADVANCE
 GAP = 88             # horizontal gap between two neighbouring columns
-CARD_H = 56          # left card height
-CARD_GAP = 12
+CARD_H = 52          # left card height
+CARD_GAP = 8
 RCARD_H = 72         # right cards are taller so both stacks end up equally tall
 RCARD_GAP = 20
+# Nine left cards and six right cards must still end at the same y:
+#   9*52 + 8*8  = 532
+#   6*72 + 5*20 = 532
+# `_check_layout()` asserts it, so a tenth provider needs a new balance rather
+# than a silently lopsided picture.
 
 CARD_PAD = 20        # text inset inside the side cards
 MID_PAD = 24         # text inset inside the index box (its lines are centred)
@@ -97,7 +102,7 @@ CARD_TEXT_SIZE = 14
 
 # --- content (unchanged) ----------------------------------------------------
 TAGLINE = "one index across every AI coding agent"
-SUBTITLE = ("8 platforms · 8 storage formats  →  one normalized local index  →  "
+SUBTITLE = ("9 platforms · 9 storage formats  →  one normalized local index  →  "
             "one query surface")
 HEAD_LEFT = "YOUR AGENTS  (read-only adapters)"
 HEAD_MID = "ONE INDEX"
@@ -120,6 +125,7 @@ PROVIDERS = [
     ("Cursor", "state.vscdb (SQLite KV)"),
     ("Kiro", "workspace-session JSON"),
     ("Antigravity", "conversation SQLite (protobuf)"),
+    ("OpenCode", "SQLite (v2 / inline / legacy)"),
 ]
 OUTPUTS = [
     ("search", "substring + CJK across every agent"),
@@ -358,8 +364,8 @@ def render_png(L: dict) -> Path:
     for i, (name, fmt) in enumerate(PROVIDERS):
         y0, y1 = L["left_card"](i)
         _box(d, L["lx"], y0, L["l_right"], y1, PANEL, PANEL_EDGE)
-        draw_text(d, L["lx"] + CARD_PAD, y0 + 8, name, 19, FG)
-        draw_text(d, L["lx"] + CARD_PAD, y0 + 31, fmt, 14, DIM)
+        draw_text(d, L["lx"] + CARD_PAD, y0 + 7, name, 19, FG)
+        draw_text(d, L["lx"] + CARD_PAD, y0 + 29, fmt, 14, DIM)
 
     # ---- middle: the index (its lines are centred in the box) --------------
     _box(d, L["mx"], L["mid_top"], L["m_right"], L["mid_bottom"],
@@ -477,8 +483,8 @@ def render_svg(L: dict) -> Path:
     for i, (name, fmt) in enumerate(PROVIDERS):
         y0, y1 = L["left_card"](i)
         s.rect(L["lx"], y0, L["l_right"], y1, PANEL, PANEL_EDGE)
-        s.text(L["lx"] + CARD_PAD, y0 + 8, name, 19, FG)
-        s.text(L["lx"] + CARD_PAD, y0 + 31, fmt, 14, DIM)
+        s.text(L["lx"] + CARD_PAD, y0 + 7, name, 19, FG)
+        s.text(L["lx"] + CARD_PAD, y0 + 29, fmt, 14, DIM)
 
     s.rect(L["mx"], L["mid_top"], L["m_right"], L["mid_bottom"],
            PANEL_CYAN, CYAN, radius=16, width=3)

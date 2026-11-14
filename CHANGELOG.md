@@ -3,6 +3,157 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Fixed
+
+- Machine-derived repo scope is now strict: a sibling directory's WorkThread
+  (`E:/x/demo-old` while working in `E:/x/demo`) can no longer enter
+  `status` / `current_work` / `continue_context` / `switch` / `continue` /
+  the session-start hook / the launcher / MCP discovery through
+  `same_repo_loose`'s substring rule, and a lone sibling thread is no longer
+  presented as the only current thread. A typed CLI `--repo` short name
+  keeps its loose matching (unchanged, pinned by a test). Found by the
+  continuity review of issue #31; the ambiguity contract itself is
+  unchanged.
+
+## [1.4.1] — 2026-11-14
+
+### Fixed
+
+- A corrupt/unusable index now produces a one-line error pointing at
+  `voyager db check` (exit 1) on **every** command that opens the store,
+  instead of a raw `sqlite3.DatabaseError` traceback (`list`, `status`,
+  `search`, `scan`, `continue`, `thread list`). The corrupt file itself is
+  never rewritten or removed. Found by the v1.4.0 cold-start acceptance
+  (#29); fixes #34.
+- The read-only `thread` subcommands (`list`, `show`, `activity`,
+  `summarize`, `timeline`, `stale`) no longer create an empty `index.db`
+  in a fresh home: they now use the same read path as `list`/`search` and
+  honour the documented "a read does not create a database" guarantee.
+  Found by the v1.4.0 cold-start acceptance (#29); fixes #35. (`thread
+  checkpoint list/show` still open the read-write store to run its schema
+  initialisation -- same class, left as a follow-up.)
+- `voyager thread checkpoint list/show/export` honour the same read
+  guarantees as every other read path (the follow-up named in the entry
+  above): nothing is created when no index exists, the checkpoint schema
+  is initialised **in memory only**, a database predating checkpoints
+  degrades to the empty answer instead of being migrated by a read, and
+  persistent DDL never runs behind a read. Mutating checkpoint
+  subcommands keep writing. Found during the #38–#41 merge round;
+  fixes #42.
+- A scan that cannot write now names the unwritable file (the index db or
+  its `-wal`/`-shm` sidecars) in the summary line, and scopes the retry
+  promise to "once the cause above is resolved" instead of implying an
+  unconditional auto-retry. SQLite reports only "attempt to write a
+  readonly database", which sent a user with a writable db and a stale
+  read-only `-shm` in circles. When the mode-bit probe finds every file
+  writable (root, ACLs, immutable flags can hide below the mode bits), it
+  says so rather than staying silent. Read-only probes only -- nothing is
+  chmodded or removed. Found by the v1.4.0 cold-start acceptance (#29);
+  fixes #36 (Linux).
+- The QUICKSTART §6 example now says what `-o` does on the D7
+  native-resume path: when the thread's newest live session can be
+  natively resumed, `continue` prints the resume command and compiles
+  nothing, so `-o` is not used; `--bundle` forces the package. Found by
+  the v1.4.0 cold-start acceptance (#29); fixes #37.
+
+## [1.4.0] — 2026-11-13
+
+### Added
+
+- **OpenCode is an indexed agent.** Its SQLite database is read **read-only**
+  (`mode=ro` + `PRAGMA query_only`), in all three shapes it ships, detected
+  structurally rather than by a version string: `session_v2` + `session_part`
+  (v2.2.x); `session_v2` with the message content inline in
+  `session_message.data` and **no** `session_part` table (v2.0.x); and the
+  pre-v2 `session` / `message` / `part` layout. A database that carries
+  `session_part` always resolves to the parts shape, so a v2.2.x install is
+  never mis-read as inline.
+  Messages, tool calls, tool results, reasoning and provider-generated rows map
+  to the same event kinds every other adapter emits. Provider-generated rows
+  (`system` / `synthetic` / `compaction`) stay `meta` with
+  `origin=provider_system` and are never promoted to a human instruction. A
+  tool whose state is still `running` produces a call and **no** invented
+  result. Events are ordered by `seq` with a deterministic tiebreak, so a
+  re-scan is idempotent.
+- **OpenCode's capability row in `voyager verify --matrix`.** Discovery,
+  indexing, transcript import, tool events and cwd/repo discovery are
+  `UNIT_VERIFIED`; native resume and every startup dimension are
+  `NOT_FOUND_IN_CURRENT_AUDIT`, because the adapter implements no resume
+  command, startup hook or injection path. Nothing in the row is
+  `LIVE_VERIFIED`.
+
+### Fixed
+
+- **The release workflow rejected its own sdist, so no tag could build.** The
+  distribution check asked `"scratch" in name.lower()`, which matches
+  `tests/test_scratch_hygiene.py` — a legitimate file the sdist is *supposed*
+  to carry. `v1.2.0`, `v1.3.0` and `v1.3.1` all failed at that step with
+  `sdist carries scratch/private content: ['voyager-1.3.1/tests/
+  test_scratch_hygiene.py']`. Both branches now match a **path segment**
+  (`(?:^|/)scratch(?:/|$)`), so a real scratch directory is still refused and a
+  filename that merely contains the word is not. The regression test executes
+  the workflow's own leaked-name predicates instead of restating them, and a
+  file-level mutation back to the old form turns it red.
+- **An explicit `VOYAGER_OPENCODE_DB` / `OPENCODE_DB` is authoritative.** It
+  used to *add* a candidate while the default data directory was still probed,
+  so naming one database could still open another — including a real user
+  database the operator had not asked for. An explicit override now excludes
+  the default; `opencode-<channel>.db` files are only enumerated when no
+  override is set.
+- **Documentation that contradicted the code.** The READMEs said no real
+  OpenCode install had been observed and named two shapes (it is three, and one
+  real v2.0.29 install has been observed — one install, one platform), and
+  `MAINTENANCE` listed eight indexed agents. Three documents — both READMEs and
+  `docs/QUICKSTART.md` — plus a `MAINTENANCE` known-issue entry also claimed
+  `voyager evidence verify --help` does not list the five outcomes; it does, with
+  their exit codes and the `MATCH` caveat, and has since 1.3.x.
+
+### Tests
+
+- Directed: **36** OpenCode tests (27 for the existing shapes + 9 for the
+  inline shape), on anonymised fixtures that carry no user text, path or digest.
+- Full suite: **1434 passed, 6 skipped** (Windows, Python 3.13, `[all,dev]`
+  installed — the same configuration the release workflow uses). The 6 skips are
+  platform/environment rows, each with a stated reason; none is an OpenCode test.
+- New opt-in `scripts/check_release_ready.py` pre-tag gate (12 tests): it verifies
+  the tree a new tag will point at without weakening the strict, real-tag-only
+  consistency check CI runs. It creates no tag and publishes nothing.
+- One real install was observed (v2.0.29, byte-for-byte isolated copy):
+  `probe` → `ok/v2-inline`, 8/8 sessions indexed, per-kind event counts
+  identical to an independent read-only `sqlite3` oracle (user 68, text 206,
+  reasoning 2053, tool call 2617, tool result 2617), and the real
+  `.db` / `-wal` / `-shm` hashes plus all 20 table row counts unchanged.
+  Record: `docs/audits/2026-11-opencode-v20x-real-gate.md`.
+
+### Verified, not claimed
+
+- The real-install gate covers **one install, one version (v2.0.29), one
+  platform (Windows)**. `session_discovery` and `session_indexing` therefore
+  stay `UNIT_VERIFIED`, not `LIVE_VERIFIED`.
+- **Native resume is `NOT_FOUND_IN_CURRENT_AUDIT`** — the adapter implements no
+  resume command, startup hook or context-injection path, and none was
+  observed. Reading a session is not resuming one, and no state in the row is
+  promoted to `LIVE_VERIFIED` because discovery worked on one install.
+- **The Evidence `verify` API op is not in this release.** The Core side is
+  still an unmerged pull request, so `evidence verify` remains CLI-only and
+  `integration_info().ops` lists no `evidence_verify` op. DSH plugin **v1.2.0**
+  keeps its six tools; no seventh tool is shipped or claimed.
+- The README architecture illustration still shows the eight pre-OpenCode
+  platforms. Regenerating it is a real layout change, not a list edit —
+  `scripts/make_diagram.py` asserts that the two card columns are the same
+  height, and a ninth provider card breaks that (600 vs 532 px, measured). It is
+  tracked separately as [issue #27](https://github.com/HarryHeYu/sessionFlow/issues/27),
+  and the prose next to the image is left consistent with the image rather than
+  contradicting it.
+
+### Compatibility
+
+- Bridge schema stays **1**; no row, column or index change, so an existing
+  index is read as-is and rolling back to 1.3.1 is safe.
+- DSH plugin **v1.2.0** works unchanged (it requires schema 1).
+
 ## [1.3.1] — 2026-11-11
 
 ### Fixed

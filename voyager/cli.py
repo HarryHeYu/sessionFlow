@@ -20,7 +20,8 @@ from .adapters.base import enabled_adapters, git_info
 from .auto import resolve_work_thread
 from .scanner import (MAX_WRITE_FAILURES,
                       WRITE_FAILURE_GRACE_SECONDS, run_scan)
-from .store import Store, default_db_path, lease_state, open_read
+from .store import (IndexUnreadableError, Store, default_db_path,
+                    lease_state, open_read)
 from .integrations.hook import cmd_hook_startup
 from .util import (fmt_ts, same_repo_loose, parse_when as _parse_when,
                    force_utf8_stdio)
@@ -898,8 +899,10 @@ def cmd_status(args) -> int:
     import json as _json
     store = open_read(args.db)
     from .auto import discover_continuity
+    user_typed = getattr(args, "repo", None)
     disc = discover_continuity(store, cwd=os.getcwd(),
-                               repo=getattr(args, "repo", None))
+                               repo=user_typed,
+                               repo_strict=user_typed is None)
     enum = _continuity_status_enum(disc)
     if args.json:
         print(_json.dumps({**disc, "status": enum}, ensure_ascii=False,
@@ -1137,7 +1140,8 @@ def cmd_continue(args) -> int:
         else:
             repo = (git_info(os.getcwd()).get("repo_root")
                     or os.getcwd().replace("\\", "/"))
-        resolved = resolve_work_thread(store, repo=repo)
+        resolved = resolve_work_thread(store, repo=repo,
+                                       repo_strict=repo_ref is None)
         if resolved["status"] == "ambiguous":
             _print_thread_ambiguity(repo, resolved)
             store.close()
@@ -1454,7 +1458,8 @@ def cmd_switch(args) -> int:
         from .adapters.base import git_info
         repo = repo_ref or (git_info(os.getcwd()).get("repo_root")
                             or os.getcwd().replace("\\", "/"))
-        resolved = resolve_work_thread(store, repo=repo)
+        resolved = resolve_work_thread(store, repo=repo,
+                                       repo_strict=repo_ref is None)
         if resolved["status"] == "no_thread":
             print("error: no active WorkThread for this repo ({0}).".format(repo))
             print("Create one: voyager thread create --repo {0} --attach <ids>".format(repo))
@@ -1604,8 +1609,15 @@ def _print_lease(store: Store, tid: str) -> None:
 
 
 def cmd_thread(args) -> int:
-    store = Store(args.db)
     action = args.thread_cmd
+    # Read-only thread surfaces must honour the same guarantee as every other
+    # read path: when the index is absent the caller gets an empty in-memory
+    # store and nothing is written to disk (issue #35 -- `thread list` used to
+    # create an empty index.db in a fresh home). Only the mutating subcommands
+    # open the read-write constructor.
+    read_only = action in ("list", "show", "activity", "summarize", "timeline",
+                           "stale")
+    store = open_read(args.db) if read_only else Store(args.db)
     if action == "list":
         status = getattr(args, "status", "active")
         rows = store.thread_list(status)
@@ -1843,15 +1855,26 @@ def cmd_thread(args) -> int:
 def cmd_checkpoint(args) -> int:
     """WorkThread checkpoint management commands."""
     from .checkpoint import (
-        init_checkpoint_schema, checkpoint_create, checkpoint_list,
+        init_checkpoint_schema, init_checkpoint_schema_for_read,
+        checkpoint_create, checkpoint_list,
         checkpoint_get, checkpoint_update, checkpoint_export, checkpoint_import,
         get_latest_checkpoint, checkpoint_summary,
     )
 
-    store = Store(args.db)
-    init_checkpoint_schema(store)
-
     action = args.checkpoint_cmd
+    # Read paths honour the same guarantee as every other read (issue #42,
+    # the same class as #35): no index file -> an in-memory store whose
+    # checkpoint schema is created in memory only, so nothing lands on disk;
+    # a file-backed db is read as it is, and one predating checkpoints
+    # degrades to the empty answer instead of being migrated by a read.
+    # Mutating subcommands keep the read-write constructor and the real
+    # schema initialisation.
+    read_only = action in ("list", "show", "export")
+    store = open_read(args.db) if read_only else Store(args.db)
+    if read_only:
+        init_checkpoint_schema_for_read(store)
+    else:
+        init_checkpoint_schema(store)
 
     # Auto-detect thread from cwd if not specified
     thread_id = None
@@ -1861,7 +1884,7 @@ def cmd_checkpoint(args) -> int:
     # If no thread specified, try to detect from current continuity state
     if not thread_id:
         from .auto import discover_continuity
-        disc = discover_continuity(store, cwd=os.getcwd())
+        disc = discover_continuity(store, cwd=os.getcwd(), repo_strict=True)
         thread = disc.get("active_thread")
         if thread:
             thread_id = thread["id"]
@@ -2534,7 +2557,18 @@ def main(argv=None) -> int:
     _expand_path_args(args)
     if not getattr(args, "cmd", None):
         return _print_onboarding()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except IndexUnreadableError as e:
+        # A corrupt/unusable index: the situation `doctor` and `db check`
+        # already render as a clean error. Every command that merely opens
+        # the store lands here instead of a traceback (#34). The corrupt
+        # file is not modified and is not removed here -- recovery is
+        # `db check` / a backup restore, by hand.
+        print("error: {0}".format(e), file=sys.stderr)
+        print("  run `voyager db check` for details and restore from a"
+              " backup (`voyager db backup`).", file=sys.stderr)
+        return 1
 
 
 def _print_onboarding() -> int:
