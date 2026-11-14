@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from .budget import apply_budget, parse_budget, resolve_auto_budget
 from .continuity import build_continuation_bundle
+from .evidence import verify
 from .ranker import extract_candidate_facts, rank_candidates
 from .store import default_db_path, open_read, Store
 from .util import force_utf8_stdio, parse_when, same_repo_loose
@@ -505,6 +506,32 @@ def continue_context(db: Optional[Path] = None,
     return out
 
 
+def evidence_verify(db: Optional[Path] = None, session_id: str = "",
+                    seq: Any = None,
+                    digest: Optional[str] = None) -> Dict[str, Any]:
+    """Check one Evidence Reference against the index, for machine clients.
+
+    A thin, read-only pass-through to :func:`evidence.verify` — the SAME
+    verification the CLI uses.  No second implementation of the five states
+    lives here: the verdict is returned in ``result.status`` (and
+    ``result.exit_code`` is a *field*, not the process exit status), so a
+    ``callOp()`` client keeps ``MISMATCH`` / ``NOT_FOUND`` / ``UNVERIFIABLE`` /
+    ``INVALID_REFERENCE`` instead of seeing them flattened into a generic
+    ``CLI_FAILED``.  The dict is returned verbatim; nothing is reinterpreted.
+
+    This is an additive op: ``BRIDGE_SCHEMA_VERSION`` stays 1, and
+    ``integration_info()`` derives ``ops``/``capabilities`` from ``_OPS`` so
+    the new name is discoverable without version sniffing.  An older Core that
+    lacks the op answers ``unknown op: ...`` — a capability error, *not* an
+    evidence ``NOT_FOUND`` and certainly not a ``MATCH``.
+    """
+    store = open_read(db)
+    try:
+        return verify(store, session_id, seq, digest)
+    finally:
+        store.close()
+
+
 def integration_info() -> Dict[str, Any]:
     """Version / capability probe for client integrations.  Read-only.
 
@@ -535,6 +562,7 @@ _OPS = {
     "search": search,
     "current_work": current_work,
     "continue_context": continue_context,
+    "evidence_verify": evidence_verify,
     "integration_info": integration_info,
 }
 
