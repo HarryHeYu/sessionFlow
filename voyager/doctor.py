@@ -396,6 +396,108 @@ def check_retention(db_path: Optional[Path] = None) -> Dict[str, Any]:
             pass
 
 
+def check_source_migration(db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Q8-R2: do any retained sessions look like a *renamed* live session?
+
+    Some providers derive the native id from the file path (codex rollouts use
+    the trailing uuid of ``rollout-<ts>-<sid>_<wid>.jsonl``; claude uses the
+    transcript stem).  Renaming such a file therefore looks like "the old
+    session's source vanished" plus "a brand-new session appeared".  The
+    retention contract keeps the old one as ``SOURCE_MISSING`` and never re-binds
+    it -- that part is correct -- but the user is left holding a thread that can
+    never be continued, with nothing pointing at the file that is still there.
+
+    This reports the pair as a **candidate**.  It is read-only in the strong
+    sense: queries only, no writes, no ``source_state`` change, no thread
+    attach, no Evidence Reference rewrite.  A copy or a fork produces exactly the
+    same digest sequence as a rename, so the finding can only ever be a
+    suggestion -- confirming it is a human act, deliberately not automated here.
+
+    Never raises.
+    """
+    empty = {"available": False, "retained": 0, "candidates": [],
+             "confirmed": False, "auto_linked": False}
+    path = _store_path(db_path)
+    if path is None or not path.exists():
+        return empty
+    try:
+        from .store import Store
+        from .util import event_digest
+        store = Store(path)
+    except Exception as e:                       # pragma: no cover - defensive
+        out = dict(empty)
+        out["error"] = str(e)
+        return out
+    try:
+        def sequence(sid: str) -> List[str]:
+            rows = store.q(
+                "SELECT kind, content, command, tool_output, tool_call_id,"
+                " exit_code FROM events WHERE sid=? ORDER BY seq, id", (sid,))
+            return [event_digest(r["kind"], r["content"], r["command"],
+                                 r["tool_output"], r["tool_call_id"],
+                                 r["exit_code"]) for r in rows]
+
+        missing = store.q(
+            "SELECT id, provider FROM sessions"
+            " WHERE source_state='SOURCE_MISSING' ORDER BY id")
+        live = store.q(
+            "SELECT id, provider FROM sessions"
+            " WHERE source_state='ACTIVE_SOURCE' ORDER BY id")
+        if not missing or not live:
+            out = dict(empty)
+            out["available"] = True
+            out["retained"] = len(missing)
+            return out
+
+        by_provider: Dict[str, List[str]] = {}
+        for r in live:
+            by_provider.setdefault(r["provider"], []).append(r["id"])
+
+        cache: Dict[str, List[str]] = {}
+
+        def digests(sid: str) -> List[str]:
+            if sid not in cache:
+                cache[sid] = sequence(sid)
+            return cache[sid]
+
+        candidates: List[Dict[str, Any]] = []
+        for m in missing:
+            a = digests(m["id"])
+            # One shared event proves nothing (two sessions can both start with
+            # "continue the work"); require a real prefix of at least two.
+            if len(a) < 2:
+                continue
+            for sid in by_provider.get(m["provider"], []):
+                b = digests(sid)
+                if len(b) < 2:
+                    continue
+                n = min(len(a), len(b))
+                if a[:n] != b[:n]:
+                    continue
+                candidates.append({
+                    "retained_session": m["id"],
+                    "candidate_session": sid,
+                    "provider": m["provider"],
+                    "shared_events": n,
+                    "retained_events": len(a),
+                    "candidate_events": len(b),
+                    "note": ("candidate only: a rename, a copy and a fork all "
+                             "produce this shape; nothing was linked"),
+                })
+        return {"available": True, "retained": len(missing),
+                "candidates": candidates, "confirmed": False,
+                "auto_linked": False}
+    except Exception as e:                       # pragma: no cover - defensive
+        out = dict(empty)
+        out["error"] = str(e)
+        return out
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
+
+
 def check_cache(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """How many continuity bundles are cached, how old is the newest, and are
     any of them stale relative to the sessions they were compiled from?
@@ -838,6 +940,25 @@ def collect_issues(repo: Optional[str] = None,
             repair_kind=USER_DECISION_REQUIRED,
         ))
 
+    # --- suspected source migration (Q8-R2) --------------------------------
+    # Informational on purpose: retention is the correct outcome, and a rename
+    # is indistinguishable from a copy or a fork.  Nothing is linked here.
+    migration = check_source_migration(db_path)
+    for cand in (migration.get("candidates") or []):
+        issues.append(Issue(
+            code="SUSPECTED_SOURCE_MIGRATION", severity=INFO,
+            category="retention",
+            message="a retained session looks like a renamed copy of a live one "
+                    "(candidate, not a confirmed link)",
+            evidence="retained %s <-> live %s (%d shared events)"
+                     % (cand["retained_session"], cand["candidate_session"],
+                        cand["shared_events"]),
+            suggested_action="confirm by hand if these are the same "
+                             "conversation; nothing was attached, deleted or "
+                             "rewritten",
+            repair_kind=READ_ONLY_DIAGNOSIS,
+        ))
+
     # --- leases (O4.5) ------------------------------------------------------
     leases = check_leases(db_path)
     for detail in leases.get("details", []):
@@ -1113,6 +1234,7 @@ def run(repo: Optional[str] = None,
     store = check_store(db_path)
     cont = check_continuity(repo, db_path)
     retention = check_retention(db_path)
+    migration = check_source_migration(db_path)
     cache = check_cache(db_path)
     fts = check_fts(db_path)
     leases = check_leases(db_path)
@@ -1130,6 +1252,7 @@ def run(repo: Optional[str] = None,
         "cache": cache,
         "fts": fts,
         "retention": retention,
+        "source_migration": migration,
         "leases": leases,
         "pending": pending,
         "verification": verification,

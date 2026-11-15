@@ -23,6 +23,28 @@ All notable changes to Voyager are documented here. Format loosely follows
   and at 300 tokens the listed heading survives while an unlisted one is
   dropped).
 
+## [Unreleased]
+
+### Added
+
+- **Doctor reports a *suspected* source migration, read-only** (Q8-R2, #31).
+  Some providers derive the session id from the file path — codex rollouts from
+  the trailing uuid of the filename, claude transcripts from the stem — so a
+  rename looks like "the old session's source vanished" plus "a brand-new
+  session appeared". The old one is retained as `SOURCE_MISSING` and never
+  re-bound (D15), which is the correct contract but leaves a WorkThread that can
+  never be continued, with nothing pointing at the file that is still there.
+  `doctor.check_source_migration()` now names such a pair as a **candidate**
+  when the retained session's event-digest sequence is a prefix of a live
+  session's, for the same provider, over at least two events. It is a diagnosis,
+  not a repair: no `source_state` change, no thread attach, no Evidence
+  Reference rewrite, and the finding is `READ_ONLY_DIAGNOSIS` with
+  `auto_fixable=False` because a rename, a copy and a fork are indistinguishable
+  from the index alone. Reported as `SUSPECTED_SOURCE_MIGRATION` and surfaced
+  under `source_migration` in the doctor report. Guard:
+  `tests/test_source_migration.py` (6 tests), including an index content-digest
+  assertion that running the check changes nothing.
+
 ## [1.5.0] — 2026-11-14
 
 ### Added
