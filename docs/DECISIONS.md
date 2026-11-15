@@ -597,5 +597,7 @@ flat/tiered 一致、标题是交接末端而非最新文件、bundle 说明选�
 `## Conclusion of the last session in handoff order`（thread 成员）与
 `## Conclusion of the most recently active session`（无 thread）。排序算法、
 `ord` 契约与正文的 "where work stopped" 指针都不变，`SECTION_PRIORITY`
-两种标题同级，预算打包行为不变。守卫是同文件新增的四个契约测试，
-它们对旧标题全部失败。
+两种标题同级，预算打包行为不变。守卫是同文件新增的**五个**契约测试，
+它们对旧标题全部失败；其中一个不是查排名而是**查截断**——同一份正文、
+只换标题，在 300 token 下已登记标题存活、未登记标题被丢弃。变异实验：
+把任一标题从 `SECTION_PRIORITY` 删掉，排名断言与截断断言**同时**失败。

@@ -494,6 +494,47 @@ def test_both_headline_forms_keep_their_packing_priority():
             f"{title!r} would be packed after other sessions' conclusions"
 
 
+def test_the_headline_survives_a_budget_that_drops_an_unlisted_heading():
+    """A truncation assertion, not a rank lookup.
+
+    Same body, only the heading string differs. Measured: at 300 tokens the
+    listed heading is kept and an unlisted one in the same position is dropped.
+    So if either form ever loses its `SECTION_PRIORITY` entry it ranks last and
+    disappears first under pressure -- which a `_priority_of` comparison cannot
+    see, and a grep certainly cannot.
+    """
+    from voyager.budget import apply_budget, split_sections
+
+    filler = "lorem ipsum dolor sit amet " * 200
+
+    def bundle(head: str) -> str:
+        return "\n".join([
+            "# Continuation Bundle", "", "## Goal", "",
+            "**Primary user goal:** ship it", "",
+            head, "",
+            "**Where work stopped (active session: `dsh` `3`):**", "",
+            "the parser is fixed.", "",
+            "## Other sessions' conclusions", "",
+            "- `[codex:1]` (T): " + filler, "",
+            "## Decisions", "", "- use absolute TTL", "",
+            "## Conversation", "", filler, "",
+            "## Evidence & Provenance", "", "Compiled from 3 session(s):", "",
+            "- **dsh** `3`", "",
+        ])
+
+    def kept(head: str) -> list:
+        packed, _ = apply_budget(bundle(head), 300)
+        return [s["title"] for s in split_sections(packed)[1]]
+
+    assert THREAD_HEADLINE in kept(THREAD_HEADLINE), \
+        "the handoff-order headline lost its packing priority"
+    assert ACTIVITY_HEADLINE in kept(ACTIVITY_HEADLINE), \
+        "the activity headline lost its packing priority"
+    # the control: an unlisted heading in the same position is dropped here
+    assert "## Some unlisted heading" not in kept("## Some unlisted heading"), \
+        "the budget no longer discriminates, so this test proves nothing"
+
+
 def test_merge_attaches_in_the_order_the_sessions_were_given(tmp_path):
     """`voyager merge a b c` must not depend on set iteration order.
 

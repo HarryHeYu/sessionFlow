@@ -19,7 +19,9 @@ All notable changes to Voyager are documented here. Format loosely follows
   algorithm, `thread_sessions.ord` and the body's "where work stopped" pointer
   are untouched: this is a naming change, pinned by contract tests that fail on
   the old heading (flat bundle, threadless bundle, tiered bundle, packing
-  priority).
+  priority, and a truncation assertion -- same body, only the heading differs,
+  and at 300 tokens the listed heading survives while an unlisted one is
+  dropped).
 
 ## [1.5.0] — 2026-11-14
 
