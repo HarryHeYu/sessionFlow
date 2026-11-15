@@ -2,7 +2,7 @@
 
 Two properties, both wrong before:
 
-1. `SECTION_PRIORITY` put `## Latest assistant conclusion` second, ahead of the
+1. `SECTION_PRIORITY` put the assistant-conclusion section second, ahead of the
    repository snapshot, the ranked evidence and the errors.  Under a tight
    budget the unverified paragraph survived and the checkable material was
    dropped -- in a bundle whose own heading says the paragraph is "read as what
@@ -28,7 +28,7 @@ EVIDENCE_SECTIONS = [
     "## Errors encountered",
 ]
 ASSERTION_SECTIONS = [
-    "## Latest assistant conclusion",
+    "## Conclusion of the last session in handoff order",
     "## Other sessions' conclusions",
 ]
 

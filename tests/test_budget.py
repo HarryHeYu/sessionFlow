@@ -34,7 +34,7 @@ def _sample_bundle() -> str:
         "",
         "**Primary user goal:** fix CI on main",
         "",
-        "## Latest assistant conclusion",
+        "## Conclusion of the last session in handoff order",
         "",
         "**Where work stopped (active session: `codex` `ci-1`) -- that "
         "session's latest conclusion, read as what it said rather than as "
@@ -165,7 +165,7 @@ def test_tight_budget_keeps_priority_sections():
     b = _sample_bundle()
     packed, info = apply_budget(b, 900)
     assert "## Goal" in packed
-    assert "## Latest assistant conclusion" in packed
+    assert "## Conclusion of the last session in handoff order" in packed
     assert "## Evidence & Provenance" in packed, "provenance header must survive"
     assert "## Budget notes" in packed
     assert ("Dropped section(s):" in packed

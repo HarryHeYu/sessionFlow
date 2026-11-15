@@ -438,6 +438,62 @@ def test_the_runtime_hint_follows_the_handoff_endpoint(tmp_path):
         f"the runtime hint points at the wrong member: {repo_line!r}")
 
 
+# --- 7. the headline must name the rule, not the clock -----------------------
+#
+# `## Latest assistant conclusion` claimed recency, but the section is
+# `sorted_rows[-1]` over the canonical order: the handoff endpoint inside a
+# WorkThread, newest activity only when the rows belong to no thread.  A reader
+# who took "latest" literally would read a re-scanned old session as the fresher
+# conclusion.  The heading now names the rule, and the two rules get different
+# headings because they are different claims.
+
+THREAD_HEADLINE = "## Conclusion of the last session in handoff order"
+ACTIVITY_HEADLINE = "## Conclusion of the most recently active session"
+
+
+def test_a_thread_bundle_headline_names_the_handoff_order(crossed):
+    store, tid = crossed
+    bundle = flat(store, tid)
+    assert THREAD_HEADLINE in bundle
+    assert "## Latest assistant conclusion" not in bundle, \
+        "'Latest' claims recency; the selection is the handoff endpoint"
+    # heading and body must name the same rule, not two different ones
+    assert "last in this WorkThread's handoff order" in bundle
+
+
+def test_a_threadless_bundle_headline_names_activity(tmp_path):
+    store = _sessions_only(tmp_path, CROSSED)
+    rows = store.sessions(None)
+    bundle = build_continuation_bundle(store, rows, live_git=False)
+    assert ACTIVITY_HEADLINE in bundle
+    assert "## Latest assistant conclusion" not in bundle
+    assert "newest by activity" in bundle
+
+
+def test_no_renderer_still_says_latest_assistant_conclusion(crossed):
+    store, tid = crossed
+    assert "## Latest assistant conclusion" not in flat(store, tid)
+    assert "## Latest assistant conclusion" not in tiered(store, tid)
+
+
+def test_both_headline_forms_keep_their_packing_priority():
+    """A renamed heading that fell out of SECTION_PRIORITY would be packed last.
+
+    `_priority_of` matches on word-boundary prefixes, so a heading with no
+    entry silently ranks below every evidence section -- the exact failure the
+    evidence-first keep order exists to prevent.
+    """
+    from voyager.budget import SECTION_PRIORITY, _priority_of
+
+    other = _priority_of("## Other sessions' conclusions")
+    for title in (THREAD_HEADLINE, ACTIVITY_HEADLINE):
+        rank = _priority_of(title)
+        assert rank < len(SECTION_PRIORITY), \
+            f"{title!r} has no SECTION_PRIORITY entry (ranks last)"
+        assert rank < other, \
+            f"{title!r} would be packed after other sessions' conclusions"
+
+
 def test_merge_attaches_in_the_order_the_sessions_were_given(tmp_path):
     """`voyager merge a b c` must not depend on set iteration order.
 

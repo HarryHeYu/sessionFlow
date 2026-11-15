@@ -886,24 +886,31 @@ def build_continuation_bundle(
                 f.provenance, f.kind, score, head))
         L.append("")
 
-    # ---- 2. Latest assistant conclusion (newest session first) -----------
-    # NOT "verified state".  What follows is the active session's last
-    # assistant message, which may be a proposal, an answer, or an opinion --
-    # nothing here has been checked against tool output or the repository.  The
+    # ---- 2. Conclusion of the session the canonical order ends on ---------
+    # NOT "verified state", and deliberately NOT "latest".  What follows is
+    # sorted_rows[-1]'s last assistant message: the handoff endpoint when the
+    # rows are a WorkThread's members, and merely the newest by activity when
+    # they belong to no thread.  Calling both "latest" invited a reader to take
+    # a re-scanned old session as the fresher conclusion -- recency is not
+    # evidence, and inside a thread the order is not even recency.  The
+    # heading therefore names the rule that selected the session, and the two
+    # rules get different headings because they are different claims.
+    # Nothing here has been checked against tool output or the repository; the
     # sections that do carry evidence (repository snapshot, files, commands,
-    # errors) are further down and are labelled as such.  Calling this
-    # "verified" invited an agent to repeat an unverified claim as fact.
-    L.append("## Latest assistant conclusion")
+    # errors) are further down and are labelled as such.
+    if order_basis == ORDER_THREAD:
+        L.append("## Conclusion of the last session in handoff order")
+        why = "last in this WorkThread's handoff order"
+    else:
+        L.append("## Conclusion of the most recently active session")
+        why = "newest by activity (these sessions belong to no WorkThread)"
     L.append("")
     picked = _select_assistant(sess_events[latest_row["id"]])
     if picked:
-        # Say which rule put this session in the headline.  "active session"
-        # alone was ambiguous: it could mean the most recently touched file or
-        # the end of the handoff chain, and those are different sessions.
-        if order_basis == ORDER_THREAD:
-            why = "last in this WorkThread's handoff order"
-        else:
-            why = "newest by activity (these sessions belong to no WorkThread)"
+        # The heading names the rule; the pointer repeats it next to the
+        # session id so the two cannot drift apart.  "active session" alone was
+        # ambiguous: it could mean the most recently touched file or the end of
+        # the handoff chain, and those are different sessions.
         L.append(
             f"**Where work stopped (active session: `{latest_row['provider']}` "
             f"`{latest_row['native_id'][:24]}`, {why}) -- that session's latest "

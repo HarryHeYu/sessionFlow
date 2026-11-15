@@ -132,7 +132,7 @@ def test_latest_assistant_message_is_not_called_verified(two_sessions):
 
     assert "## Current verified state" not in bundle, \
         "the newest assistant message is still presented as verified state"
-    assert "## Latest assistant conclusion" in bundle
+    assert "## Conclusion of the most recently active session" in bundle
     assert PHRASE in bundle, \
         "the section does not say the conclusion is unverified"
 
