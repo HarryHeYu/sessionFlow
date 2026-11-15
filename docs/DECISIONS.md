@@ -589,3 +589,15 @@ flat/tiered 一致、标题是交接末端而非最新文件、bundle 说明选�
 把 flat 的排序改回时钟、或让 `_l0_latest_member` 忽略 `order`，
 对应测试立即失败（见 P8 报告）。
 
+
+**Addendum (2026-11-15) — 标题必须说出选择规则**：本决定第 2 条把标题描述为
+"Where work stopped"，但实际输出的二级标题是 `## Latest assistant conclusion`。
+名字说的是"最新"，选择用的是 `ord`，两者互相矛盾：读者把 "latest" 当真，
+就会把被重新扫描的旧会话读成更新的结论。标题现在按 `order_basis` 二选一 ——
+`## Conclusion of the last session in handoff order`（thread 成员）与
+`## Conclusion of the most recently active session`（无 thread）。排序算法、
+`ord` 契约与正文的 "where work stopped" 指针都不变，`SECTION_PRIORITY`
+两种标题同级，预算打包行为不变。守卫是同文件新增的**五个**契约测试，
+它们对旧标题全部失败；其中一个不是查排名而是**查截断**——同一份正文、
+只换标题，在 300 token 下已登记标题存活、未登记标题被丢弃。变异实验：
+把任一标题从 `SECTION_PRIORITY` 删掉，排名断言与截断断言**同时**失败。

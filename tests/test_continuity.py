@@ -45,8 +45,9 @@ def test_synthesis_chronological_overlay_and_superseding(synthetic_trio):
     assert "We need a structured data format for config." in bundle
     assert "Implement Approach Y (JSON format)." in bundle
 
-    # 2. Latest assistant conclusion
-    assert "## Latest assistant conclusion" in bundle
+    # 2. Conclusion of the session the bundle ends on (no thread here,
+    #    so the rule is activity, not handoff order)
+    assert "## Conclusion of the most recently active session" in bundle
     assert "active session: `grok` `sess-3`" in bundle
     assert "Approach Y implemented: JSON parser complete" in bundle
 
@@ -57,8 +58,8 @@ def test_synthesis_chronological_overlay_and_superseding(synthetic_trio):
     assert "`[claude:sess-2]`" in bundle
     assert "Rejected Approach X" in bundle
 
-    # Concat-regression test: Approach X must NOT appear in Latest assistant conclusion
-    state_section = bundle.split("## Latest assistant conclusion")[1].split("##")[0]
+    # Concat-regression test: Approach X must NOT appear in the headline section
+    state_section = bundle.split("## Conclusion of the most recently active session")[1].split("##")[0]
     assert "Approach Y" in state_section
     assert "Approach X" not in state_section
 
@@ -473,7 +474,7 @@ class TestTieredBundle:
             "\n"
             "Ship the tiered bundle skeleton.\n"
             "\n"
-            "## Latest assistant conclusion\n"
+            "## Conclusion of the most recently active session\n"
             "\n"
             "(no assistant conclusion captured in the active session)\n"
             "\n"
@@ -502,7 +503,7 @@ class TestTieredBundle:
         flat = build_continuation_bundle(store, rows, live_git=False)
         out = build_tiered_bundle(store, thread, members, rows)
         for flat_marker in ("# Continuation Bundle",
-                            "## Latest assistant conclusion",
+                            "## Conclusion of the most recently active session",
                             "## Evidence & Provenance"):
             assert flat_marker in flat       # the flat path still carries them
             assert flat_marker not in out    # ...and the tiered path inlines none of it

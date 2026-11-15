@@ -3,6 +3,26 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Changed
+
+- **The continuation bundle's headline now names the rule that chose the
+  session.** `## Latest assistant conclusion` claimed recency, but the section
+  is `sorted_rows[-1]` over the canonical order — the WorkThread handoff
+  endpoint when the rows are thread members, and newest activity only when they
+  are not. A reader who took "latest" literally would read a re-scanned old
+  session as the fresher conclusion. The two rules now get different headings —
+  `## Conclusion of the last session in handoff order` and `## Conclusion of the
+  most recently active session` — and both keep the same keep-priority in
+  `SECTION_PRIORITY`, so budget packing is unchanged. The default ordering
+  algorithm, `thread_sessions.ord` and the body's "where work stopped" pointer
+  are untouched: this is a naming change, pinned by contract tests that fail on
+  the old heading (flat bundle, threadless bundle, tiered bundle, packing
+  priority, and a truncation assertion -- same body, only the heading differs,
+  and at 300 tokens the listed heading survives while an unlisted one is
+  dropped).
+
 ## [1.5.0] — 2026-11-14
 
 ### Added

@@ -318,7 +318,7 @@ def test_grok_rules_file_is_tiered_v1(store, tmp_path, git_repo):
                     "[Historical Evidence]", "[L1 Active Working Context]"):
         assert section in body
     assert "SENTINEL-CONTINUATION-PAYLOAD" in body
-    for flat_only in ("# Continuation Bundle", "## Latest assistant conclusion",
+    for flat_only in ("# Continuation Bundle", "## Conclusion of the last session in handoff order",
                       "## Evidence & Provenance"):
         assert flat_only not in body
     # the wrong-repo warning belongs to the writer header and must survive

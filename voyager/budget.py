@@ -112,7 +112,12 @@ SECTION_PRIORITY = [
     "## Files this session touched",
     "## Commands executed",
     # --- assistant statements, including the [open] items -------------------
-    "## Latest assistant conclusion",
+    # Two forms, one per selection rule: the bundle names whichever rule chose
+    # the session (handoff order inside a WorkThread, activity otherwise), and
+    # both must keep the same keep-priority.  A renamed heading with no entry
+    # here would silently rank below every evidence section.
+    "## Conclusion of the last session in handoff order",
+    "## Conclusion of the most recently active session",
     "## Where the work stopped",
     "## Other sessions' conclusions",
     "## Decisions",
