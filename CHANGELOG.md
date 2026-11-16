@@ -30,6 +30,16 @@ All notable changes to Voyager are documented here. Format loosely follows
   Structural sample and coverage boundary:
   `docs/audits/2026-11-dsh-provenance-structure.md`.
 
+- **VS Code UI MVP: WorkThread Selector and clearer preview caveats.** The
+  existing extension scaffold now has a read-only WorkThread Selector over
+  `overview` and `thread_detail` (repo, id/title, status, members, last
+  activity, source state, recent sessions). The Context Composer shows the
+  resolved budget, marks `SOURCE_MISSING` sessions as retained, and states
+  the evidence caveats (`MATCH` is reference consistency, `UNVERIFIED`
+  means no digest, preview writes nothing). No new Core API, no scan, no
+  implicit write, no VSIX. Static webview tests and a real
+  `bundle_preview` Git-probe test pin the boundary.
+
 - **Doctor reports a *suspected* source migration, read-only** (Q8-R2, #31).
   Some providers derive the session id from the file path — codex rollouts from
   the trailing uuid of the filename, claude transcripts from the stem — so a

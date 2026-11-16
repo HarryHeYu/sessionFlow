@@ -166,3 +166,48 @@ def test_overview_reads_events_only_for_the_rows_it_returns(tmp_path,
     assert seen["n"] <= limit, (
         "overview read events for %d of %d sessions to return %d rows"
         % (seen["n"], total, limit))
+
+# --- bundle_preview: live git state, not cached index state -----------------
+
+def _fake_git(monkeypatch, branch, oid):
+    from voyager import continuity
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "# branch.oid %s\n# branch.head %s\n" % (oid, branch)
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return Result()
+
+    monkeypatch.setattr(continuity.subprocess, "run", fake_run)
+    return calls
+
+
+def test_bundle_preview_uses_one_git_probe(db, monkeypatch):
+    calls = _fake_git(monkeypatch, "main", "abc1234def")
+    res = handle_request({"id": 7, "op": "bundle_preview",
+                          "params": {"db": str(db),
+                                     "session_refs": ["codex:api1"]}})
+    assert "error" not in res, res
+    assert len(calls) == 1, "one git status probe per preview"
+    assert calls[0][0][:2] == ["git", "status"]
+    bundle = res["result"]["bundle"]
+    assert "Current repository state (live snapshot)" in bundle
+    assert "`main`" in bundle and "`abc1234`" in bundle
+
+
+def test_bundle_preview_live_git_state_is_not_cached(db, monkeypatch):
+    calls = _fake_git(monkeypatch, "main", "abc1234def")
+    first = handle_request({"id": 8, "op": "bundle_preview",
+                            "params": {"db": str(db),
+                                       "session_refs": ["codex:api1"]}})["result"]
+    _fake_git(monkeypatch, "feature/live", "def5678abc")
+    second = handle_request({"id": 9, "op": "bundle_preview",
+                             "params": {"db": str(db),
+                                        "session_refs": ["codex:api1"]}})["result"]
+    assert first["bundle"] != second["bundle"]
+    assert "`main`" in first["bundle"]
+    assert "`feature/live`" in second["bundle"]
+    assert len(calls) == 1

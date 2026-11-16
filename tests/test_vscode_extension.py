@@ -117,6 +117,10 @@ def _timeline_html(nonce: str = "TESTNONCE") -> str:
     return _webview_html("timeline.js", nonce)
 
 
+def _selector_html(nonce: str = "TESTNONCE") -> str:
+    return _webview_html("selector.js", nonce)
+
+
 def test_composer_html_is_self_contained():
     html = _composer_html()
     assert html.startswith("<!DOCTYPE html>")
@@ -164,7 +168,7 @@ def test_extension_js_parses(tmp_path):
     node = shutil.which("node")
     if not node:
         pytest.skip("node not installed")
-    for name in ("extension.js", "composer.js", "timeline.js"):
+    for name in ("extension.js", "composer.js", "timeline.js", "selector.js"):
         proc = subprocess.run([node, "--check", str(EXT / name)],
                               capture_output=True, text=True, encoding="utf-8")
         assert proc.returncode == 0, "%s: %s" % (name, proc.stderr)
@@ -263,3 +267,72 @@ def test_one_click_switch_command_is_wired_end_to_end(pkg, extension_js):
     api_text = (EXT.parent / "voyager" / "api.py").read_text(encoding="utf-8")
     ops_block = api_text.split("_OPS = {", 1)[1].split("}", 1)[0]
     assert "handoff" not in ops_block
+
+# --- UI MVP: WorkThread Selector + evidence caveats ------------------------
+
+def test_selector_command_is_wired(pkg, extension_js):
+    assert "voyager.openSelector" in {c["command"] for c in pkg["contributes"]["commands"]}
+    assert "voyager.openSelector" in extension_js
+    assert "onCommand:voyager.openSelector" in pkg["activationEvents"]
+    titles = pkg["contributes"]["menus"]["view/title"]
+    assert any(m["command"] == "voyager.openSelector" for m in titles)
+
+
+def test_selector_webview_is_self_contained():
+    html = _selector_html()
+    assert html.startswith("<!DOCTYPE html>")
+    assert html.rstrip().endswith("</html>")
+    assert "http://" not in html and "https://" not in html
+    assert "<link" not in html
+    assert "src=" not in html
+    assert html.count("<script") == 1 and html.count("</script>") == 1
+
+
+def test_selector_nonce_reaches_both_the_csp_and_the_script_tag():
+    html = _selector_html("SEL123")
+    assert "script-src 'nonce-SEL123'" in html
+    assert '<script nonce="SEL123">' in html
+    assert "${nonce}" not in html
+
+
+def test_selector_never_writes_untrusted_text_as_markup():
+    code = _code_only(EXT / "selector.js")
+    assert "innerHTML" not in code
+    assert "textContent" in code
+
+
+def test_selector_uses_existing_read_ops_only(extension_js):
+    assert 'request("overview"' in extension_js
+    assert 'request("thread_detail"' in extension_js
+    code = _code_only(EXT / "selector.js")
+    for forbidden in ('request("scan"', 'request("merge"',
+                      'request("handoff"', 'request("switch"'):
+        assert forbidden not in code, forbidden
+
+
+def test_selector_shows_source_state_and_recent_sessions():
+    html = _selector_html()
+    assert "SOURCE_MISSING" in html
+    assert "recent_sessions" in html
+    assert "source_state" in html
+
+
+def test_selector_inline_script_parses(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    html = _selector_html()
+    body = html.split("<script nonce=", 1)[1].split(">", 1)[1]
+    script = body.rsplit("</script>", 1)[0]
+    target = tmp_path / "selector-inline.js"
+    target.write_text(script, encoding="utf-8")
+    proc = subprocess.run([node, "--check", str(target)],
+                          capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+
+
+def test_composer_states_the_evidence_caveats():
+    html = _composer_html()
+    assert "nothing is executed or written" in html
+    assert "MATCH" in html and "UNVERIFIED" in html
+    assert "SOURCE_MISSING" in html

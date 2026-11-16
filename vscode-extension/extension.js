@@ -17,6 +17,7 @@ const vscode = require("vscode");
 const { spawn } = require("child_process");
 const composer = require("./composer");
 const timelineView = require("./timeline");
+const selectorView = require("./selector");
 
 let bridge = null;
 let requestSeq = 0;
@@ -152,6 +153,77 @@ async function previewBundle(context) {
   } catch (e) {
     showError(e.message);
   }
+}
+
+let selectorPanel = null;
+
+/**
+ * WorkThread Selector (UI MVP).
+ *
+ * Read-only consumer of `overview` and `thread_detail`. It does not infer a
+ * "current" thread, scan, write, merge, hand off or switch. The handoff engine
+ * remains the only path that may write a WorkThread.
+ */
+function openSelector(context) {
+  if (selectorPanel) {
+    selectorPanel.reveal(vscode.ViewColumn.Beside);
+    return;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    "voyager.selector",
+    "Voyager: WorkThread Selector",
+    vscode.ViewColumn.Beside,
+    { enableScripts: true, retainContextWhenHidden: true }
+  );
+  selectorPanel = panel;
+  panel.webview.html = selectorView.html(
+    String(Date.now()) + String(Math.random()).slice(2)
+  );
+
+  async function sendOverview() {
+    try {
+      const res = await getBridge(context).request("overview", {
+        repo: repoPath(),
+      });
+      if (res.error) {
+        panel.webview.postMessage({ type: "overview", ok: false, error: res.error });
+        return;
+      }
+      panel.webview.postMessage({
+        type: "overview", ok: true, data: res.result, repo: repoPath(),
+      });
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  panel.webview.onDidReceiveMessage(async (msg) => {
+    try {
+      if (msg.type === "ready") {
+        await sendOverview();
+      } else if (msg.type === "select") {
+        const res = await getBridge(context).request("thread_detail", {
+          thread_id: msg.thread_id,
+        });
+        if (res.error) {
+          panel.webview.postMessage({
+            type: "detail", ok: false, error: res.error,
+          });
+          return;
+        }
+        panel.webview.postMessage({ type: "detail", ok: true, data: res.result });
+      } else if (msg.type === "copy") {
+        await vscode.env.clipboard.writeText(msg.text || "");
+        vscode.window.showInformationMessage("Voyager: copied to clipboard.");
+      }
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+
+  panel.onDidDispose(() => {
+    selectorPanel = null;
+  });
 }
 
 let composerPanel = null;
@@ -348,6 +420,9 @@ function activate(context) {
     ),
     vscode.commands.registerCommand("voyager.bundlePreview", () =>
       previewBundle(context)
+    ),
+    vscode.commands.registerCommand("voyager.openSelector", () =>
+      openSelector(context)
     ),
     vscode.commands.registerCommand("voyager.openComposer", () =>
       openComposer(context)
