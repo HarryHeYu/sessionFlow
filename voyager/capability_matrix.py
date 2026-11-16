@@ -82,7 +82,7 @@ DIMENSIONS: Tuple[str, ...] = (
 
 PROVIDERS: Tuple[str, ...] = (
     "codex", "claude", "grok", "zcode", "cursor", "kiro", "antigravity", "dsh",
-    "opencode",
+    "opencode", "workbuddy",
 )
 
 # --- what each provider supports (the ceiling) -----------------------------
@@ -246,6 +246,25 @@ DECLARED: Dict[str, Dict[str, Tuple[str, str]]] = {
         "context_budget": (NOT_FOUND, "no injection path"),
         "truncation_behavior": (NOT_FOUND, "no injection path"),
     },
+    # WorkBuddy desktop stores turns in CodeBuddy-style JSONL files under
+    # ~/.workbuddy-ai/projects/<project>/<sessionId>.jsonl. Only the JSONL
+    # shape was structurally inspected on a local install; all mapping tests
+    # run against synthetic fixtures, so no cell is LIVE_VERIFIED.
+    "workbuddy": {
+        "session_discovery": (UNIT_VERIFIED, _ADAPTER + "; read-only JSONL, synthetic fixtures; local paths and JSON keys inspected structurally"),
+        "session_indexing": (UNIT_VERIFIED, _ADAPTER + "; message/reasoning/tool events from synthetic JSONL"),
+        "native_resume": (NOT_FOUND, "read-only index only; no resume surface implemented or verified"),
+        "startup_hook": (NOT_FOUND, "no startup surface"),
+        "dynamic_context_injection": (NOT_FOUND, "no startup surface to inject into"),
+        "native_session_id_at_start": (NOT_FOUND, "no startup surface"),
+        "native_auto_attach": (NOT_FOUND, "no startup surface"),
+        "live_zero_touch_continuity": (NOT_FOUND, "no startup surface"),
+        "transcript_import": (UNIT_VERIFIED, _ADAPTER + "; synthetic JSONL; no real import performed"),
+        "tool_event_support": (UNIT_VERIFIED, "function_call/function_call_result in fixtures"),
+        "cwd_repo_discovery": (UNIT_VERIFIED, "message cwd in fixtures; repo identity from git_info"),
+        "context_budget": (NOT_FOUND, "no injection path"),
+        "truncation_behavior": (NOT_FOUND, "no injection path"),
+    },
 }
 
 #: Where each provider keeps its hook registration, if it has one.
@@ -270,6 +289,9 @@ SOURCE_PATHS: Dict[str, str] = {
     "dsh": "~/.dsh/sessions",
     # XDG_DATA_HOME/opencode, else ~/.local/share/opencode (all platforms).
     "opencode": "~/.local/share/opencode",
+    # WorkBuddy desktop: per-project JSONL conversations; the sibling
+    # workbuddy.db holds metadata only and is not indexed.
+    "workbuddy": "~/.workbuddy-ai/projects",
 }
 
 #: Per-provider context budget declarations (roadmap Phase 4 / issue #5).
@@ -341,6 +363,14 @@ PROVIDER_CONTEXT_BUDGETS: Dict[str, Dict[str, Any]] = {
         "auto_budget_target": None,
     },
     "opencode": {
+        "startup_context_budget": None,      # no injection path
+        "transport_limit": None,
+        "truncation_behavior": None,
+        "supports_spill_pointer": False,
+        "native_session_id_at_start": False,
+        "auto_budget_target": None,
+    },
+    "workbuddy": {
         "startup_context_budget": None,      # no injection path
         "transport_limit": None,
         "truncation_behavior": None,

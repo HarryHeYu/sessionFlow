@@ -7,6 +7,18 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Added
 
+- **WorkBuddy desktop is now a read-only indexed provider.** Conversations in
+  `~/.workbuddy-ai/projects/<project>/<sessionId>.jsonl` are parsed into the
+  normal Session/Event model: user and assistant messages, reasoning, tool
+  calls and tool results. The adapter never writes to WorkBuddy storage, never
+  opens `workbuddy.db`, and declares no native resume, startup hook or
+  transcript writer. Only file structure and JSON key/value types were
+  inspected on a local install — no real conversation text was read — and the
+  mapping tests use synthetic fixtures, so the capability cells are
+  `UNIT_VERIFIED`, not `LIVE_VERIFIED`. Set `VOYAGER_WORKBUDDY_PROJECTS` to
+  point at a specific projects directory. Recon details:
+  `docs/audits/2026-11-workbuddy-provider-recon.md`.
+
 - **Doctor reports a *suspected* source migration, read-only** (Q8-R2, #31).
   Some providers derive the session id from the file path — codex rollouts from
   the trailing uuid of the filename, claude transcripts from the stem — so a

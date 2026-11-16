@@ -618,6 +618,7 @@ For verification of actual zero-touch startup behavior, see [docs/DOGFOOD.md](ht
 | Kiro IDE | workspace-session JSON | ✅ | ❌ not persisted | ❌ | ❌ | ❌ | ❌ IDE only |
 | Antigravity | conversation SQLite (protobuf) | ⚠️ heuristic | ⚠️ heuristic | ⚠️ text | ⚠️ snapshots on disk | ❌ | ❌ IDE only |
 | OpenCode | read-only SQLite (`~/.local/share/opencode`) | ✅ | ✅ | ⚠️ shell only | ❌ | ✅ session totals | ❌ read-only index |
+| WorkBuddy | CodeBuddy-style JSONL (`~/.workbuddy-ai/projects`) | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ read-only index |
 
 The **Resume** column names the command Voyager will run for that provider — it
 says the command exists and is wired up, **not** that a resume has been observed
@@ -638,6 +639,16 @@ observed once on a real v2.0.29 install, recorded in
 `docs/audits/2026-11-opencode-v20x-real-gate.md`. That is one install on one
 platform, so native resume and cross-agent continuation stay unverified. Set
 `VOYAGER_OPENCODE_DB` to point at a specific database.
+
+WorkBuddy desktop conversations are indexed **read-only** from the JSONL files
+under `~/.workbuddy-ai/projects/<project>/`. The adapter maps user/assistant
+messages, reasoning, tool calls and results; it does not touch `workbuddy.db`,
+does not write to WorkBuddy storage, and has no native resume, startup hook or
+transcript writer. Only file structure, database tables and JSON key/value
+types were inspected on a local install — no real conversation text was read —
+and all mapping tests use synthetic fixtures. Set
+`VOYAGER_WORKBUDDY_PROJECTS` to point at a specific projects directory. See
+`docs/audits/2026-11-workbuddy-provider-recon.md`.
 
 Cursor and Antigravity adapters are marked experimental: Cursor reads its
 key-value store read-only and Antigravity decodes protobuf blobs

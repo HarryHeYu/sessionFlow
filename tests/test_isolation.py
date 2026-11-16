@@ -31,7 +31,7 @@ REAL_HOME = Path(os.path.expanduser("~"))
 REAL_DATA_DIRS = tuple(
     REAL_HOME / name for name in (
         ".voyager", ".codex", ".claude", ".dsh", ".grok", ".zcode",
-        ".cursor", ".gemini", ".config",
+        ".cursor", ".gemini", ".config", ".workbuddy-ai",
         ".local/share/opencode",   # OpenCode's XDG data root under HOME
     )
 )

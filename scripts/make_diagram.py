@@ -5,7 +5,7 @@ Outputs (both from ONE layout definition, so they cannot drift apart):
     docs/screenshots/architecture.png    raster, embedded in the READMEs
     docs/screenshots/architecture.svg    vector, for further tweaking
 
-The picture in one line: 9 agents with 9 storage formats feed one normalized
+The picture in one line: 10 agents with 10 storage formats feed one normalized
 local index, which is then queryable from the CLI, another agent, or an MCP
 host. Re-run after adding a platform:
 
@@ -67,14 +67,14 @@ MARGIN = 56
 COL_W = 368          # left and right column width (identical: equal weight)
 MID_W = 416          # sized for the worst-case font, see FIT_ADVANCE
 GAP = 88             # horizontal gap between two neighbouring columns
-CARD_H = 52          # left card height
+CARD_H = 46          # left card height
 CARD_GAP = 8
 RCARD_H = 72         # right cards are taller so both stacks end up equally tall
 RCARD_GAP = 20
-# Nine left cards and six right cards must still end at the same y:
-#   9*52 + 8*8  = 532
-#   6*72 + 5*20 = 532
-# `_check_layout()` asserts it, so a tenth provider needs a new balance rather
+# Ten left cards and six right cards must still end at the same y:
+#   10*46 + 9*8  = 532
+#   6*72 + 5*20  = 532
+# `_check_layout()` asserts it, so another provider needs a new balance rather
 # than a silently lopsided picture.
 
 CARD_PAD = 20        # text inset inside the side cards
@@ -102,7 +102,7 @@ CARD_TEXT_SIZE = 14
 
 # --- content (unchanged) ----------------------------------------------------
 TAGLINE = "one index across every AI coding agent"
-SUBTITLE = ("9 platforms · 9 storage formats  →  one normalized local index  →  "
+SUBTITLE = ("10 platforms · 10 storage formats  →  one normalized local index  →  "
             "one query surface")
 HEAD_LEFT = "YOUR AGENTS  (read-only adapters)"
 HEAD_MID = "ONE INDEX"
@@ -126,6 +126,7 @@ PROVIDERS = [
     ("Kiro", "workspace-session JSON"),
     ("Antigravity", "conversation SQLite (protobuf)"),
     ("OpenCode", "SQLite (v2 / inline / legacy)"),
+    ("WorkBuddy", "CodeBuddy-style JSONL"),
 ]
 OUTPUTS = [
     ("search", "substring + CJK across every agent"),
