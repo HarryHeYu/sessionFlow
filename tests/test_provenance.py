@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from voyager.model import new_event, new_session
-from voyager.provenance import classify, coverage, enrich
+from voyager.provenance import UNKNOWN, classify, coverage, enrich
 from voyager.store import Store
 
 
@@ -158,6 +158,78 @@ def test_zcode_subagent_child_is_not_human():
     assert classify("zcode", {"role": "user"}, {"task_type": "subagent_child"}) \
         == "provider_synthetic"
 
+
+# --- DSH --------------------------------------------------------------------
+
+def _dsh_user(source_kind=None, role="user"):
+    data = {"role": role, "source": {}}
+    if source_kind is not None:
+        data["source"]["kind"] = source_kind
+    return {"type": "user/message", "data": data}
+
+
+def test_dsh_user_source_kind_decides_human():
+    assert classify("dsh", _dsh_user("user")) == "human"
+    # Synthetic fixture / older shape; not counted as real-world coverage.
+    assert classify("dsh", _dsh_user("client")) == "human"
+
+
+def test_dsh_role_user_alone_is_not_enough():
+    assert classify("dsh", _dsh_user(None)) == UNKNOWN
+    assert classify("dsh", _dsh_user("novel-kind")) == UNKNOWN
+
+
+def test_dsh_injected_source_kinds_are_not_human():
+    for kind in ("agent-instructions", "skill-catalog", "runtime-context", "plugin"):
+        assert classify("dsh", _dsh_user(kind)) == "provider_bootstrap"
+    for kind in ("goal", "tool-goal", "user-approval", "tool-jobs",
+                 "repeat-tool-reminder", "compact-checkpoint", "model-selection"):
+        assert classify("dsh", _dsh_user(kind)) == "provider_system"
+
+
+def test_dsh_delegated_session_user_is_synthetic():
+    assert classify("dsh", _dsh_user("user"), {"delegationDepth": 1}) \
+        == "provider_synthetic"
+    assert classify("dsh", _dsh_user("user"), {"delegationDepth": 0}) == "human"
+
+
+def test_dsh_assistant_and_tool_rows_are_provider_system():
+    for typ in ("assistant/message", "tool/call", "tool/result", "error"):
+        assert classify("dsh", {"type": typ}) == "provider_system"
+    # Unsupported structural types stay unknown rather than being guessed.
+    assert classify("dsh", {"type": "step/start"}) == UNKNOWN
+
+
+def test_dsh_enrichment_reports_classified_and_unknown_separately(tmp_path):
+    records = [_dsh_user("user"), _dsh_user("skill-catalog"), _dsh_user(None)]
+    store = _store_with(tmp_path, "dsh", records)
+    rep = enrich(store.con, dry_run=False)
+    assert rep["classified"] == 2
+    assert rep["left_unknown"] == 1
+
+    rows = {r["provider"]: r for r in coverage(store.con)}
+    assert rows["dsh"]["user_events"] == 3
+    assert rows["dsh"]["enriched"] == 2
+    assert rows["dsh"]["human"] == 1
+    assert rows["dsh"]["unknown"] == 1
+    assert rows["dsh"]["coverage_pct"] == 66.7
+
+
+def test_dsh_adapter_fixture_classifies_every_stored_event(
+        adapter_of, patch_paths, dsh_fixture, tmp_path):
+    """The real adapter fixture is a positive case; novel kinds are negative cases."""
+    ad = adapter_of("dsh")
+    patch_paths(ad, SESSIONS_DIR=dsh_fixture)
+    source = ad.discover()[0]
+    parsed = ad.parse(source)
+    store = Store(tmp_path / "dsh-prov.db")
+    store.replace_session(parsed["session"], parsed["events"], "dsh", source)
+    rep = enrich(store.con, dry_run=False)
+    assert rep["classified"] == 5 and rep["left_unknown"] == 0
+    origins = [r[0] for r in store.con.execute(
+        "select origin from events order by seq")]
+    assert origins == ["human", "provider_system", "provider_system",
+                       "provider_system", "provider_system"]
 
 # --- enrichment -------------------------------------------------------------
 

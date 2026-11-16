@@ -149,10 +149,78 @@ def zcode_origin(raw_event: Any, session_meta: Any = None) -> str:
     return UNKNOWN
 
 
+_DSH_BOOTSTRAP_KINDS = frozenset({
+    "agent-instructions",
+    "skill-catalog",
+    "runtime-context",
+    "plugin",
+})
+_DSH_SYSTEM_KINDS = frozenset({
+    "goal",
+    "tool-goal",
+    "user-approval",
+    "tool-jobs",
+    "repeat-tool-reminder",
+    "compact-checkpoint",
+    "model-selection",
+})
+
+
+def dsh_origin(raw_event: Any, session_raw_meta: Any = None) -> str:
+    """DSH record -> origin, from structural fields only.
+
+    A DSH ``user/message`` row always has ``data.role = "user"``, but that does
+    not mean a human wrote it: injected context is also stored with the user
+    role.  The decisive field is ``data.source.kind``.  A real structural sample
+    of 12 local session files found ``user`` (human) plus provider-generated
+    kinds such as ``goal``, ``skill-catalog``, ``tool-jobs``, ``plugin``,
+    ``runtime-context``, ``agent-instructions`` and ``model-selection``.
+
+    The older synthetic fixture uses ``client``; that alias is accepted for the
+    fixture, not claimed as real-world coverage.  A missing or novel source kind
+    stays ``UNKNOWN``.  ``delegationDepth > 0`` marks a delegated/subagent
+    session and is pinned by synthesis only (all 12 sampled sessions were 0).
+    """
+    d = _as_dict(raw_event)
+    typ = d.get("type")
+    if not typ:
+        return UNKNOWN
+
+    if typ == "user/message":
+        data = _as_dict(d.get("data"))
+        role = data.get("role")
+        if role is not None and role != "user":
+            return UNKNOWN
+
+        meta = _as_dict(session_raw_meta)
+        depth = meta.get("delegationDepth")
+        try:
+            if depth is not None and int(depth) > 0:
+                return "provider_synthetic"
+        except (TypeError, ValueError):
+            pass
+
+        kind = _as_dict(data.get("source")).get("kind")
+        if kind in ("user", "client"):
+            return "human"
+        if kind in _DSH_BOOTSTRAP_KINDS:
+            return "provider_bootstrap"
+        if kind in _DSH_SYSTEM_KINDS:
+            return "provider_system"
+        return UNKNOWN
+
+    if typ == "assistant/message":
+        return "provider_system"
+    if typ in ("tool/call", "tool/result") or "error" in typ:
+        return "provider_system"
+    return UNKNOWN
+
+
 CLASSIFIERS = {
     "codex": codex_origin,
     "claude": claude_origin,
     "zcode": zcode_origin,
+    "dsh": dsh_origin,
     # grok: no message-level structural source is reachable yet -- stays unknown.
     #        tracked as GROK_MESSAGE_PROVENANCE_COVERAGE.
 }
