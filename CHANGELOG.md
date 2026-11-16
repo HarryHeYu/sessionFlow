@@ -23,6 +23,36 @@ All notable changes to Voyager are documented here. Format loosely follows
   and at 300 tokens the listed heading survives while an unlisted one is
   dropped).
 
+## [Unreleased]
+
+### Added
+
+- **Doctor reports a *suspected* source migration, read-only** (Q8-R2, #31).
+  Some providers derive the session id from the file path — codex rollouts from
+  the trailing uuid of the filename, claude transcripts from the stem — so a
+  rename looks like "the old session's source vanished" plus "a brand-new
+  session appeared". The old one is retained as `SOURCE_MISSING` and never
+  re-bound (D15), which is the correct contract but leaves a WorkThread that can
+  never be continued, with nothing pointing at the file that is still there.
+  `doctor.check_source_migration()` names such a pair as a **candidate**: same
+  provider, and the retained session's event-digest sequence is a prefix of a
+  live session's over at least two events (one shared event proves nothing).
+  Each candidate carries `direction` (`identical` / `retained_is_prefix` /
+  `live_is_prefix`), `same_repo`, and a `confidence` that is `weak` when the
+  live side is the shorter one or when the two sit in different repositories —
+  a copy into another project is also what a deliberate fork looks like.
+  It is a diagnosis, not a repair: it opens the index with a **`mode=ro`
+  connection** (no directory creation, no journal switch, no schema script, no
+  migration — `Store()` would do all four), writes nothing, attaches nothing,
+  and rewrites no Evidence Reference. The finding is `SUSPECTED_SOURCE_MIGRATION`
+  at INFO with `READ_ONLY_DIAGNOSIS` and `auto_fixable=False`, one row per
+  retained session rather than one per pair, and it is computed once per
+  `doctor` run instead of once in `run()` plus once in `collect_issues()`.
+  Surfaced under `source_migration` in the report dict. Guard:
+  `tests/test_source_migration.py` (25 tests, one POSIX-only), including
+  byte-identical index and content-digest assertions, a structural proof that no
+  directory or writable `Store` is opened, and mutation-checked guards.
+
 ## [1.5.0] — 2026-11-14
 
 ### Added
