@@ -50,7 +50,7 @@ def test_committed_assets_match_the_layout(diagram):
 
 
 def test_diagram_still_shows_every_platform_and_use_case(diagram):
-    assert len(diagram.PROVIDERS) == 9, "README claims 9 platforms"
+    assert len(diagram.PROVIDERS) == 10, "README claims 10 platforms"
     assert len(diagram.OUTPUTS) == 6
     assert all(fmt for _, fmt in diagram.PROVIDERS)
     names = [name for name, _ in diagram.PROVIDERS]

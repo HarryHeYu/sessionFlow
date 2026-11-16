@@ -2,37 +2,40 @@
 <rect width="1440" height="880" fill="#0c0c0c"/>
 <text x="470.0" y="76" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="32" text-anchor="start" fill="#f2f2f2">Voyager</text>
 <text x="614.0" y="86" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#5fd0d6">one index across every AI coding agent</text>
-<text x="720.0" y="109" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">9 platforms · 9 storage formats  →  one normalized local index  →  one query surface</text>
+<text x="720.0" y="109" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">10 platforms · 10 storage formats  →  one normalized local index  →  one query surface</text>
 <text x="240.0" y="155" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">YOUR AGENTS  (read-only adapters)</text>
 <text x="720.0" y="155" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">ONE INDEX</text>
 <text x="1200.0" y="155" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="17" text-anchor="middle" fill="#808690">USE IT FROM</text>
-<rect x="56" y="186" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<rect x="56" y="186" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
 <text x="76" y="208" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Codex</text>
 <text x="76" y="226" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">rollout JSONL</text>
-<rect x="56" y="246" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="268" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Claude Code</text>
-<text x="76" y="286" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">project JSONL + file history</text>
-<rect x="56" y="306" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="328" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">ZCode</text>
-<text x="76" y="346" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">SQLite (session/message/part)</text>
-<rect x="56" y="366" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="388" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">DSH</text>
-<text x="76" y="406" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">zstd JSONL</text>
-<rect x="56" y="426" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="448" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Grok CLI</text>
-<text x="76" y="466" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">chat_history.jsonl + summary</text>
-<rect x="56" y="486" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="508" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Cursor</text>
-<text x="76" y="526" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">state.vscdb (SQLite KV)</text>
-<rect x="56" y="546" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="568" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Kiro</text>
-<text x="76" y="586" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">workspace-session JSON</text>
-<rect x="56" y="606" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="628" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Antigravity</text>
-<text x="76" y="646" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">conversation SQLite (protobuf)</text>
-<rect x="56" y="666" width="368" height="52" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
-<text x="76" y="688" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">OpenCode</text>
-<text x="76" y="706" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">SQLite (v2 / inline / legacy)</text>
+<rect x="56" y="240" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="262" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Claude Code</text>
+<text x="76" y="280" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">project JSONL + file history</text>
+<rect x="56" y="294" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="316" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">ZCode</text>
+<text x="76" y="334" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">SQLite (session/message/part)</text>
+<rect x="56" y="348" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="370" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">DSH</text>
+<text x="76" y="388" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">zstd JSONL</text>
+<rect x="56" y="402" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="424" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Grok CLI</text>
+<text x="76" y="442" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">chat_history.jsonl + summary</text>
+<rect x="56" y="456" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="478" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Cursor</text>
+<text x="76" y="496" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">state.vscdb (SQLite KV)</text>
+<rect x="56" y="510" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="532" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Kiro</text>
+<text x="76" y="550" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">workspace-session JSON</text>
+<rect x="56" y="564" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="586" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">Antigravity</text>
+<text x="76" y="604" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">conversation SQLite (protobuf)</text>
+<rect x="56" y="618" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="640" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">OpenCode</text>
+<text x="76" y="658" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">SQLite (v2 / inline / legacy)</text>
+<rect x="56" y="672" width="368" height="46" rx="12" fill="#16181c" stroke="#3a404a" stroke-width="2"/>
+<text x="76" y="694" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#d0d0d0">WorkBuddy</text>
+<text x="76" y="712" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">CodeBuddy-style JSONL</text>
 <rect x="512" y="309" width="416" height="286" rx="16" fill="#0e282e" stroke="#5fd0d6" stroke-width="3"/>
 <text x="720.0" y="358" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="22" text-anchor="middle" fill="#f2f2f2">Voyager Index</text>
 <text x="720.0" y="390" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="middle" fill="#5fd0d6">~/.voyager/index.db</text>
@@ -59,16 +62,17 @@
 <rect x="1016" y="646" width="368" height="72" rx="12" fill="#10201a" stroke="#1a7856" stroke-width="2"/>
 <text x="1036" y="674" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="19" text-anchor="start" fill="#16b27c">MCP server</text>
 <text x="1036" y="698" font-family="Consolas, 'DejaVu Sans Mono', Menlo, 'Courier New', monospace" font-size="14" text-anchor="start" fill="#808690">agents query the index themselves</text>
-<line x1="468" y1="212" x2="468" y2="692" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="212" x2="468" y2="212" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="272" x2="468" y2="272" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="332" x2="468" y2="332" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="392" x2="468" y2="392" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="452" x2="468" y2="452" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="512" x2="468" y2="512" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="572" x2="468" y2="572" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="632" x2="468" y2="632" stroke="#6e747e" stroke-width="2"/>
-<line x1="424" y1="692" x2="468" y2="692" stroke="#6e747e" stroke-width="2"/>
+<line x1="468" y1="209" x2="468" y2="695" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="209" x2="468" y2="209" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="263" x2="468" y2="263" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="317" x2="468" y2="317" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="371" x2="468" y2="371" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="425" x2="468" y2="425" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="479" x2="468" y2="479" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="533" x2="468" y2="533" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="587" x2="468" y2="587" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="641" x2="468" y2="641" stroke="#6e747e" stroke-width="2"/>
+<line x1="424" y1="695" x2="468" y2="695" stroke="#6e747e" stroke-width="2"/>
 <line x1="468" y1="452" x2="512" y2="452" stroke="#6e747e" stroke-width="2"/>
 <polygon points="512,452 503,447 503,457" fill="#6e747e"/>
 <line x1="972" y1="222" x2="972" y2="682" stroke="#6e747e" stroke-width="2"/>

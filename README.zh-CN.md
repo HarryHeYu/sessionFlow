@@ -425,6 +425,7 @@ voyager continue --thread thr_xxxx     # 或 voyager switch claude --thread ...
 | Kiro IDE | workspace-session JSON | ✅ | ❌ 未持久化 | ❌ | ❌ | ❌ | ❌ 仅 IDE |
 | Antigravity | 会话 SQLite（protobuf） | ⚠️ 启发式 | ⚠️ 启发式 | ⚠️ 文本 | ⚠️ 快照在磁盘 | ❌ | ❌ 仅 IDE |
 | OpenCode | 只读 SQLite（`~/.local/share/opencode`） | ✅ | ✅ | ⚠️ 仅 shell | ❌ | ✅ 会话汇总 | ❌ 只读索引 |
+| WorkBuddy | CodeBuddy 风格 JSONL（`~/.workbuddy-ai/projects`） | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ 只读索引 |
 
 **Resume** 一列写的是 Voyager 会为该 provider 运行的命令 —— 它说明命令存在且已接好，
 **不**说明有人观察到 resume 真的成功过。目前**没有任何 provider 的 native resume 被端到端跑过**，
@@ -440,6 +441,13 @@ transcript writer。三种表结构都有合成 fixture 覆盖（`tests/test_ope
 此外在一台真实的 v2.0.29 安装上观察过一次发现与消息映射，记录在
 `docs/audits/2026-11-opencode-v20x-real-gate.md`。这只是一个安装、一个平台，
 因此 native resume 与跨 Agent 接续仍未验证。可用 `VOYAGER_OPENCODE_DB` 指向指定数据库。
+
+WorkBuddy 桌面版的会话从 `~/.workbuddy-ai/projects/<project>/` 下的 JSONL 文件**只读**
+索引。适配器映射用户/助手消息、推理、工具调用与结果；它不碰 `workbuddy.db`，不写
+WorkBuddy 存储，也没有 native resume、启动 hook 或 transcript writer。本机安装上
+只检查了文件结构、数据库表与 JSON 键/值类型，**没有读取真实对话文本**，所有映射
+测试都使用合成 fixture。可用 `VOYAGER_WORKBUDDY_PROJECTS` 指向指定目录。详见
+`docs/audits/2026-11-workbuddy-provider-recon.md`。
 
 Cursor 与 Antigravity 适配器标记为实验性：Cursor 只读解析它的 KV 存储，
 Antigravity 用启发式方式解码 protobuf blob（无公开 schema）。

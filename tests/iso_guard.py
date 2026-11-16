@@ -54,7 +54,7 @@ from pathlib import Path
 # docstring for why the difference matters on CI runners.
 _HOME_DATA_DIRS = (
     ".voyager", ".codex", ".claude", ".dsh", ".grok", ".zcode",
-    ".cursor", ".gemini", ".config",
+    ".cursor", ".gemini", ".config", ".workbuddy-ai",
     # OpenCode uses the XDG data root under HOME when XDG_DATA_HOME is unset.
     ".local/share/opencode",
 )
@@ -236,7 +236,9 @@ _DISCOVERY_ENV = ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
                   # redirection above: OPENCODE_DB / VOYAGER_OPENCODE_DB can
                   # name a file directly. Their literal value is checked, and
                   # XDG_DATA_HOME is checked for the derived opencode dir.
-                  "OPENCODE_DB", "VOYAGER_OPENCODE_DB")
+                  "OPENCODE_DB", "VOYAGER_OPENCODE_DB",
+                  # WorkBuddy's override names a project directory directly.
+                  "VOYAGER_WORKBUDDY_PROJECTS")
 
 #: Which data directories each variable *derives*.  Checking the variable's
 #: own value is not enough: ``HOME=C:\\Users\\me`` does not look like agent

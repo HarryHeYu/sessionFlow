@@ -17,7 +17,7 @@ the code is the contract and this document is the bug.
 
 ### 1. Provider
 
-The nine providers sessionFlow integrates with, as the `provider` value used by
+The ten providers sessionFlow integrates with, as the `provider` value used by
 `--platform` and stored on every session.
 
 | Provider | Agent | Source shape |
@@ -31,6 +31,7 @@ The nine providers sessionFlow integrates with, as the `provider` value used by
 | `antigravity` | Antigravity | conversation SQLite (protobuf payloads) |
 | `dsh` | DSH | zstd JSONL under `~/.dsh/sessions` |
 | `opencode` | OpenCode | read-only SQLite (`session_v2` / inline / legacy) — one artifact, many sessions |
+| `workbuddy` | Tencent WorkBuddy desktop | CodeBuddy-style JSONL under `~/.workbuddy-ai/projects/<project>/` — one artifact, one session |
 
 Defined once in `voyager/capability_matrix.py::PROVIDERS` and implemented as one
 module each in `voyager/adapters/`.

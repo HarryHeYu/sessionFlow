@@ -238,6 +238,7 @@ Nine agents, nine on-disk formats. They are not interchangeable.
 | Antigravity | SQLite + protobuf | none | **no** |
 | Kiro | JSON `history[]`, no tools | none | **no** |
 | OpenCode | SQLite `session_v2`/`session_part` (v2), inline `session_message.data` (v2.0.x), or `session`/`message`/`part` (legacy) | none | **no**, read-only |
+| WorkBuddy | CodeBuddy-style JSONL under `~/.workbuddy-ai/projects/<project>/` | none | **no**, read-only |
 
 Tool names do not map (`Read` ≠ `shell_command` ≠ `read_file`).
 Unmatched `tool_use` / `tool_result` pairs break the next API call.
@@ -248,7 +249,7 @@ vendor bumps a JSONL schema.
 So the hub is the index Voyager already has:
 
 ```
-9 provider formats
+10 provider formats
       ↓  adapters (read-only)          shipped
 canonical Session / Event
       ↓  continuity compiler           Phase 1 shipped
@@ -412,7 +413,7 @@ Do not rebuild this. The continuity layer sits on top.
 
 | Layer | Today |
 |---|---|
-| Adapters | 9 providers → normalized `Session` / `Event` (`voyager/model.py`) |
+| Adapters | 10 providers → normalized `Session` / `Event` (`voyager/model.py`) |
 | Index | SQLite + FTS5 trigram (`voyager/store.py`), idempotent scan |
 | Per-session handoff V1 | `voyager/handoff.py`: one session → Markdown Context Package → launch `claude` / `codex` / `grok` |
 | Continue V1 | newest session; native resume when `can_resume`, else handoff |
