@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -396,6 +397,30 @@ def check_retention(db_path: Optional[Path] = None) -> Dict[str, Any]:
             pass
 
 
+def _ro_connect(path: Path):
+    """Open an existing index **strictly read-only**.
+
+    ``Store(path)`` is not read-only: its constructor creates the parent
+    directory, switches the journal to WAL and runs the schema script, so on an
+    older index it migrates.  A diagnosis must not do any of that, so this opens
+    a URI connection with ``mode=ro`` and never touches the filesystem.
+
+    Returns ``(connection, None)`` or ``(None, reason)``; it does not raise.
+    """
+    try:
+        uri = path.resolve().as_uri() + "?mode=ro"
+        con = sqlite3.connect(uri, uri=True, timeout=5.0)
+    except (sqlite3.Error, ValueError, OSError) as e:
+        return None, "cannot open read-only: %s" % e
+    con.row_factory = sqlite3.Row
+    return con, None
+
+
+def _norm_repo(value: Any) -> str:
+    """Compare repo roots the way the rest of the tool does: case-folded."""
+    return os.path.normcase(str(value).replace("\\", "/")).rstrip("/")
+
+
 def check_source_migration(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Q8-R2: do any retained sessions look like a *renamed* live session?
 
@@ -408,7 +433,8 @@ def check_source_migration(db_path: Optional[Path] = None) -> Dict[str, Any]:
     never be continued, with nothing pointing at the file that is still there.
 
     This reports the pair as a **candidate**.  It is read-only in the strong
-    sense: queries only, no writes, no ``source_state`` change, no thread
+    sense: a ``mode=ro`` connection, queries only, no directory creation, no
+    journal-mode switch, no schema script, no ``source_state`` change, no thread
     attach, no Evidence Reference rewrite.  A copy or a fork produces exactly the
     same digest sequence as a rename, so the finding can only ever be a
     suggestion -- confirming it is a human act, deliberately not automated here.
@@ -420,45 +446,59 @@ def check_source_migration(db_path: Optional[Path] = None) -> Dict[str, Any]:
     path = _store_path(db_path)
     if path is None or not path.exists():
         return empty
-    try:
-        from .store import Store
-        from .util import event_digest
-        store = Store(path)
-    except Exception as e:                       # pragma: no cover - defensive
+    con, why = _ro_connect(path)
+    if con is None:
         out = dict(empty)
-        out["error"] = str(e)
+        out["error"] = why
         return out
     try:
-        def sequence(sid: str) -> List[str]:
-            rows = store.q(
-                "SELECT kind, content, command, tool_output, tool_call_id,"
-                " exit_code FROM events WHERE sid=? ORDER BY seq, id", (sid,))
-            return [event_digest(r["kind"], r["content"], r["command"],
-                                 r["tool_output"], r["tool_call_id"],
-                                 r["exit_code"]) for r in rows]
+        from .util import event_digest
 
-        missing = store.q(
-            "SELECT id, provider FROM sessions"
-            " WHERE source_state='SOURCE_MISSING' ORDER BY id")
-        live = store.q(
-            "SELECT id, provider FROM sessions"
-            " WHERE source_state='ACTIVE_SOURCE' ORDER BY id")
+        missing = con.execute(
+            "SELECT id, provider, repo_root FROM sessions"
+            " WHERE source_state='SOURCE_MISSING' ORDER BY id").fetchall()
+        live = con.execute(
+            "SELECT id, provider, repo_root FROM sessions"
+            " WHERE source_state='ACTIVE_SOURCE' ORDER BY id").fetchall()
         if not missing or not live:
             out = dict(empty)
             out["available"] = True
             out["retained"] = len(missing)
             return out
 
-        by_provider: Dict[str, List[str]] = {}
-        for r in live:
-            by_provider.setdefault(r["provider"], []).append(r["id"])
+        # Bucket by (provider, first two digests).  A candidate must share at
+        # least two events, so it must share the first two: this prunes without
+        # losing a single match, and it turns the retained x live product into
+        # retained x bucket.
+        by_key: Dict[Any, List[Any]] = {}
 
+        # One pass over the events of the providers that actually have a
+        # retained session, instead of one query per session: at 5,000 sessions
+        # the per-session form is 5,000 round trips for the same rows.
+        providers = sorted({m["provider"] for m in missing})
+        marks = ",".join("?" * len(providers))
+        rows = con.execute(
+            "SELECT e.sid AS sid, e.kind, e.content, e.command, e.tool_output,"
+            " e.tool_call_id, e.exit_code"
+            " FROM events e JOIN sessions s ON s.id = e.sid"
+            " WHERE s.source_state IN ('SOURCE_MISSING','ACTIVE_SOURCE')"
+            " AND s.provider IN (" + marks + ")"
+            " ORDER BY e.sid, e.seq, e.id", tuple(providers)).fetchall()
         cache: Dict[str, List[str]] = {}
+        for r in rows:
+            cache.setdefault(r["sid"], []).append(
+                event_digest(r["kind"], r["content"], r["command"],
+                             r["tool_output"], r["tool_call_id"],
+                             r["exit_code"]))
 
         def digests(sid: str) -> List[str]:
-            if sid not in cache:
-                cache[sid] = sequence(sid)
-            return cache[sid]
+            return cache.get(sid, [])
+
+        for r in live:
+            seq = digests(r["id"])
+            if len(seq) < 2:
+                continue
+            by_key.setdefault((r["provider"], tuple(seq[:2])), []).append(r)
 
         candidates: List[Dict[str, Any]] = []
         for m in missing:
@@ -467,33 +507,58 @@ def check_source_migration(db_path: Optional[Path] = None) -> Dict[str, Any]:
             # "continue the work"); require a real prefix of at least two.
             if len(a) < 2:
                 continue
-            for sid in by_provider.get(m["provider"], []):
+            for other in by_key.get((m["provider"], tuple(a[:2])), []):
+                sid = other["id"]
                 b = digests(sid)
                 if len(b) < 2:
                     continue
                 n = min(len(a), len(b))
                 if a[:n] != b[:n]:
                     continue
+                if len(a) == len(b):
+                    direction = "identical"
+                elif n == len(a):
+                    direction = "retained_is_prefix"
+                else:
+                    direction = "live_is_prefix"
+                # A copy into another repository is a plausible migration too,
+                # but it is also what a deliberate fork looks like, so the same
+                # content in a different repo is labelled weaker.
+                same_repo = bool(m["repo_root"]) and bool(other["repo_root"]) \
+                    and _norm_repo(m["repo_root"]) == _norm_repo(other["repo_root"])
+                confidence = ("strong" if direction != "live_is_prefix"
+                              and same_repo else "weak")
                 candidates.append({
                     "retained_session": m["id"],
                     "candidate_session": sid,
                     "provider": m["provider"],
+                    "direction": direction,
+                    "confidence": confidence,
+                    "same_repo": same_repo,
                     "shared_events": n,
                     "retained_events": len(a),
                     "candidate_events": len(b),
                     "note": ("candidate only: a rename, a copy and a fork all "
                              "produce this shape; nothing was linked"),
                 })
+        # Stable order: SQLite makes no promise about IN/rowid order, and the
+        # report is compared across runs.
+        candidates.sort(key=lambda c: (c["retained_session"],
+                                       c["candidate_session"]))
         return {"available": True, "retained": len(missing),
                 "candidates": candidates, "confirmed": False,
                 "auto_linked": False}
+    except sqlite3.Error as e:
+        out = dict(empty)
+        out["error"] = "index cannot be queried read-only: %s" % e
+        return out
     except Exception as e:                       # pragma: no cover - defensive
         out = dict(empty)
         out["error"] = str(e)
         return out
     finally:
         try:
-            store.close()
+            con.close()
         except Exception:
             pass
 
@@ -822,7 +887,8 @@ def _capability_reason(provider: str, dimension: str,
 # --- O4 canonical issue collection ------------------------------------------
 
 def collect_issues(repo: Optional[str] = None,
-                   db_path: Optional[Path] = None) -> List[Issue]:
+                   db_path: Optional[Path] = None,
+                   migration: Optional[Dict[str, Any]] = None) -> List[Issue]:
     """The canonical O4 entry point: all findings as :class:`Issue` objects.
 
     Never raises.  This is what ``doctor --fix`` and the dashboard consume.
@@ -943,16 +1009,27 @@ def collect_issues(repo: Optional[str] = None,
     # --- suspected source migration (Q8-R2) --------------------------------
     # Informational on purpose: retention is the correct outcome, and a rename
     # is indistinguishable from a copy or a fork.  Nothing is linked here.
-    migration = check_source_migration(db_path)
+    if migration is None:
+        migration = check_source_migration(db_path)
+    # One finding per retained session, not per pair: at 5,000 sessions a busy
+    # index produced 500 rows for 100 retained sessions, which buries every
+    # other finding.  The candidates are this finding's evidence.
+    by_retained: Dict[str, List[Dict[str, Any]]] = {}
     for cand in (migration.get("candidates") or []):
+        by_retained.setdefault(cand["retained_session"], []).append(cand)
+    for retained, cands in sorted(by_retained.items()):
+        shown = ", ".join(
+            "%s (%s, %s)" % (c["candidate_session"], c["direction"],
+                             c["confidence"]) for c in cands[:3])
+        if len(cands) > 3:
+            shown += ", +%d more" % (len(cands) - 3)
         issues.append(Issue(
             code="SUSPECTED_SOURCE_MIGRATION", severity=INFO,
             category="retention",
-            message="a retained session looks like a renamed copy of a live one "
-                    "(candidate, not a confirmed link)",
-            evidence="retained %s <-> live %s (%d shared events)"
-                     % (cand["retained_session"], cand["candidate_session"],
-                        cand["shared_events"]),
+            message="retained session %s looks like a renamed copy of %d live "
+                    "session(s) (candidates, not a confirmed link)"
+                    % (retained, len(cands)),
+            evidence="%s: %s" % (retained, shown),
             suggested_action="confirm by hand if these are the same "
                              "conversation; nothing was attached, deleted or "
                              "rewritten",
@@ -1242,7 +1319,7 @@ def run(repo: Optional[str] = None,
     verification = check_verification(db_path)
 
     # Collect canonical issues
-    issues = collect_issues(repo, db_path)
+    issues = collect_issues(repo, db_path, migration=migration)
     issue_dicts = [i.to_dict() for i in issues]
 
     return {
