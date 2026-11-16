@@ -128,7 +128,7 @@ function html(nonce) {
   <footer>
     <button id="copyCli" disabled>Copy CLI command</button>
     <button id="copyBundle" class="secondary" disabled>Copy bundle</button>
-    <span id="hint">The Composer never launches an agent — it hands you the command.</span>
+    <span id="hint">Preview only — nothing is executed or written. MATCH means the reference matches, not that a claim is true; UNVERIFIED means no digest was supplied; SOURCE_MISSING is retained history.</span>
   </footer>
 
 <script nonce="${nonce}">
@@ -136,7 +136,8 @@ function html(nonce) {
   "use strict";
   const vscode = acquireVsCodeApi();
   const state = { items: [], selected: new Set(), bundle: "", tokens: null,
-                  dropped: [], trimmed: [], error: null, pending: null };
+                  budget: null, dropped: [], trimmed: [], error: null,
+                  pending: null };
 
   const $ = (id) => document.getElementById(id);
   const sessionsEl = $("sessions");
@@ -187,6 +188,12 @@ function html(nonce) {
         "  " + (s.message_count || 0) + "msg/" + (s.tool_count || 0) + "tool"));
       label.appendChild(title);
       label.appendChild(meta);
+      if (s.source_state === "SOURCE_MISSING") {
+        const tag = document.createElement("span");
+        tag.className = "warn";
+        tag.textContent = "  retained - source unavailable";
+        label.appendChild(tag);
+      }
       li.appendChild(cb);
       li.appendChild(label);
       sessionsEl.appendChild(li);
@@ -221,6 +228,9 @@ function html(nonce) {
       t.textContent = "~" + state.tokens;
       parts.push(document.createTextNode("  ·  "), t,
                  document.createTextNode(" tokens estimated"));
+    }
+    if (state.budget != null) {
+      parts.push(document.createTextNode("  ·  budget " + state.budget));
     }
     if (state.dropped.length) {
       parts.push(document.createTextNode("  ·  "));
@@ -311,11 +321,12 @@ function html(nonce) {
       if (msg.ok) {
         state.bundle = msg.bundle || "";
         state.tokens = msg.tokens;
+        state.budget = msg.budget;
         state.dropped = msg.dropped || [];
         state.trimmed = msg.trimmed || [];
         state.error = null;
       } else {
-        state.bundle = ""; state.tokens = null;
+        state.bundle = ""; state.tokens = null; state.budget = null;
         state.dropped = []; state.trimmed = [];
         state.error = msg.error || "unknown error";
       }

@@ -4,9 +4,10 @@ The **Phase 7 client** for the voyager local API (`voyager api serve`, stdio
 JSON-lines). It is a thin client: all logic (indexing, ranking, budget packing,
 lease handling) lives in voyager core.
 
-Shipped: the WorkThreads tree view, Overview, bundle preview, the Context
-Composer, the WorkThread timeline, and one-click switch. Not shipped:
-marketplace listing and a published VSIX — see *What is still pending*.
+Shipped: the WorkThreads tree view, Overview, the WorkThread Selector,
+bundle preview, the Context Composer, the WorkThread timeline, and
+one-click switch. Not shipped: marketplace listing and a published VSIX —
+see *What is still pending*.
 
 ## What works today
 
@@ -15,6 +16,10 @@ marketplace listing and a published VSIX — see *What is still pending*.
 - `Voyager: Show Overview` — index stats, active WorkThreads and recent
   sessions in an output channel
 - WorkThreads tree view (activity bar → Voyager)
+- **`Voyager: Open WorkThread Selector`** — a read-only selector over
+  `overview` + `thread_detail`: repo, id/title, status, members, last
+  activity, member source state and the recent-session window. It does not
+  infer a "current" thread, scan, write, merge, hand off or switch.
 - `Voyager: Preview Continuation Bundle` — renders a bundle in a Markdown
   tab with the token estimate
 - **`Voyager: Open WorkThread Timeline`** (also the `＋` on the WorkThreads view
@@ -28,8 +33,11 @@ marketplace listing and a published VSIX — see *What is still pending*.
   Phase 7 composer:
   - checkbox session picker, scoped to the configured repo, newest first
   - goal input + budget selector (`compact` / `balanced` / `full` / `auto`)
-  - live Continuation Bundle preview with the token estimate, and the
-    dropped / trimmed section names when a budget bites
+  - live Continuation Bundle preview with the token estimate, resolved
+    budget, and the dropped / trimmed section names when a budget bites
+  - a fixed caveat line: preview only, `MATCH` is reference consistency
+    rather than truth, `UNVERIFIED` means no digest, and `SOURCE_MISSING`
+    is retained history
   - `Copy CLI command` — yields the equivalent
     `voyager handoff <id> --goal "…" --budget … --to <agent>` or
     `voyager merge <ids> …`, ready to paste
@@ -63,6 +71,14 @@ guesses is worse than a short one (DECISIONS D16).
   summarise / inspect are all still available, native resume is not.
 - Timestamps order the display and nothing else. They never settle a WorkThread
   ambiguity or establish authority.
+
+## Selector and preview safety notes
+
+- The Selector and Composer are read-only consumers of the existing API.
+  They never scan, write an index, merge, hand off or launch an agent.
+- Source state is rendered from the API (`ACTIVE_SOURCE` /
+  `SOURCE_MISSING`); a retained session is labelled as history, not
+  hidden and not treated as a place to switch into.
 
 ## Composer safety notes
 

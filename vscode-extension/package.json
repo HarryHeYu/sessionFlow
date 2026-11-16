@@ -13,6 +13,7 @@
   ],
   "activationEvents": [
     "onCommand:voyager.overview",
+    "onCommand:voyager.openSelector",
     "onCommand:voyager.openComposer",
     "onCommand:voyager.openTimeline",
     "onView:voyager.threads"
@@ -27,6 +28,10 @@
       {
         "command": "voyager.bundlePreview",
         "title": "Voyager: Preview Continuation Bundle"
+      },
+      {
+        "command": "voyager.openSelector",
+        "title": "Voyager: Open WorkThread Selector"
       },
       {
         "command": "voyager.openComposer",
@@ -46,6 +51,11 @@
       "view/title": [
         {
           "command": "voyager.openTimeline",
+          "when": "view == voyager.threads",
+          "group": "navigation"
+        },
+        {
+          "command": "voyager.openSelector",
           "when": "view == voyager.threads",
           "group": "navigation"
         },
