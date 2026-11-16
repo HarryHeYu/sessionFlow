@@ -19,6 +19,17 @@ All notable changes to Voyager are documented here. Format loosely follows
   point at a specific projects directory. Recon details:
   `docs/audits/2026-11-workbuddy-provider-recon.md`.
 
+- **DSH events now have a structural provenance classifier.** `user/message`
+  rows are not human by role alone: DSH also writes injected context with
+  `role=user`. The classifier reads `data.source.kind` and maps observed
+  `user`/`client` rows to `human`, bootstrap kinds to `provider_bootstrap`,
+  lifecycle/tool kinds to `provider_system`, and assistant/tool rows to
+  `provider_system`; missing or novel kinds stay `UNKNOWN`. A
+  `delegationDepth > 0` user row is `provider_synthetic` (synthetic-only
+  evidence). No text heuristics, no model, no provider-file writes.
+  Structural sample and coverage boundary:
+  `docs/audits/2026-11-dsh-provenance-structure.md`.
+
 - **Doctor reports a *suspected* source migration, read-only** (Q8-R2, #31).
   Some providers derive the session id from the file path — codex rollouts from
   the trailing uuid of the filename, claude transcripts from the stem — so a
