@@ -344,5 +344,60 @@ class TestAgentSkill(unittest.TestCase):
                          "the reference Agent Skills validator rejected the skill")
 
 
+
+class TestChangelogStructure(unittest.TestCase):
+    """A CHANGELOG that repeats a same-level heading splits one release in two.
+
+    This happened for real: two `## [Unreleased]` sections were added by two
+    separate PRs (#47 and #48), and nothing noticed, because a duplicated
+    heading is still valid markdown and still renders. A reader skimming for
+    "what is unreleased" saw one of them.
+    """
+
+    CHANGELOG = ROOT / "CHANGELOG.md"
+
+    def headings(self):
+        text = self.CHANGELOG.read_text(encoding="utf-8")
+        return re.findall(r"^##\s+\[([^\]]+)\]", text, re.M)
+
+    def test_no_release_heading_appears_twice(self):
+        seen = self.headings()
+        self.assertTrue(seen, "the CHANGELOG has no `## [version]` headings at all")
+        dupes = sorted({h for h in seen if seen.count(h) > 1})
+        self.assertEqual(
+            dupes, [],
+            "these headings appear more than once at the same level: %s — "
+            "merge them into one section instead of appending a second"
+            % ", ".join(dupes))
+
+    def test_there_is_at_most_one_unreleased_section(self):
+        unreleased = [h for h in self.headings() if h.lower() == "unreleased"]
+        self.assertLessEqual(len(unreleased), 1,
+                             "the CHANGELOG has %d `[Unreleased]` sections"
+                             % len(unreleased))
+
+    def test_unreleased_is_the_first_heading(self):
+        """Newest first: an Unreleased block after a release reads as history."""
+        seen = self.headings()
+        if any(h.lower() == "unreleased" for h in seen):
+            self.assertEqual(seen[0].lower(), "unreleased",
+                             "`[Unreleased]` is not the first release heading")
+
+    def test_the_unreleased_subsections_use_the_keep_a_changelog_names(self):
+        """Only the unreleased block: older releases are history, not ours to rewrite."""
+        text = self.CHANGELOG.read_text(encoding="utf-8")
+        start = text.find("## [Unreleased]")
+        if start == -1:
+            self.skipTest("there is no `[Unreleased]` section to check")
+        nxt = re.search(r"^## \[", text[start + 1:], re.M)
+        block = text[start:start + 1 + nxt.start()] if nxt else text[start:]
+        allowed = {"Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"}
+        found = set(re.findall(r"^###\s+(.+)$", block, re.M))
+        unknown = sorted(found - allowed)
+        self.assertEqual(unknown, [],
+                         "non-standard subsection headings in [Unreleased]: %s"
+                         % ", ".join(unknown))
+
+
 if __name__ == "__main__":
     unittest.main()
