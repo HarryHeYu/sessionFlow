@@ -590,20 +590,41 @@ def provider_state(provider: str, ev: Optional[Evidence] = None) -> str:
     return declared
 
 
+def provider_status(provider: str, ev: Optional[Evidence] = None) -> Dict[str, Any]:
+    """The two facts doctor and `--json` must keep separate.
+
+    ``state`` stays exactly what :func:`provider_state` has always
+    returned, so no capability semantics change silently.  The new
+    fields name that value as a *continuity capability* and add an
+    installation verdict derived only from the provider source path.
+    DSH is the case that exposed the ambiguity: installed == True and
+    capability_state == NOT_FOUND_IN_CURRENT_AUDIT are both true.
+    """
+    ev = ev or collect_evidence(provider)
+    state = provider_state(provider, ev)
+    return {
+        "state": state,
+        "capability_state": state,
+        "capability_scope": "continuity_capability",
+        "installed": ev.installed,
+        "installation_state": "INSTALLED" if ev.installed else "NOT_INSTALLED",
+    }
+
+
 def summary() -> Dict[str, Any]:
     """What `doctor` prints and `--json` emits."""
     providers = {}
     for p in PROVIDERS:
         ev = collect_evidence(p)
-        providers[p] = {
-            "state": provider_state(p, ev),
-            "installed": ev.installed,
+        info = provider_status(p, ev)
+        info.update({
             "hook_registered": ev.hook_registered,
             "hook_fired": ev.hook_fired,
             "last_trigger": ev.last_trigger,
             "context_budget": PROVIDER_CONTEXT_BUDGETS.get(p, {}).get("startup_context_budget"),
             "auto_budget_target": PROVIDER_CONTEXT_BUDGETS.get(p, {}).get("auto_budget_target"),
-        }
+        })
+        providers[p] = info
     return {"providers": providers,
             "dimensions": list(DIMENSIONS),
             "states": list(STATE_ORDER)}

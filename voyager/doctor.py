@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .capability_matrix import (
     DIMENSIONS, HOOK_CONFIG_PATHS, PROVIDERS, SOURCE_PATHS,
-    collect_evidence, evidence_ceiling, provider_state, resolve_cell,
+    collect_evidence, evidence_ceiling, provider_status, resolve_cell,
     PROVIDER_CONTEXT_BUDGETS,
     NOT_FOUND, SUPPORTED, CONFIGURED, UNIT_VERIFIED,
     LIVE_VERIFIED, ZERO_TOUCH_LIVE_VERIFIED, STATE_ORDER,
@@ -936,9 +936,8 @@ def collect_issues(repo: Optional[str] = None,
         ev = collect_evidence(p)
         cfg = check_hook_config(p)
         budget_info = provider_context_budget_info(p)
-        providers[p] = {
-            "state": provider_state(p, ev),
-            "installed": ev.installed,
+        info = provider_status(p, ev)
+        info.update({
             "source_path": SOURCE_PATHS.get(p),
             "hook_registered": ev.hook_registered,
             "hook_config_valid": cfg.get("valid"),
@@ -950,7 +949,8 @@ def collect_issues(repo: Optional[str] = None,
             "truncation_behavior": budget_info.get("truncation_behavior"),
             "supports_spill_pointer": budget_info.get("supports_spill_pointer", False),
             "native_session_id_at_start": budget_info.get("native_session_id_at_start", False),
-        }
+        })
+        providers[p] = info
         # O4.7: invalid hook config is blocking; not-yet-fired is informational
         if providers[p]["hook_registered"] and providers[p]["hook_config_valid"] is False:
             issues.append(Issue(
@@ -1292,9 +1292,8 @@ def run(repo: Optional[str] = None,
         ev = collect_evidence(p)
         cfg = check_hook_config(p)
         budget_info = provider_context_budget_info(p)
-        providers[p] = {
-            "state": provider_state(p, ev),
-            "installed": ev.installed,
+        info = provider_status(p, ev)
+        info.update({
             "source_path": SOURCE_PATHS.get(p),
             "hook_registered": ev.hook_registered,
             "hook_config_valid": cfg.get("valid"),
@@ -1306,7 +1305,8 @@ def run(repo: Optional[str] = None,
             "truncation_behavior": budget_info.get("truncation_behavior"),
             "supports_spill_pointer": budget_info.get("supports_spill_pointer", False),
             "native_session_id_at_start": budget_info.get("native_session_id_at_start", False),
-        }
+        })
+        providers[p] = info
 
     store = check_store(db_path)
     cont = check_continuity(repo, db_path)
@@ -1411,7 +1411,7 @@ def render(report: Dict[str, Any]) -> str:
     lines.append("")
     lines.append("providers")
     lines.append("  %-12s %-26s %-8s %-8s %-6s %-8s"
-                 % ("provider", "state", "installed", "hook", "fired", "budget"))
+                 % ("provider", "capability", "installed", "hook", "fired", "budget"))
     lines.append("  " + "-" * 74)
     for p, info in (report.get("providers") or {}).items():
         budget = info.get("budget")
@@ -1422,6 +1422,7 @@ def render(report: Dict[str, Any]) -> str:
                         "Y" if info.get("hook_registered") else "N",
                         "Y" if info.get("hook_fired") else "N",
                         budget_str))
+    lines.append("  capability = continuity capability, not an installation verdict")
 
     # O5.7: verification three-layer view with evidence details
     verification = report.get("verification") or {}
