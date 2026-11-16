@@ -19,7 +19,7 @@ known, what is supported, and what a maintainer should check.
 | 8 | **Browser verification runs locally, not in CI.** | CI jobs skip where a browser cannot start, with a stated reason. | `CI_BROWSER_NOT_VERIFIED` — declared, not hidden. |
 | 9 | **SQLite concurrent-index flake.** | Rare failure in `test_concurrent_creation_of_a_fresh_index`. | **INCONCLUSIVE**: not reproduced in bounded re-runs (40 fresh-index pairs, 160 child processes). Deliberately not masked with sleeps or unbounded retries. |
 | 10 | **Native resume is unverified** end to end on every provider. | The command is built and wired; no resume has been observed succeeding. | `NOT_VERIFIED` — never claimed as working. Verifying it needs a paid provider session and writes into a real environment. |
-| 11 | **Model-driven tool selection has no repeatable end-to-end suite.** | It has been *observed* in recorded real-model runs — 3/3 when the prompt names the agent or asks "what was I working on", 1/3 on a bare "continue" — but that is one model, one fixture, three attempts. | `OBSERVED, NOT REPEATABLE`. Contract tests cover the six tools; they do not cover the model choosing them. Do not quote a success rate. |
+| 11 | **Model-driven tool selection has no repeatable end-to-end suite.** | It has been *observed* in recorded real-model runs — 3/3 when the prompt names the agent or asks "what was I working on", 1/3 on a bare "continue" — but that is one model, one fixture, three attempts. | `OBSERVED, NOT REPEATABLE`. Contract tests cover the seven tools for plugin v1.3.0 (six older tools plus `sessionflow_evidence_verify`); they do not cover the model choosing them. Do not quote a success rate. |
 | 12 | **`voyager evidence verify --help` did not list the five outcomes or the exit codes.** | A user writing a script had to read the README (or trigger each state) to learn them. | **FIXED.** The help lists all five outcomes, their exit codes and the `MATCH` caveat. The row is kept so the number stays stable for existing references. |
 | 13 | **Provenance classification covers only codex / claude / zcode.** | `provenance.CLASSIFIERS` has no entry for dsh, grok, cursor, kiro or antigravity, so `classify()` returns `UNKNOWN` for every one of their events. A DSH-only index reports `0.0% classified`, and `provenance enrich --apply` cannot change that. | `DESIGN GAP, NOT A BUG`: no toggle or rescan helps. The grok case is tracked as `GROK_MESSAGE_PROVENANCE_COVERAGE` in code; the DSH case was undocumented until dsh-sessionflow#2 reported it. Adding a classifier requires a structural field in the provider record — do not guess one. |
 | 14 | **`NOT_FOUND_IN_CURRENT_AUDIT` reads as "provider not installed".** | It is the declared state of the five machine-dependent *startup* dimensions, and `verify` reports their strongest value as the provider's `declared`. DSH has no native startup surface, so a machine with 46 indexed DSH sessions still shows `NOT_FOUND_IN_CURRENT_AUDIT` while `session_discovery` is `LIVE_VERIFIED`. | Naming/presentation, not detection: `installed: true` is computed from the path and is correct. A clearer label (or a per-dimension view) is the fix; do not change path probing. |
@@ -37,13 +37,16 @@ known, what is supported, and what a maintainer should check.
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| v1.5.0 | v1.2.0 | 1 | current release (2026-11-14); `evidence_verify` op added (ops 9→10); machine-derived repo scope strict; plugin v1.2.0 needs no upgrade — schema 1 unchanged, seventh tool comes with plugin v1.3.0 |
+| v1.5.0 | v1.3.0 | 1 | **current pairing** (Core release 2026-11-14; plugin release 2026-11-15); seventh tool `sessionflow_evidence_verify` ships in plugin v1.3.0 through the additive Core `evidence_verify` op; bridge schema unchanged |
+| v1.5.0 | v1.2.0 | 1 | historical pairing after Core v1.5.0 before plugin v1.3.0; six tools, no seventh tool; index and bridge schema unchanged |
 | v1.4.1 | v1.2.0 | 1 | released 2026-11-14 (patch); plugin v1.2.0 needs no upgrade — no new op, no schema change |
 | v1.4.0 | v1.2.0 | 1 | released 2026-11-13; plugin v1.2.0 needs no upgrade — no new op, no seventh tool |
 | v1.3.1 | v1.2.0 | 1 | still supported; index readable by v1.4.0 with no migration |
 | v1.3.0 | v1.2.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.2.0 | v1.1.0 | 1 | still supported; index readable by v1.3.1 with no migration |
 | v1.1.0 | v1.1.0 | 1 | upgrade path verified: no row and no schema object changes |
+
+Current plugin contract: `dsh-sessionflow` v1.3.0 exposes **seven** `sessionflow_*` tools; bridge schema is still 1. Indexing/continuation and native resume are separate capabilities; no native resume is claimed as LIVE_VERIFIED.
 
 Bundle compatibility: v1.2.0 bundles are readable by v1.3.1. They carry no
 fingerprint, so `evidence verify` answers `UNVERIFIABLE` and offers the digest to
@@ -171,8 +174,8 @@ kind of operation and `continue` is a write.
 
 ```sh
 # --- stage 1: synthetic only, nothing real is opened ---
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.3.0"
-voyager --version        # must print 1.3.0
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+voyager --version        # must print 1.5.0
 voyager demo             # seeds ~/.voyager/demo.db, separate from the real index
 voyager --db ~/.voyager/demo.db search "authentication"
 voyager --db ~/.voyager/demo.db show codex:demo-auth-01

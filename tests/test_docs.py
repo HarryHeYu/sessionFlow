@@ -399,5 +399,64 @@ class TestChangelogStructure(unittest.TestCase):
                          % ", ".join(unknown))
 
 
+class TestMaintenanceGuide(unittest.TestCase):
+    """The maintained compatibility matrix must name the current pairing.
+
+    Historical rows are deliberately kept: a released pair does not stop being
+    supported when a newer plugin ships. Only the first row is a claim about
+    today.
+    """
+
+    GUIDE = ROOT / "docs" / "MAINTENANCE.md"
+
+    def rows(self):
+        text = self.GUIDE.read_text(encoding="utf-8")
+        start = text.index("## Compatibility Matrix")
+        end = text.find("\n## ", start + 1)
+        section = text[start:end if end != -1 else len(text)]
+        rows = []
+        for line in section.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if len(cells) >= 4 and re.fullmatch(r"v\d+\.\d+\.\d+", cells[0]):
+                rows.append(cells)
+        return rows
+
+    def test_first_row_is_the_released_pairing(self):
+        rows = self.rows()
+        self.assertTrue(rows, "no compatibility rows found in MAINTENANCE.md")
+        self.assertEqual(
+            rows[0][:3], ["v1.5.0", "v1.3.0", "1"],
+            "the first compatibility row must name the current released pairing")
+        self.assertIn(
+            "seven", rows[0][3].lower(),
+            "the current row must state that plugin v1.3.0 has seven tools")
+
+    def test_historical_pairings_are_still_listed(self):
+        pairs = {(row[0], row[1]) for row in self.rows()}
+        historical = [
+            ("v1.5.0", "v1.2.0"),
+            ("v1.4.1", "v1.2.0"),
+            ("v1.4.0", "v1.2.0"),
+            ("v1.3.1", "v1.2.0"),
+        ]
+        missing = [pair for pair in historical if pair not in pairs]
+        self.assertEqual(missing, [], "historical compatibility rows were removed")
+
+    def test_indexing_and_native_resume_are_not_conflated(self):
+        text = self.GUIDE.read_text(encoding="utf-8")
+        self.assertIn(
+            "no native resume is claimed as LIVE_VERIFIED", text,
+            "MAINTENANCE must keep indexing and native resume capability separate")
+
+    def test_supported_agent_list_includes_workbuddy(self):
+        text = self.GUIDE.read_text(encoding="utf-8")
+        self.assertIn("WorkBuddy", text,
+                      "the tenth read-only provider is missing from the guide")
+
+    def test_the_seven_tool_contract_is_not_called_six(self):
+        text = self.GUIDE.read_text(encoding="utf-8")
+        self.assertNotIn("Contract tests cover the six tools", text,
+                         "the historical six-tool contract claim is still current")
+
 if __name__ == "__main__":
     unittest.main()
