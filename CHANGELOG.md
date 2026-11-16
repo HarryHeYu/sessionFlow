@@ -49,7 +49,7 @@ All notable changes to Voyager are documented here. Format loosely follows
   retained session rather than one per pair, and it is computed once per
   `doctor` run instead of once in `run()` plus once in `collect_issues()`.
   Surfaced under `source_migration` in the report dict. Guard:
-  `tests/test_source_migration.py` (24 tests, one POSIX-only), including
+  `tests/test_source_migration.py` (25 tests, one POSIX-only), including
   byte-identical index and content-digest assertions, a structural proof that no
   directory or writable `Store` is opened, and mutation-checked guards.
 

@@ -292,6 +292,17 @@ def test_an_index_without_the_column_is_reported_not_raised(tmp_path):
     assert hashlib.sha256(db.read_bytes()).hexdigest() == before
 
 
+def test_a_unicode_path_still_opens(tmp_path):
+    """Windows users have non-ASCII profile paths; the ro URI must survive them."""
+    root = tmp_path / "索引目录"
+    root.mkdir()
+    store = _pair(root, ["a", "b"], ["a", "b"])
+    store.close()
+    rpt = doctor.check_source_migration(root / "i.db")
+    assert rpt["available"] is True, rpt
+    assert len(rpt["candidates"]) == 1
+
+
 def test_a_corrupt_file_is_reported_not_raised(tmp_path):
     db = tmp_path / "junk.db"
     db.write_bytes(b"this is not a database" * 100)
