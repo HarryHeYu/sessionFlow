@@ -45,6 +45,10 @@ All notable changes to Voyager are documented here. Format loosely follows
   byte-identical index and content-digest assertions, a structural proof that no
   directory or writable `Store` is opened, and mutation-checked guards.
 
+### Fixed
+
+- **Doctor no longer makes a capability state read like an installation verdict.** `summary()` and `doctor` now expose `capability_state` (the unchanged legacy `state` value), `capability_scope = continuity_capability` and `installation_state` derived only from the provider source path. For DSH, `installed: true` and `capability_state: NOT_FOUND_IN_CURRENT_AUDIT` are now shown as two separate facts; path probing and per-dimension capability states are untouched. Synthetic installation regression tests pin the distinction.
+
 ### Changed
 
 - **The continuation bundle's headline now names the rule that chose the

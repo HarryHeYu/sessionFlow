@@ -22,7 +22,7 @@ from voyager.capability_matrix import (
     CONFIGURED, DIMENSIONS, LIVE_VERIFIED, NOT_FOUND, PROVIDERS, STATE_ORDER,
     SUPPORTED, UNIT_VERIFIED, ZERO_TOUCH_LIVE_VERIFIED,
     Evidence, collect_evidence, evidence_ceiling, matrix, provider_state,
-    resolve_cell, summary,
+    provider_status, resolve_cell, summary,
 )
 
 
@@ -227,3 +227,41 @@ def test_the_cli_forwards_db_to_doctor(tmp_path, capsys):
     out = capsys.readouterr().out
     assert str(path) in out, "the report must name the index it actually read"
     assert "threads: 1" in out
+
+# --- capability vs installation are separate facts -------------------------
+
+def test_provider_status_separates_installation_from_capability(tmp_path, monkeypatch):
+    """Issue #2 is not an installation bug: DSH is present but has no startup surface."""
+    from voyager import capability_matrix
+
+    monkeypatch.setitem(capability_matrix.SOURCE_PATHS, "dsh", str(tmp_path))
+    ev = collect_evidence("dsh")
+    assert ev.installed is True
+
+    status = provider_status("dsh", ev)
+    assert status["state"] == NOT_FOUND              # legacy field, unchanged
+    assert status["capability_state"] == NOT_FOUND   # explicit field
+    assert status["capability_scope"] == "continuity_capability"
+    assert status["installed"] is True
+    assert status["installation_state"] == "INSTALLED"
+
+    summary_dsh = summary()["providers"]["dsh"]
+    assert summary_dsh["installation_state"] == "INSTALLED"
+    assert summary_dsh["capability_state"] == NOT_FOUND
+
+
+def test_installed_dsh_renders_as_capability_not_found(tmp_path, monkeypatch):
+    """`NOT_FOUND_IN_CURRENT_AUDIT` must never read as 'DSH is not installed'."""
+    from voyager import capability_matrix
+
+    monkeypatch.setitem(capability_matrix.SOURCE_PATHS, "dsh", str(tmp_path))
+
+    report = doctor.run()
+    info = report["providers"]["dsh"]
+    assert info["installed"] is True
+    assert info["installation_state"] == "INSTALLED"
+    assert info["capability_state"] == NOT_FOUND
+
+    rendered = doctor.render(report)
+    assert "capability" in rendered
+    assert "capability = continuity capability" in rendered
