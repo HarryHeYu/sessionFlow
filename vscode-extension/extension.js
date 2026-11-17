@@ -202,16 +202,23 @@ function openSelector(context) {
       if (msg.type === "ready") {
         await sendOverview();
       } else if (msg.type === "select") {
+        // Bind every detail response to the thread that was requested, so a
+        // late response for an older selection can be discarded by the webview
+        // (the Selector keeps a generation token). A response without this id
+        // is un-attributable and must be ignored.
+        const requested = msg.thread_id;
         const res = await getBridge(context).request("thread_detail", {
-          thread_id: msg.thread_id,
+          thread_id: requested,
         });
         if (res.error) {
           panel.webview.postMessage({
-            type: "detail", ok: false, error: res.error,
+            type: "detail", ok: false, thread_id: requested, error: res.error,
           });
           return;
         }
-        panel.webview.postMessage({ type: "detail", ok: true, data: res.result });
+        panel.webview.postMessage({
+          type: "detail", ok: true, thread_id: requested, data: res.result,
+        });
       } else if (msg.type === "copy") {
         await vscode.env.clipboard.writeText(msg.text || "");
         vscode.window.showInformationMessage("Voyager: copied to clipboard.");

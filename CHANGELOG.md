@@ -68,6 +68,17 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Fixed
 
+- **WorkThread Selector no longer shows a stale thread's detail.** Every
+  `detail` response from the API host now echoes the requested `thread_id`,
+  and the webview applies a response only if it still belongs to the
+  current selection. A late response for an older click can no longer
+  overwrite a newer selection, nor can a stale success clear a newer
+  error; an un-attributable response is ignored. Selecting a thread clears
+  the previous detail immediately. An overview failure is now distinguished
+  from an empty index: the error state no longer renders the
+  "Run voyager scan first" hint. Regression is an executable out-of-order
+  test that runs the shipped inline webview script in a JS sandbox.
+
 - **Doctor no longer makes a capability state read like an installation verdict.** `summary()` and `doctor` now expose `capability_state` (the unchanged legacy `state` value), `capability_scope = continuity_capability` and `installation_state` derived only from the provider source path. For DSH, `installed: true` and `capability_state: NOT_FOUND_IN_CURRENT_AUDIT` are now shown as two separate facts; path probing and per-dimension capability states are untouched. Synthetic installation regression tests pin the distinction.
 
 ### Changed
