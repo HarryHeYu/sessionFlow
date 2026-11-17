@@ -13,7 +13,11 @@
  *                     {type:"select", thread_id}
  *                     {type:"copy", text}
  *   host -> webview : {type:"overview", ok, repo, data|error}
- *                     {type:"detail", ok, data|error}
+ *                     {type:"detail", ok, thread_id, data|error}
+ *
+ * The `thread_id` on every detail message is a correlation token: a response
+ * is applied only if it belongs to the currently selected thread, so an older
+ * request that returns late can never overwrite a newer selection.
  */
 
 function html(nonce) {
@@ -114,7 +118,8 @@ function html(nonce) {
 (function () {
   "use strict";
   const vscode = acquireVsCodeApi();
-  const state = { overview: null, detail: null, selected: null, repo: "", error: null };
+  const state = { overview: null, detail: null, selected: null, repo: "",
+                  error: null, overviewError: null, detailGeneration: 0 };
 
   const $ = (id) => document.getElementById(id);
 
@@ -142,8 +147,9 @@ function html(nonce) {
   function renderBanner() {
     const banner = $("banner");
     banner.textContent = "";
-    if (state.error) {
-      banner.appendChild(el("div", "err", "Error: " + state.error));
+    const err = state.overviewError || state.error;
+    if (err) {
+      banner.appendChild(el("div", "err", "Error: " + err));
     }
   }
 
@@ -152,7 +158,13 @@ function html(nonce) {
     box.textContent = "";
     const threads = (state.overview && state.overview.threads) || [];
     if (!threads.length) {
-      box.appendChild(el("div", "empty", "No active WorkThreads for this repo. Run voyager scan first."));
+      // A failed/empty overview is not the same state as "no WorkThreads
+      // indexed". Never suggest running a scan when the query itself failed.
+      if (state.overviewError) {
+        box.appendChild(el("div", "empty", "WorkThreads could not be loaded."));
+      } else {
+        box.appendChild(el("div", "empty", "No active WorkThreads for this repo. Run voyager scan first."));
+      }
       return;
     }
     threads.forEach(function (t) {
@@ -167,7 +179,13 @@ function html(nonce) {
       if (t.repo_root) card.appendChild(el("span", "meta mono", t.repo_root));
       card.addEventListener("click", function () {
         state.selected = t.id;
+        // Invalidate any in-flight detail request for the previous selection
+        // and drop the stale detail immediately, so the panel never shows a
+        // thread that is no longer selected while the new one loads.
+        state.detailGeneration += 1;
+        state.detail = null;
         renderThreads();
+        renderDetail();
         vscode.postMessage({ type: "select", thread_id: t.id });
       });
       box.appendChild(card);
@@ -253,6 +271,8 @@ function html(nonce) {
 
   $("refresh").addEventListener("click", function () {
     state.error = null;
+    state.overviewError = null;
+    state.detailGeneration += 1;   // in-flight detail responses are now stale
     vscode.postMessage({ type: "ready" });
   });
 
@@ -261,23 +281,34 @@ function html(nonce) {
     if (msg.type === "overview") {
       if (msg.ok) {
         state.overview = msg.data || {};
+        state.overviewError = null;
         state.repo = msg.repo || "";
         state.error = null;
         $("repo").textContent = state.repo || "(not configured)";
         if (!state.selected && state.overview.threads && state.overview.threads.length) {
-          state.selected = state.overview.threads[0].id;
-          vscode.postMessage({ type: "select", thread_id: state.selected });
+          const first = state.overview.threads[0].id;
+          state.selected = first;
+          state.detailGeneration += 1;
+          vscode.postMessage({ type: "select", thread_id: first });
         }
         renderThreads();
         renderDetail();
       } else {
         state.error = msg.error || "unknown error";
+        state.overviewError = state.error;
         state.overview = null;
         renderBanner();
         renderThreads();
         renderDetail();
       }
     } else if (msg.type === "detail") {
+      // Correlation check: ignore responses that (a) carry no thread_id,
+      // (b) belong to a different thread than the current selection.
+      // This is what stops a late response for an old click from overwriting
+      // the detail of a newer click (or its error).
+      if (!msg.thread_id || msg.thread_id !== state.selected) {
+        return;
+      }
       state.detail = msg.ok ? (msg.data || {}) : { error: msg.error || "unknown error" };
       renderDetail();
     }
