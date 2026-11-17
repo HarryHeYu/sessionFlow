@@ -1373,7 +1373,8 @@ def _render_handoff(store: Store, res, args, kind: str) -> int:
 
 
 def _handoff_via_engine(store: Store, args, kind: str,
-                        style: Optional[str] = None, **source) -> int:
+                        style: Optional[str] = None, *,
+                        extra: Optional[dict] = None, **source) -> int:
     """Run the one engine and render it in this command's dialect.
 
     `source` carries the already-resolved entry point (`thread=`, `sessions=`,
@@ -1414,6 +1415,8 @@ def _handoff_via_engine(store: Store, args, kind: str,
         # compiled context is the whole point of the call, so include its text
         # rather than making a client re-open the file it just wrote.
         payload = dict(res)
+        if extra:
+            payload.update(extra)
         ctx_path = res.get("context_path") or res.get("bundle_path")
         if ctx_path:
             try:
@@ -1548,28 +1551,67 @@ def cmd_merge(args) -> int:
 
     # The WorkThread comes first, so the engine can lease it and record the
     # pending attach: a merged handoff is then exactly as safe as a `switch`.
-    tid = _thread_from_merge(store, rows, args)
-    return _handoff_via_engine(store, args, "merge", thread=tid, sessions=rows,
-                               target=getattr(args, "to", None))
+    # Q1-C2: --repo is an additive override for NEW threads only; the chosen
+    # repo and any reuse warning are surfaced in both render paths.
+    merge_info: dict = {}
+    tid = _thread_from_merge(store, rows, args, info=merge_info)
+    rc = _handoff_via_engine(store, args, "merge", thread=tid, sessions=rows,
+                             target=getattr(args, "to", None), extra=merge_info)
+    return rc
 
 
-def _thread_from_merge(store: Store, rows: list, args) -> str:
+def _thread_from_merge(store: Store, rows: list, args, *, info: Optional[dict] = None) -> str:
     """Phase 2: a merge over N sessions yields (or updates) a WorkThread
-    whose member set is exactly those N sessions.  Returns the thread id."""
+    whose member set is exactly those N sessions.  Returns the thread id.
+
+    Q1-C2 (ADR docs/audits/2026-11-q1-c2-explicit-repo.md): an explicit
+    ``--repo`` overrides ``repo_root`` **only when a new thread is created**.
+    Reusing an existing thread never rewrites its repo_root -- a differing
+    explicit value is reported as a warning, not applied (that would be a
+    `relink`, a separate decision).  No change to member set, `ord`, thread
+    identity, Store schema or Bridge schema.  ``info`` is an optional out-dict
+    used by the CLI renderers; it does not change the return contract.
+    """
     sids = {r["id"] for r in rows}
     tid = store.thread_find_by_members(sids)
-    repo_root = next((r["repo_root"] or r["cwd"] for r in rows
-                      if r["repo_root"] or r["cwd"]), None)
-    label = " + ".join("{0}:{1}".format(r["provider"], (r["native_id"] or "")[:10])
-                       for r in rows)
-    title = getattr(args, "thread_title", None) or getattr(args, "goal", None)         or "merge: " + label
+    derived_repo = next((r["repo_root"] or r["cwd"] for r in rows
+                         if r["repo_root"] or r["cwd"]), None)
+    explicit_repo = getattr(args, "repo", None)
+    repo_root = derived_repo
+    warning = None
     if tid:
-        store.thread_touch(tid)
+        existing = store.thread_get(tid)
         action = "updated"
+        # Reuse: never rewrite repo_root. A differing explicit value is a
+        # warning only; relinking is a separate, deliberate operation.
+        repo_root = existing["repo_root"] if existing else None
+        if explicit_repo and existing and existing["repo_root"] != explicit_repo:
+            warning = ("thread {0} kept repo_root={1!r}; --repo {2!r} was "
+                       "ignored because the thread already exists (use "
+                       "relink to change an existing thread's repo)").format(
+                           tid, existing["repo_root"], explicit_repo)
+        store.thread_touch(tid)
     else:
-        tid = store.thread_create(repo_root=repo_root, title=title,
-                                  goal=getattr(args, "goal", None))
+        if explicit_repo:
+            repo_root = explicit_repo
         action = "created"
+        tid = store.thread_create(repo_root=repo_root,
+                                  title=getattr(args, "thread_title", None) or getattr(args, "goal", None)
+                                  or "merge: " + " + ".join(
+                                      "{0}:{1}".format(r["provider"], (r["native_id"] or "")[:10])
+                                      for r in rows),
+                                  goal=getattr(args, "goal", None))
+    if info is not None:
+        info.update({
+            "thread_id": tid,
+            "thread_action": action,
+            "repo_root": repo_root,
+            "repo_source": "explicit" if (explicit_repo and action == "created") else "derived",
+        })
+        if warning:
+            info["repo_warning"] = warning
+    if warning and not getattr(args, "json", False):
+        print("warning: " + warning, file=sys.stderr)
     # Attach in the order the caller listed the sessions, deduplicated.  `sids`
     # is a set, and iterating it here would hand `thread_sessions.ord` whatever
     # order the set happened to have -- which varies between processes, and now
@@ -2151,6 +2193,9 @@ def main(argv=None) -> int:
     sp = sub.add_parser("merge", parents=[common],
                         help="synthesize multiple sessions into a continuation bundle")
     sp.add_argument("sessions", nargs="+", help="session ids/prefixes to merge")
+    sp.add_argument("--repo",
+                    help="explicit repo_root for a NEW WorkThread (ignored with a "
+                         "warning when reusing an existing thread; no Store/Bridge schema change)")
     sp.add_argument("--thread-title")
     sp.add_argument("--goal", help="explicit primary goal for the next agent")
     sp.add_argument("--to", help="target agent (claude, codex, grok)")

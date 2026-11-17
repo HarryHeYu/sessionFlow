@@ -7,6 +7,9 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Added
 
+- **`voyager merge --repo <path>` names the repository of a NEW WorkThread** (Q1-C2, ADR `docs/audits/2026-11-q1-c2-explicit-repo.md`). Without the flag the first usable session row still supplies repo_root. With it, a newly created thread uses the explicit path, so reversing the session order no longer changes the repo label. Reusing an existing thread NEVER rewrites its repo_root: a differing --repo is reported as a warning (JSON: `repo_warning`; human: stderr) and changing an existing thread remains a separate `relink` decision. Member set, ord, thread identity, bundle order, Store schema and the Bridge schema (version 1) are unchanged. Red/green tests cover reverse-order merges, conflicting repos, old behaviour and JSON output.
+
+
 - **WorkBuddy desktop is now a read-only indexed provider.** Conversations in
   `~/.workbuddy-ai/projects/<project>/<sessionId>.jsonl` are parsed into the
   normal Session/Event model: user and assistant messages, reasoning, tool
