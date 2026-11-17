@@ -72,6 +72,7 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-workbuddy-provider-recon.md](audits/2026-11-workbuddy-provider-recon.md) | AUDIT | maintainer | frozen — 2026-11-16 WorkBuddy structural reconnaissance: install version, JSONL shape, read-only adapter decision, no real conversation text read |
 | [audits/2026-11-dsh-provenance-structure.md](audits/2026-11-dsh-provenance-structure.md) | AUDIT | maintainer | frozen — 2026-11-16 DSH structural provenance sample: source.kind distribution, classifier decision, no real message text read |
 | [audits/2026-11-q1-c2-explicit-repo.md](audits/2026-11-q1-c2-explicit-repo.md) | DESIGN | maintainer | frozen — 2026-11-16 Q1-C2 decision: additive `merge --repo` for new threads only; merge identity unchanged; relink separate |
+| [audits/2026-11-ui-scope-matrix.md](audits/2026-11-ui-scope-matrix.md) | DESIGN | maintainer | frozen — 2026-11-17 all eight #32 candidate rows: surface, verdict, gap, risk, evidence; real-bridge + real-webview interaction evidence |
 
 ## Performance evidence
 
