@@ -23,8 +23,8 @@ from .scanner import (MAX_WRITE_FAILURES,
 from .store import (IndexUnreadableError, Store, default_db_path,
                     lease_state, open_read)
 from .integrations.hook import cmd_hook_startup
-from .util import (fmt_ts, same_repo_loose, parse_when as _parse_when,
-                   force_utf8_stdio)
+from .util import (fmt_ts, same_repo, same_repo_loose,
+                   parse_when as _parse_when, force_utf8_stdio)
 from ._version import get_version
 
 
@@ -1567,28 +1567,42 @@ def _thread_from_merge(store: Store, rows: list, args, *, info: Optional[dict] =
     Q1-C2 (ADR docs/audits/2026-11-q1-c2-explicit-repo.md): an explicit
     ``--repo`` overrides ``repo_root`` **only when a new thread is created**.
     Reusing an existing thread never rewrites its repo_root -- a differing
-    explicit value is reported as a warning, not applied (that would be a
-    `relink`, a separate decision).  No change to member set, `ord`, thread
-    identity, Store schema or Bridge schema.  ``info`` is an optional out-dict
-    used by the CLI renderers; it does not change the return contract.
+    explicit value is reported as a warning, not applied.  No command in this
+    release changes an existing thread's repository.  No change to member set,
+    `ord`, thread identity, Store schema or Bridge schema.  ``info`` is an
+    optional out-dict used by the CLI renderers; it does not change the return
+    contract.
+
+    ``repo_source`` describes where the reported ``repo_root`` came from:
+    ``explicit`` = a new thread used ``--repo``; ``derived`` = a new thread used
+    the first usable session row (the old behaviour); ``existing`` = an already
+    existing thread was reused and kept its stored root.  Path comparisons for
+    the reuse warning use the project's strict :func:`same_repo` rule, so
+    ``E:/repo/A``, ``E:\\repo\\A\\`` and ``e:/repo/a`` are the same repository.
     """
     sids = {r["id"] for r in rows}
     tid = store.thread_find_by_members(sids)
     derived_repo = next((r["repo_root"] or r["cwd"] for r in rows
                          if r["repo_root"] or r["cwd"]), None)
     explicit_repo = getattr(args, "repo", None)
+    if isinstance(explicit_repo, str) and explicit_repo:
+        # --repo is a repo root, not a substring filter like other commands'
+        # --repo flags: expand `~` here rather than in the generic argv pass.
+        explicit_repo = os.path.expanduser(explicit_repo)
     repo_root = derived_repo
     warning = None
     if tid:
         existing = store.thread_get(tid)
         action = "updated"
         # Reuse: never rewrite repo_root. A differing explicit value is a
-        # warning only; relinking is a separate, deliberate operation.
+        # warning only; changing an existing thread's repository is a separate
+        # persisted-identity decision and is not available in this release.
         repo_root = existing["repo_root"] if existing else None
-        if explicit_repo and existing and existing["repo_root"] != explicit_repo:
+        if explicit_repo and existing and not same_repo(existing["repo_root"],
+                                                         explicit_repo):
             warning = ("thread {0} kept repo_root={1!r}; --repo {2!r} was "
-                       "ignored because the thread already exists (use "
-                       "relink to change an existing thread's repo)").format(
+                       "ignored because the thread already exists; this merge "
+                       "does not change an existing thread's repository").format(
                            tid, existing["repo_root"], explicit_repo)
         store.thread_touch(tid)
     else:
@@ -1606,7 +1620,8 @@ def _thread_from_merge(store: Store, rows: list, args, *, info: Optional[dict] =
             "thread_id": tid,
             "thread_action": action,
             "repo_root": repo_root,
-            "repo_source": "explicit" if (explicit_repo and action == "created") else "derived",
+            "repo_source": ("explicit" if (explicit_repo and action == "created")
+                            else "existing" if action == "updated" else "derived"),
         })
         if warning:
             info["repo_warning"] = warning

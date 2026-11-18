@@ -7,7 +7,10 @@ Invariants pinned here:
 * an existing thread keeps its repo_root; a differing --repo is a warning,
   not a rewrite;
 * member set, ord, thread identity and bundle order are unchanged;
-* Store / Bridge schema and BRIDGE_SCHEMA_VERSION are untouched.
+* Store / Bridge schema and BRIDGE_SCHEMA_VERSION are untouched;
+* repo_source is explicit (new thread + --repo), derived (new thread, first
+  usable row), or existing (reused thread keeps its stored repo_root);
+* the reuse warning never names an unimplemented relink command.
 """
 from __future__ import annotations
 
@@ -128,7 +131,9 @@ def test_reuse_keeps_repo_root_and_warns(store):
     assert store.thread_get(tid2)["repo_root"] == "E:/repo/EXPLICIT"
     assert info["repo_root"] == "E:/repo/EXPLICIT"
     assert "repo_warning" in info and "ignored" in info["repo_warning"]
+    assert "relink" not in info["repo_warning"]
     assert info["thread_action"] == "updated"
+    assert info["repo_source"] == "existing"   # kept from the existing thread
 
 
 def test_reuse_with_matching_repo_does_not_warn(store):
@@ -137,6 +142,28 @@ def test_reuse_with_matching_repo_does_not_warn(store):
     info = {}
     _thread_from_merge(store, rows, _args(repo="E:/repo/EXPLICIT"), info=info)
     assert "repo_warning" not in info
+    assert info["repo_source"] == "existing"
+
+
+def test_reuse_same_repo_different_path_spelling_does_not_warn(store):
+    rows = _fresh(store)
+    _thread_from_merge(store, rows, _args(repo="E:/repo/EXPLICIT"))
+    info = {}
+    _thread_from_merge(store, rows, _args(repo="e:\\repo\\explicit\\"), info=info)
+    assert "repo_warning" not in info
+    assert store.thread_get(store.thread_find_by_members({"codex:1", "claude:2"}))["repo_root"] == "E:/repo/EXPLICIT"
+
+
+def test_explicit_repo_tilde_is_expanded(store, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    rows = [("codex:tilde", "codex", "E:/repo/OLD")]
+    _sessions(store, rows)
+    info = {}
+    tid = _thread_from_merge(store, [store.session("codex:tilde")[0]],
+                             _args(repo="~/project"), info=info)
+    assert store.thread_get(tid)["repo_root"] == str(tmp_path / "project")
+    assert info["repo_source"] == "explicit"
 
 
 # --- AC5: single-repo, no --repo unchanged -------------------------------
