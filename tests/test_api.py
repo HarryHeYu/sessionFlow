@@ -120,6 +120,35 @@ def test_bridge_round_trip(db):
         p.wait(timeout=10)
 
 
+def test_bridge_survives_a_malformed_op_and_answers_the_next_request(db):
+    """One bad request envelope must not kill a long-lived bridge process.
+
+    The VS Code extension keeps a single stdio bridge for the lifetime of the
+    panel. `handle_request()` used to call `_OPS.get(op)` before its try block,
+    so `{"op": []}` killed the loop and every later valid request hung.
+    """
+    checkout = Path(__file__).resolve().parents[1]
+    p = subprocess.Popen(
+        [sys.executable, "-m", "voyager.api", "--db", str(db)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", cwd=str(checkout))
+    try:
+        reqs = [
+            {"id": 1, "op": "integration_info", "params": {}},
+            {"id": 2, "op": [], "params": {}},
+            {"id": 3, "op": "integration_info", "params": {}},
+        ]
+        p.stdin.write("\n".join(json.dumps(r) for r in reqs) + "\n")
+        p.stdin.flush()
+        answers = [json.loads(p.stdout.readline()) for _ in reqs]
+        assert "error" in answers[1]
+        assert answers[2]["id"] == 3
+        assert answers[2]["result"]["schema_version"] == 1
+    finally:
+        p.terminate()
+        p.wait(timeout=10)
+
+
 def test_overview_reads_events_only_for_the_rows_it_returns(tmp_path,
                                                             monkeypatch):
     """`overview` fetched every session's events, then kept `limit` rows.
