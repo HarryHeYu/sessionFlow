@@ -15,6 +15,7 @@ Invariants pinned here:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -162,7 +163,7 @@ def test_explicit_repo_tilde_is_expanded(store, monkeypatch, tmp_path):
     info = {}
     tid = _thread_from_merge(store, [store.session("codex:tilde")[0]],
                              _args(repo="~/project"), info=info)
-    assert store.thread_get(tid)["repo_root"] == str(tmp_path / "project")
+    assert os.path.normpath(store.thread_get(tid)["repo_root"]) == os.path.normpath(str(tmp_path / "project"))
     assert info["repo_source"] == "explicit"
 
 
