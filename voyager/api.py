@@ -568,9 +568,25 @@ _OPS = {
 
 
 def handle_request(req: Dict[str, Any], db: Optional[Path] = None) -> Dict[str, Any]:
+    # Validate the envelope BEFORE touching the op registry. A malformed JSON
+    # line is still a request: it must get an error response, not kill the
+    # long-lived stdio loop used by the VS Code client. `_OPS.get()` with an
+    # unhashable `op` (a list or dict) raises before the old try block.
+    if not isinstance(req, dict):
+        return {"id": None, "error": "request must be a JSON object"}
     rid = req.get("id")
     op = req.get("op")
-    params = req.get("params") or {}
+    if not isinstance(op, str):
+        return {"id": rid,
+                "error": "invalid op: expected a string, got {0}".format(
+                    type(op).__name__)}
+    params = req.get("params", {})
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        return {"id": rid,
+                "error": "invalid params: expected a JSON object, got {0}".format(
+                    type(params).__name__)}
     fn = _OPS.get(op)
     if fn is None:
         return {"id": rid, "error": f"unknown op: {op!r} (ops: {sorted(_OPS)})"}

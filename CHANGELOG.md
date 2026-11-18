@@ -71,6 +71,16 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Fixed
 
+- **One malformed request can no longer kill the stdio API bridge.** The
+  request envelope is validated before op dispatch: a non-object request, a
+  non-string `op` and a non-object `params` now receive a JSON error response.
+  Previously `_OPS.get(op)` ran before the exception guard, so `{"op": []}`
+  raised `TypeError` and terminated `voyager api serve`; the VS Code client's
+  long-lived bridge then went silent for every later request. An executable
+  subprocess test sends a good request, a malformed `op`, and another good
+  request, and requires all three answers. No op response shape or Bridge
+  schema version changed.
+
 - **WorkThread Selector no longer shows a stale thread's detail.** Every
   `detail` response from the API host now echoes the requested `thread_id`,
   and the webview applies a response only if it still belongs to the
