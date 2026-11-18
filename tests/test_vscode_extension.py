@@ -268,6 +268,73 @@ def test_one_click_switch_command_is_wired_end_to_end(pkg, extension_js):
     ops_block = api_text.split("_OPS = {", 1)[1].split("}", 1)[0]
     assert "handoff" not in ops_block
 
+_ONE_CLICK_DRIVER = r"""
+const fs = require('fs'), vm = require('vm'), events = require('events');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const commands = new Map();
+let sent = null;
+const vscode = {
+  workspace: {
+    getConfiguration: () => ({}),
+    workspaceFolders: [{ uri: { fsPath: 'E:/repo/demo' } }],
+    openTextDocument: async () => ({}),
+  },
+  window: {
+    createOutputChannel: () => ({ appendLine() {}, clear() {}, show() {}, dispose() {} }),
+    createWebviewPanel: () => ({ webview: { html: '', postMessage() {}, onDidReceiveMessage() {} }, onDidDispose() {}, reveal() {} }),
+    showInputBox: async () => null,
+    showQuickPick: async () => 'codex',
+    showInformationMessage() {}, showErrorMessage() {},
+    createTerminal: () => ({ show() {}, sendText(text) { sent = text; } }),
+    registerTreeDataProvider() {},
+  },
+  commands: {
+    registerCommand(name, fn) { commands.set(name, fn); return { dispose() {} }; },
+    executeCommand() {},
+  },
+  env: { clipboard: { writeText: async () => {} } },
+  EventEmitter: class { constructor() { this.event = () => ({ dispose() {} }); } fire() {} },
+  TreeItem: class { constructor(label) { this.label = label; } },
+  ViewColumn: { Beside: 2 },
+};
+const sandbox = {
+  require(name) {
+    if (name === 'vscode') return vscode;
+    if (name === 'child_process') return { spawn: () => ({
+      stdout: new events.EventEmitter(), stderr: new events.EventEmitter(),
+      stdin: { write() {}, end() {} }, kill() {}, on() {},
+    }) };
+    if (name === './composer' || name === './timeline' || name === './selector') return { html: () => '' };
+    throw new Error('unexpected require ' + name);
+  },
+  module: { exports: {} }, exports: {}, console, process, setTimeout, clearTimeout,
+};
+vm.createContext(sandbox);
+vm.runInContext(src, sandbox, { filename: 'extension.js' });
+sandbox.module.exports.activate({ subscriptions: [] });
+(async () => {
+  const fn = commands.get('voyager.switchThread');
+  if (!fn) throw new Error('switchThread command not registered');
+  await fn({ threadId: 'thr-EXPECTED', contextValue: 'thread' });
+  console.log(JSON.stringify({ sent }));
+})();
+"""
+
+
+def test_one_click_switch_passes_the_selected_thread(tmp_path):
+    """A right-click switch must carry the thread the user clicked."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    driver = tmp_path / "one-click-switch-driver.js"
+    driver.write_text(_ONE_CLICK_DRIVER, encoding="utf-8")
+    proc = subprocess.run([node, str(driver), str(EXT / "extension.js")],
+                          capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    verdict = json.loads(proc.stdout)
+    assert '--thread "thr-EXPECTED"' in verdict["sent"], (
+        "selected thread was dropped: %r" % verdict["sent"])
+
 # --- UI MVP: WorkThread Selector + evidence caveats ------------------------
 
 def test_selector_command_is_wired(pkg, extension_js):

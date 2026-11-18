@@ -463,7 +463,13 @@ async function switchThread(context, item) {
     cwd: repoPath() || undefined,
   });
   terminal.show(true);
-  terminal.sendText(`voyager switch ${target}`);
+  // The tree item is the user's explicit choice. Passing only the target
+  // would make the CLI resolve "the current thread" again, which can be a
+  // different thread when the repo has more than one active WorkThread.
+  // JSON.stringify quotes the id so a surprising character is data, not shell
+  // syntax; generated ids are simple, but the boundary should still be safe.
+  const selectedThread = JSON.stringify(String(item.threadId));
+  terminal.sendText(`voyager switch ${target} --thread ${selectedThread}`);
   vscode.window.showInformationMessage(
     `Voyager: handing the WorkThread to ${target} (lease + continuation + launch).`
   );
