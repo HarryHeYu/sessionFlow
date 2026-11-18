@@ -81,6 +81,16 @@ All notable changes to Voyager are documented here. Format loosely follows
   request, and requires all three answers. No op response shape or Bridge
   schema version changed.
 
+- **VS Code one-click switch now honours the selected WorkThread.** The tree
+  item already carried `item.threadId`, but the handler sent only
+  `voyager switch <target>` and let the CLI resolve "current" again. With more
+  than one active WorkThread in the repo, that could lease and continue a
+  different thread from the one the user clicked. The terminal command now
+  includes `--thread "<selected id>"`; the id is JSON-quoted so unexpected
+  characters stay data. A node:vm regression executes the shipped
+  `extension.js` with a minimal host stub and fails when the selected id is
+  dropped. No new API op, no Store/Bridge schema change.
+
 - **WorkThread Selector no longer shows a stale thread's detail.** Every
   `detail` response from the API host now echoes the requested `thread_id`,
   and the webview applies a response only if it still belongs to the
