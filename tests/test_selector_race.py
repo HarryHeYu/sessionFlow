@@ -67,38 +67,81 @@ const ctx={
 vm.createContext(ctx);
 vm.runInContext(mm[1], ctx);
 function deliver(type, extra){ msgHandler({data:Object.assign({type},extra)}); }
-function shown(){ const t=byId['detail'].textContent;
-  return { A:t.includes('THREAD-A'), B:t.includes('THREAD-B'), err:t.includes('B failed') }; }
+function clickThread(i){
+  const cards=byId['threads'].children.filter(c=>String(c.className).indexOf('thread')===0);
+  cards[i].fire('click');
+}
+function lastOf(type){ const xs=sent.filter(m=>m.type===type); return xs[xs.length-1]||{}; }
+function shown(){
+  const t=byId['detail'].textContent;
+  return { A:t.includes('THREAD-A'), B:t.includes('THREAD-B'), err:t.includes('B failed'),
+           newA:t.includes('NEW-A'), staleA:t.includes('STALE-A'),
+           newB:t.includes('NEW-B'), loading:t.includes('Loading thread detail') };
+}
 
 const A={id:'THREAD-A',title:'Alpha',status:'active',members:1,updated_at:1};
 const B={id:'THREAD-B',title:'Beta',status:'active',members:1,updated_at:2};
 const dA={thread:A,members:[],lease:{}};
 const dB={thread:B,members:[],lease:{}};
+const dAold={thread:Object.assign({},A,{title:'STALE-A'}),members:[],lease:{}};
+const dAnew={thread:Object.assign({},A,{title:'NEW-A'}),members:[],lease:{}};
+const dBnew={thread:Object.assign({},B,{title:'NEW-B'}),members:[],lease:{}};
 const out={};
 
-deliver('overview',{ok:true,repo:'/r',data:{threads:[A,B],recent_sessions:[]}});
-const cards=byId['threads'].children.filter(c=>String(c.className).indexOf('thread')===0);
-cards[1].fire('click');                       // select B (newer request)
-// The host now echoes the requested thread_id on every detail response.
-deliver('detail',{ok:true,thread_id:'THREAD-B',data:dB});   // B returns first
-deliver('detail',{ok:true,thread_id:'THREAD-A',data:dA});   // A returns late (stale)
-out.afterLateA=shown();                       // want B=true, A=false
+// Initial overview auto-selects the first thread. Capture its generation: it
+// is the token of the first (A1) in-flight request.
+deliver('overview',{ok:true,repo:'/r',generation:0,data:{threads:[A,B],recent_sessions:[]}});
+const a1=lastOf('select');
 
-// a response without a correlation id is un-attributable and must be ignored
-deliver('detail',{ok:true,data:dA});
-out.uncorrelatedIgnored=shown();              // still B, never A
+// A1 in flight, B requested, then A2 requested. A2 returns first; A1 arrives
+// late. A2 (and only A2) must remain visible.
+clickThread(1); const b1=lastOf('select');
+clickThread(0); const a2=lastOf('select');
+deliver('detail',{ok:true,thread_id:a2.thread_id,generation:a2.generation,data:dAnew});
+deliver('detail',{ok:true,thread_id:a1.thread_id,generation:a1.generation,data:dAold});
+out.sameThread=shown();
 
-// error must not be overwritten by a stale success
-deliver('overview',{ok:true,repo:'/r',data:{threads:[A,B],recent_sessions:[]}});
-cards[1].fire('click');
-deliver('detail',{ok:false,thread_id:'THREAD-B',error:'B failed'});
-deliver('detail',{ok:true,thread_id:'THREAD-A',data:dA});
-out.afterStaleOnError=shown();                // want err=true, A=false
+// A response carrying the current generation but the wrong thread is still
+// un-attributable and must not mutate the panel.
+clickThread(1); const b2=lastOf('select');
+deliver('detail',{ok:true,thread_id:'THREAD-A',generation:b2.generation,data:dAnew});
+out.crossThreadIgnored=shown();
 
-// core error must not render the empty-state scan hint
-deliver('overview',{ok:false,error:'core unavailable'});
+// Missing correlation fields are ignored too.
+deliver('detail',{ok:true,data:dAold});
+out.uncorrelatedIgnored=shown();
+
+// A fresh error must not be overwritten by an old success.
+clickThread(1); const b3=lastOf('select');
+deliver('detail',{ok:false,thread_id:b3.thread_id,generation:b3.generation,error:'B failed'});
+deliver('detail',{ok:true,thread_id:a1.thread_id,generation:a1.generation,data:dAnew});
+out.afterStaleOnError=shown();
+
+// Refresh invalidates in-flight detail requests even when the thread id stays
+// the same; the ready message must carry an advanced overview generation.
+clickThread(1); const b4=lastOf('select');
+deliver('detail',{ok:true,thread_id:b4.thread_id,generation:b4.generation,data:dB});
+const beforeRefresh=shown();
+byId['refresh'].fire('click');
+const ready=lastOf('ready');
+const afterRefresh=shown();
+deliver('detail',{ok:true,thread_id:b4.thread_id,generation:b4.generation,data:dAold});
+out.refresh={ beforeB:beforeRefresh.B, generation:ready.generation,
+              cleared:afterRefresh.loading, staleIgnored:!shown().staleA };
+
+// Core errors must not render the "run scan" empty-state hint.
+deliver('overview',{ok:false,error:'core unavailable',generation:ready.generation});
 out.coreError={banner:byId['banner'].textContent,
                scanHint:byId['threads'].textContent.includes('Run voyager scan')};
+
+// A disposed webview must ignore every late response.
+deliver('overview',{ok:true,repo:'/r',generation:ready.generation,data:{threads:[A,B],recent_sessions:[]}});
+clickThread(1); const b5=lastOf('select');
+deliver('detail',{ok:true,thread_id:b5.thread_id,generation:b5.generation,data:dB});
+const beforeDispose=shown();
+deliver('dispose',{});
+deliver('detail',{ok:true,thread_id:b5.thread_id,generation:b5.generation,data:dBnew});
+out.dispose={before:beforeDispose,after:shown()};
 console.log(JSON.stringify(out));
 """
 
@@ -119,25 +162,40 @@ def driver_verdict(tmp_path_factory):
     return json.loads(proc.stdout)
 
 
-def test_late_stale_detail_does_not_overwrite_newer_selection(driver_verdict):
-    """A first, B second; B returns then late A -> detail must stay on B."""
-    got = driver_verdict["afterLateA"]
-    assert got["B"] is True and got["A"] is False, (
-        "stale A overwrote newer B selection: %r" % got)
+def test_same_thread_old_response_cannot_beat_newer_generation(driver_verdict):
+    """A1 -> B -> A2; A2 returns first and the late A1 must be discarded."""
+    got = driver_verdict["sameThread"]
+    assert got["newA"] is True and got["staleA"] is False, (
+        "same-thread generation was not enforced: %r" % got)
 
 
-def test_detail_without_correlation_id_is_ignored(driver_verdict):
-    """An un-attributable response must not mutate the current detail."""
+def test_response_for_another_thread_is_ignored_even_with_current_generation(driver_verdict):
+    got = driver_verdict["crossThreadIgnored"]
+    assert got["A"] is False and got["B"] is False, (
+        "a response for another thread mutated the panel: %r" % got)
+
+
+def test_detail_without_correlation_fields_is_ignored(driver_verdict):
+    """Both thread_id and generation are mandatory correlation tokens."""
     got = driver_verdict["uncorrelatedIgnored"]
-    assert got["B"] is True and got["A"] is False, (
-        "a detail response without thread_id changed the panel: %r" % got)
+    assert got["A"] is False and got["B"] is False, (
+        "an un-correlated detail response changed the panel: %r" % got)
 
 
 def test_stale_success_does_not_clear_newer_error(driver_verdict):
     """B fails, then late A success must not replace B's error with A."""
     got = driver_verdict["afterStaleOnError"]
-    assert got["err"] is True and got["A"] is False, (
+    assert got["err"] is True and got["newA"] is False, (
         "stale A success cleared B's error: %r" % got)
+
+
+def test_refresh_invalidates_in_flight_detail_and_advances_generation(driver_verdict):
+    got = driver_verdict["refresh"]
+    assert got["beforeB"] is True, "B detail was not shown before refresh"
+    assert isinstance(got["generation"], int) and got["generation"] > 0, (
+        "refresh ready message lost its generation: %r" % got)
+    assert got["cleared"] is True, "refresh did not drop the stale detail"
+    assert got["staleIgnored"] is True, "a pre-refresh response returned after refresh"
 
 
 def test_core_error_does_not_render_empty_state_hint(driver_verdict):
@@ -145,3 +203,20 @@ def test_core_error_does_not_render_empty_state_hint(driver_verdict):
     got = driver_verdict["coreError"]
     assert "core unavailable" in got["banner"]
     assert got["scanHint"] is False, "error state rendered the 'run scan' empty hint"
+
+
+def test_disposed_webview_ignores_late_responses(driver_verdict):
+    got = driver_verdict["dispose"]
+    assert got["before"]["B"] is True, "B detail was not shown before dispose"
+    assert got["after"]["B"] is True and got["after"]["newB"] is False, (
+        "a late response mutated a disposed webview: %r" % got)
+
+
+def test_extension_host_echoes_generation_and_guards_disposed_panel():
+    src = (EXT / "extension.js").read_text(encoding="utf-8")
+    assert 'generation: msg.generation' in src, (
+        "the host must echo the generation token on detail responses")
+    assert 'generation: generation' in src, (
+        "the host must echo the generation token on overview responses")
+    assert 'if (disposed' in src, (
+        "the host must stop posting to a disposed selector panel")
