@@ -73,6 +73,12 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-dsh-provenance-structure.md](audits/2026-11-dsh-provenance-structure.md) | AUDIT | maintainer | frozen — 2026-11-16 DSH structural provenance sample: source.kind distribution, classifier decision, no real message text read |
 | [audits/2026-11-q1-c2-explicit-repo.md](audits/2026-11-q1-c2-explicit-repo.md) | DESIGN | maintainer | frozen — 2026-11-16 Q1-C2 decision: additive `merge --repo` for new threads only; merge identity unchanged; relink separate |
 | [audits/2026-11-ui-scope-matrix.md](audits/2026-11-ui-scope-matrix.md) | DESIGN | maintainer | frozen — 2026-11-17 all eight #32 candidate rows: surface, verdict, gap, risk, evidence; real-bridge + real-webview interaction evidence |
+| [audits/2026-11-18-full-project-module-matrix.md](audits/2026-11-18-full-project-module-matrix.md) | AUDIT | maintainer | frozen — 2026-11-18 Core/Plugin module facts before the independent reviews |
+| [audits/2026-11-18-jyy-systems-review.md](audits/2026-11-18-jyy-systems-review.md) | AUDIT | maintainer | frozen — 2026-11-18 JYY-method systems review; minimum reproductions and state-machine findings |
+| [audits/2026-11-18-jyy1-engineering-review.md](audits/2026-11-18-jyy1-engineering-review.md) | AUDIT | maintainer | frozen — 2026-11-18 Jyy1-method engineering review; coverage gate and bridge fault injection |
+| [audits/2026-11-18-cross-review-verdicts.md](audits/2026-11-18-cross-review-verdicts.md) | AUDIT | maintainer | frozen — 2026-11-18 cross-review verdict table and fix threshold |
+| [audits/2026-11-18-continuity-effectiveness-benchmark.md](audits/2026-11-18-continuity-effectiveness-benchmark.md) | EXPERIMENT_REPORT | maintainer | frozen — 2026-11-18 synthetic A–H continuity preparation benchmark; no LLM, no live claim |
+| [audits/2026-11-18-context-intelligence-research.md](audits/2026-11-18-context-intelligence-research.md) | DESIGN | maintainer | frozen — 2026-11-18 seven directions, two small deterministic experiments, no roadmap commitment |
 
 ## Performance evidence
 
