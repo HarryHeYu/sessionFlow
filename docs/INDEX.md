@@ -80,6 +80,8 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-18-continuity-effectiveness-benchmark.md](audits/2026-11-18-continuity-effectiveness-benchmark.md) | EXPERIMENT_REPORT | maintainer | frozen — 2026-11-18 synthetic A–H continuity preparation benchmark; no LLM, no live claim |
 | [audits/2026-11-18-context-intelligence-research.md](audits/2026-11-18-context-intelligence-research.md) | DESIGN | maintainer | frozen — 2026-11-18 seven directions, two small deterministic experiments, no roadmap commitment |
 | [audits/2026-11-18-future-rnd-route.md](audits/2026-11-18-future-rnd-route.md) | DESIGN | maintainer | frozen — 2026-11-18 evidence-based direction ranking; not an approved roadmap |
+| [audits/2026-11-19-reproducible-continuity-benchmark.md](audits/2026-11-19-reproducible-continuity-benchmark.md) | EXPERIMENT_REPORT | maintainer | maintained — in-repo synthetic harness: six metrics, four baselines + equal budget, hold-out I, quality gates |
+| [audits/2026-11-19-context-intelligence-experiment.md](audits/2026-11-19-context-intelligence-experiment.md) | DESIGN | maintainer | frozen — ADR: equal-budget command down-weight experiment; marginal gain, no product ranking change |
 
 ## Performance evidence
 
