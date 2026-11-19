@@ -82,6 +82,7 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-18-future-rnd-route.md](audits/2026-11-18-future-rnd-route.md) | DESIGN | maintainer | frozen — 2026-11-18 evidence-based direction ranking; not an approved roadmap |
 | [audits/2026-11-19-reproducible-continuity-benchmark.md](audits/2026-11-19-reproducible-continuity-benchmark.md) | EXPERIMENT_REPORT | maintainer | maintained — in-repo synthetic harness: six metrics, four baselines + equal budget, hold-out I, quality gates |
 | [audits/2026-11-19-context-intelligence-experiment.md](audits/2026-11-19-context-intelligence-experiment.md) | DESIGN | maintainer | frozen — ADR: equal-budget command down-weight experiment; marginal gain, no product ranking change |
+| [audits/2026-11-20-extension-host-e2e-gate.md](audits/2026-11-20-extension-host-e2e-gate.md) | AUDIT | maintainer | frozen — Core #59 real Extension Host blocked in sandbox (no GUI); isolated harness prepared, NOT VERIFIED |
 
 ## Performance evidence
 
