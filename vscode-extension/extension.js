@@ -52,8 +52,38 @@ function getBridge(context) {
   child.stderr.on("data", (d) =>
     stderrChannel.appendLine("[voyager api stderr] " + d.toString())
   );
+
   const pending = new Map();
   let buffer = "";
+  let dead = null;
+
+  function failPending(reason) {
+    for (const [id, entry] of pending) {
+      clearTimeout(entry.timer);
+      pending.delete(id);
+      entry.reject(reason);
+    }
+  }
+
+  function retire(reason) {
+    if (dead) return;
+    dead = reason instanceof Error ? reason : new Error(reason);
+    failPending(dead);
+    // Never hand an exited/failed child to the next caller: a later request
+    // would write into a dead stdin and hang until its own timeout.
+    if (bridge && bridge.child === child) bridge = null;
+  }
+
+  child.on("error", (e) =>
+    retire(new Error("voyager api spawn failed: " + (e && e.message ? e.message : e)))
+  );
+  child.on("exit", (code, signal) =>
+    retire(new Error("voyager api exited (code=" + code + ", signal=" + signal + ")"))
+  );
+  child.on("close", (code, signal) =>
+    retire(new Error("voyager api closed (code=" + code + ", signal=" + signal + ")"))
+  );
+
   child.stdout.on("data", (d) => {
     buffer += d.toString();
     let idx;
@@ -63,10 +93,11 @@ function getBridge(context) {
       if (!line) continue;
       try {
         const msg = JSON.parse(line);
-        const resolve = pending.get(msg.id);
-        if (resolve) {
+        const entry = pending.get(msg.id);
+        if (entry) {
           pending.delete(msg.id);
-          resolve(msg);
+          clearTimeout(entry.timer);
+          entry.resolve(msg);
         }
       } catch (e) {
         /* ignore partial lines */
@@ -74,23 +105,34 @@ function getBridge(context) {
     }
   });
   bridge = {
+    child,
     request(op, params) {
+      if (dead) return Promise.reject(dead);
       return new Promise((resolve, reject) => {
         const id = ++requestSeq;
-        pending.set(id, resolve);
-        child.stdin.write(
-          JSON.stringify({ id, op, params: params || {} }) + "\n"
-        );
-        setTimeout(() => {
+        const timer = setTimeout(() => {
           if (pending.has(id)) {
             pending.delete(id);
             reject(new Error("voyager api timeout: " + op));
           }
         }, 30000);
+        pending.set(id, { resolve, reject, timer });
+        try {
+          child.stdin.write(
+            JSON.stringify({ id, op, params: params || {} }) + "\n"
+          );
+        } catch (e) {
+          clearTimeout(timer);
+          pending.delete(id);
+          reject(e);
+        }
       });
     },
   };
-  context.subscriptions.push({ dispose: () => child.kill() });
+  context.subscriptions.push({ dispose: () => {
+    retire(new Error("voyager api bridge disposed"));
+    child.kill();
+  } });
   return bridge;
 }
 
@@ -180,55 +222,69 @@ function openSelector(context) {
     String(Date.now()) + String(Math.random()).slice(2)
   );
 
-  async function sendOverview() {
+  let disposed = false;
+
+  function post(msg) {
+    if (!disposed && panel === selectorPanel) panel.webview.postMessage(msg);
+  }
+
+  async function sendOverview(generation) {
     try {
       const res = await getBridge(context).request("overview", {
         repo: repoPath(),
       });
+      if (disposed || panel !== selectorPanel) return;
       if (res.error) {
-        panel.webview.postMessage({ type: "overview", ok: false, error: res.error });
+        post({ type: "overview", ok: false, error: res.error,
+               generation: generation });
         return;
       }
-      panel.webview.postMessage({
+      post({
         type: "overview", ok: true, data: res.result, repo: repoPath(),
+        generation: generation,
       });
     } catch (e) {
-      showError(e.message);
+      if (!disposed) showError(e.message);
     }
   }
 
   panel.webview.onDidReceiveMessage(async (msg) => {
+    if (disposed || panel !== selectorPanel) return;
     try {
       if (msg.type === "ready") {
-        await sendOverview();
+        await sendOverview(msg.generation);
       } else if (msg.type === "select") {
-        // Bind every detail response to the thread that was requested, so a
-        // late response for an older selection can be discarded by the webview
-        // (the Selector keeps a generation token). A response without this id
-        // is un-attributable and must be ignored.
+        // Echo the webview's generation token verbatim. The webview compares
+        // it with its current generation and thread selection before rendering,
+        // so a late response for an older click is discarded even when both
+        // requests named the same thread.
         const requested = msg.thread_id;
         const res = await getBridge(context).request("thread_detail", {
           thread_id: requested,
         });
+        if (disposed || panel !== selectorPanel) return;
         if (res.error) {
-          panel.webview.postMessage({
+          post({
             type: "detail", ok: false, thread_id: requested, error: res.error,
+            generation: msg.generation,
           });
           return;
         }
-        panel.webview.postMessage({
+        post({
           type: "detail", ok: true, thread_id: requested, data: res.result,
+          generation: msg.generation,
         });
       } else if (msg.type === "copy") {
         await vscode.env.clipboard.writeText(msg.text || "");
         vscode.window.showInformationMessage("Voyager: copied to clipboard.");
       }
     } catch (e) {
-      showError(e.message);
+      if (!disposed) showError(e.message);
     }
   });
 
   panel.onDidDispose(() => {
+    disposed = true;
     selectorPanel = null;
   });
 }

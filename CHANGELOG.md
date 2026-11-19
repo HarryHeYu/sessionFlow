@@ -91,6 +91,29 @@ All notable changes to Voyager are documented here. Format loosely follows
   `extension.js` with a minimal host stub and fails when the selected id is
   dropped. No new API op, no Store/Bridge schema change.
 
+- **VS Code Selector now correlates responses by generation and thread.** The
+  webview incremented `detailGeneration` but never compared it, so a late A1
+  response could overwrite a newer A2 response for the *same* WorkThread, and
+  a pre-Refresh response could repopulate a cleared panel. `ready`/`select`
+  messages now carry an overview/detail generation, the host echoes it on
+  every `overview`/`detail` response, and the webview accepts a response only
+  when both generation and `thread_id` match the current selection. Responses
+  with a missing correlation field and messages arriving after `dispose` are
+  ignored. Executable node:vm tests cover A1->B->A2, Refresh, cross-thread
+  responses, error-vs-stale-success, missing tokens and dispose; a mutation
+  that removes the generation check makes them fail again. No Core API or
+  Bridge schema change.
+
+- **The VS Code stdio bridge now fails fast instead of hanging.** A spawn
+  error or child `exit`/`close` rejects every pending request, clears its
+  timeout handle and retires the bridge so the next call spawns a fresh child;
+  `dispose` rejects pending work, kills the process and clears timers. Before
+  this, a request whose child died stayed pending until the 30-second timeout
+  and later calls wrote into a dead stdin. Node fault injection with a stub
+  `child_process` records spawn failure, mid-request exit, recovery, dispose,
+  duplicate-spawn and timer hygiene. Real Extension Host E2E remains
+  `NOT VERIFIED` (Core #59).
+
 - **WorkThread Selector no longer shows a stale thread's detail.** Every
   `detail` response from the API host now echoes the requested `thread_id`,
   and the webview applies a response only if it still belongs to the

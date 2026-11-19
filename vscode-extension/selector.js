@@ -12,12 +12,15 @@
  *   webview -> host : {type:"ready"}
  *                     {type:"select", thread_id}
  *                     {type:"copy", text}
- *   host -> webview : {type:"overview", ok, repo, data|error}
- *                     {type:"detail", ok, thread_id, data|error}
+ *   host -> webview : {type:"overview", ok, generation, repo, data|error}
+ *                     {type:"detail", ok, generation, thread_id, data|error}
+ *                     {type:"dispose"}
  *
  * The `thread_id` on every detail message is a correlation token: a response
- * is applied only if it belongs to the currently selected thread, so an older
- * request that returns late can never overwrite a newer selection.
+ * is applied only if it belongs to the currently selected thread. The
+ * `generation` token additionally distinguishes two requests for the *same*
+ * thread, so a late A1 can never overwrite a newer A2. Responses missing
+ * either token are un-attributable and are discarded.
  */
 
 function html(nonce) {
@@ -119,7 +122,8 @@ function html(nonce) {
   "use strict";
   const vscode = acquireVsCodeApi();
   const state = { overview: null, detail: null, selected: null, repo: "",
-                  error: null, overviewError: null, detailGeneration: 0 };
+                  error: null, overviewError: null, detailGeneration: 0,
+                  overviewGeneration: 0, disposed: false };
 
   const $ = (id) => document.getElementById(id);
 
@@ -186,7 +190,8 @@ function html(nonce) {
         state.detail = null;
         renderThreads();
         renderDetail();
-        vscode.postMessage({ type: "select", thread_id: t.id });
+        vscode.postMessage({ type: "select", thread_id: t.id,
+                             generation: state.detailGeneration });
       });
       box.appendChild(card);
     });
@@ -272,13 +277,26 @@ function html(nonce) {
   $("refresh").addEventListener("click", function () {
     state.error = null;
     state.overviewError = null;
+    state.overviewGeneration += 1;
     state.detailGeneration += 1;   // in-flight detail responses are now stale
-    vscode.postMessage({ type: "ready" });
+    state.detail = null;
+    renderDetail();
+    vscode.postMessage({ type: "ready", generation: state.overviewGeneration });
   });
 
   window.addEventListener("message", function (event) {
+    if (state.disposed) return;
     const msg = event.data;
+    if (msg.type === "dispose") {
+      state.disposed = true;
+      return;
+    }
     if (msg.type === "overview") {
+      // Overview responses are correlated too: a late failed/successful
+      // overview from before Refresh must not rewrite the current view.
+      if (msg.generation !== state.overviewGeneration) {
+        return;
+      }
       if (msg.ok) {
         state.overview = msg.data || {};
         state.overviewError = null;
@@ -289,7 +307,8 @@ function html(nonce) {
           const first = state.overview.threads[0].id;
           state.selected = first;
           state.detailGeneration += 1;
-          vscode.postMessage({ type: "select", thread_id: first });
+          vscode.postMessage({ type: "select", thread_id: first,
+                               generation: state.detailGeneration });
         }
         renderThreads();
         renderDetail();
@@ -302,11 +321,12 @@ function html(nonce) {
         renderDetail();
       }
     } else if (msg.type === "detail") {
-      // Correlation check: ignore responses that (a) carry no thread_id,
-      // (b) belong to a different thread than the current selection.
-      // This is what stops a late response for an old click from overwriting
-      // the detail of a newer click (or its error).
-      if (!msg.thread_id || msg.thread_id !== state.selected) {
+      // Double correlation: the response must carry both the current
+      // generation and the currently selected thread id. This blocks a late
+      // A1 from overwriting A2 even when both responses name thread A, and it
+      // blocks an in-flight A from landing on a newer B selection.
+      if (msg.generation !== state.detailGeneration ||
+          !msg.thread_id || msg.thread_id !== state.selected) {
         return;
       }
       state.detail = msg.ok ? (msg.data || {}) : { error: msg.error || "unknown error" };
@@ -317,7 +337,7 @@ function html(nonce) {
   renderBanner();
   renderThreads();
   renderDetail();
-  vscode.postMessage({ type: "ready" });
+  vscode.postMessage({ type: "ready", generation: state.overviewGeneration });
 })();
 </script>
 </body>
