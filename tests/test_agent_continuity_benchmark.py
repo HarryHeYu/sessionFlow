@@ -14,13 +14,13 @@ not be pooled. These tests prove that:
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import os
 import pathlib
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import pytest
 
@@ -191,14 +191,140 @@ def test_runner_template_cannot_reference_private_data(mod, result):
 def test_runner_error_is_not_task_success(mod):
     failed = mod.classify_outcome(2, {"independent_tests_pass": True})
     assert failed["independent_tests_pass"] is False
-    assert failed["failure_type"] == "runner_error"
+    assert failed["failure_type"] == "runner_failed"
     tests_failed = mod.classify_outcome(0, {"independent_tests_pass": False})
-    assert tests_failed["failure_type"] == "tests_failed"
+    assert tests_failed["failure_type"] == "hidden_tests_failed"
 
 
-def test_scorer_does_not_take_a_method_name(mod):
-    params = inspect.signature(mod.evaluate_repo).parameters
-    assert "baseline" not in params and "mode" not in params and "name" not in params
+def _forced_thread_ids(mod, monkeypatch):
+    """Force every generated WorkThread id to differ across stores."""
+    counter = {"n": 0}
+
+    def create(self, repo_root=None, title=None, goal=None):
+        counter["n"] += 1
+        tid = "thr_forced_%04d" % counter["n"]
+        now = time.time()
+        self.con.execute(
+            "INSERT INTO threads(id, repo_root, title, goal, created_at,"
+            " updated_at, status) VALUES (?,?,?,?,?,?,'active')",
+            (tid, repo_root, title, goal, now, now))
+        self.con.commit()
+        return tid
+
+    monkeypatch.setattr(mod.Store, "thread_create", create)
+    return counter
+
+
+def test_oracle_prompt_uses_baseline_local_thread_id(mod, monkeypatch, scratch_root):
+    _forced_thread_ids(mod, monkeypatch)
+    result = mod.run_level2(scratch_root / "forced-thread-ids")
+    private_id = result["task"]["correct_thread_id"]
+
+    oracle = result["modes"]["oracle_conditioned"]
+    for name, row in oracle["baselines"].items():
+        local_id = row["layout"]["correct_thread_id"]
+        assert local_id != private_id, name
+        text = pathlib.Path(row["prompt_file"]).read_text(encoding="utf-8")
+        assert mod.THREAD_ID_MARKER + " " + local_id in text, name
+        assert mod.THREAD_ID_MARKER + " " + private_id not in text, name
+        store = mod.Store(pathlib.Path(row["layout"]["index_db"]))
+        try:
+            thread = store.thread_get(local_id)
+            assert thread is not None and thread["id"] == local_id, name
+            assert len(store.thread_members(local_id)) == 2, name
+        finally:
+            store.close()
+
+    for mode in ("explicit_goal_continuation", "realistic_work_discovery"):
+        for name, row in result["modes"][mode]["baselines"].items():
+            text = pathlib.Path(row["prompt_file"]).read_text(encoding="utf-8")
+            assert private_id not in text, (mode, name)
+            assert row["layout"]["correct_thread_id"] not in text, (mode, name)
+
+
+def test_eval_repos_are_unique_per_mode_baseline_and_run(mod, scratch_root):
+    task = mod.build_task(scratch_root / "eval-directory-names")
+    hidden = pathlib.Path(task["hidden_test"])
+    eval_root = pathlib.Path(task["private_root"]) / "eval"
+    eval_root.mkdir(parents=True, exist_ok=True)
+    repo = pathlib.Path(task["repo_template"])
+
+    combos = [
+        ("oracle_conditioned", "no_history", "run-1"),
+        ("oracle_conditioned", "no_history", "run-2"),
+        ("explicit_goal_continuation", "no_history", "run-1"),
+        ("realistic_work_discovery", "sessionflow_bundle", "run-1"),
+    ]
+    seen = set()
+    for mode, baseline, run_id in combos:
+        verdict = mod.evaluate_repo(
+            repo, hidden, sys.executable, eval_root,
+            mode=mode, baseline=baseline, run_id=run_id)
+        eval_repo = pathlib.Path(verdict["eval_repo"]).resolve()
+        assert eval_repo not in seen, (mode, baseline, run_id)
+        seen.add(eval_repo)
+        for token in (mode, baseline, run_id):
+            assert token in eval_repo.name
+        assert (eval_repo / "tests" / "test_hidden.py").exists()
+        assert verdict["independent_tests_pass"] is False
+
+
+def test_private_path_string_check_is_lint_only(mod, result):
+    layout = result["modes"]["oracle_conditioned"]["baselines"]["no_history"]["layout"]
+    private = result["isolation"]["private_grader_root"]
+    variant = private.replace("\\", "/").lower()
+    contract = mod.runner_contract(
+        "my-agent --private-root '" + variant + "' --prompt-file {prompt} --repo {repo}",
+        layout, pathlib.Path(private).parent)
+    assert contract["status"] == "DISABLED"
+    assert contract["reason"] == "NO_OS_SANDBOX"
+    assert contract["live_execution_supported"] is False
+    assert contract["private_path_check"] == "LINT_ONLY_NOT_SECURITY_BOUNDARY"
+
+
+def test_runner_failure_contract_distinguishes_sources(mod):
+    cases = [
+        (("completed", 0, {"independent_tests_pass": True}),
+         "success", True),
+        (("completed", 0, {"independent_tests_pass": False}),
+         "hidden_tests_failed", False),
+        (("completed", 2, {"independent_tests_pass": True}),
+         "runner_failed", False),
+        (("spawn_failed", None, {}),
+         "runner_spawn_failed", False),
+        (("timeout", None, {}),
+         "runner_timeout", False),
+        (("evaluator_failed", None, {}),
+         "evaluator_failed", False),
+        (("completed", 0, {"evaluator_failed": True,
+                           "independent_tests_pass": False}),
+         "evaluator_failed", False),
+    ]
+    for args, failure_type, passed in cases:
+        verdict = mod.classify_outcome(args[1], args[2], runner_status=args[0])
+        assert verdict["failure_type"] == failure_type, args
+        assert verdict["independent_tests_pass"] is passed, args
+        assert verdict["final_code_meets_goal"] is passed, args
+        assert verdict["runner_status"] == args[0], args
+
+
+def test_scorer_does_not_depend_on_method_name(mod, scratch_root):
+    task = mod.build_task(scratch_root / "method-name-independence")
+    hidden = pathlib.Path(task["hidden_test"])
+    eval_root = pathlib.Path(task["private_root"]) / "eval"
+    eval_root.mkdir(parents=True, exist_ok=True)
+    repo = pathlib.Path(task["repo_template"])
+    verdicts = [
+        mod.evaluate_repo(
+            repo, hidden, sys.executable, eval_root,
+            mode=mode, baseline=baseline, run_id=run_id)["independent_tests_pass"]
+        for mode, baseline, run_id in (
+            ("oracle_conditioned", "no_history", "run-1"),
+            ("explicit_goal_continuation", "sessionflow_bundle", "run-2"),
+            ("realistic_work_discovery", "raw_history", "run-3"),
+        )
+    ]
+    assert len(set(verdicts)) == 1
 
 
 def test_no_llm_no_real_data_declaration(result):
