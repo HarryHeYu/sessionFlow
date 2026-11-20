@@ -4,43 +4,54 @@
 WHY THIS EXISTS
 ---------------
 `scripts/continuity_benchmark.py` (Core PR #64) measures *context preparation*
-deterministically: are facts present, is provenance explained, is budget kept.
-It deliberately cannot answer "did the next agent actually finish the work?"
-This module adds that second layer without reusing or rewriting the Level 1
-scorer: it builds real, small software tasks whose requirements live ONLY in
-synthetic prior-agent sessions, prepares four context variants, and provides a
-pluggable executor + an independent hidden-test verdict.
+deterministically. This module measures whether a next agent can finish a real
+code task. It never rewrites the Level 1 scorer and never reuses its historical
+results.
 
-HONESTY / SCOPE
----------------
-* No LLM, embedding, vector DB or long-term memory service is introduced.
-* No real user session, index, home or repo is read or written. Every repo,
-  session and test is synthetic and built under a caller-supplied workdir.
-* Running a real model needs paid calls / auth / real histories. Without an
-  explicit, authorised runner, this harness runs in DRY-RUN mode: it builds
-  everything, prepares contexts, and reports every agent-outcome metric as
-  ``LIVE_MODEL_NOT_VERIFIED``. It never invents a completion rate.
-* The task "answer" is a hidden test set the incoming agent never sees; the
-  benchmark verdict is that test's result, not tool-call counts.
+FAIRNESS CONTRACT (v2)
+----------------------
+Three evaluation modes are kept separate and must not be pooled:
+
+* ``oracle_conditioned`` — every baseline receives the same external goal AND
+  the same explicit WorkThread id. It measures context quality with full
+  oracle information. It is NOT a work-discovery result.
+* ``explicit_goal_continuation`` — every baseline receives the same external
+  user goal, and no baseline receives a WorkThread id. It measures continuation
+  under an explicit goal.
+* ``realistic_work_discovery`` — no baseline receives an external goal or a
+  WorkThread id. The agent must discover both from the repo and its own tools.
+
+In every mode, all four baselines use an identical repo template, identical
+external information and an independent workspace. Hidden tests, the manifest
+and grader data live in a private tree that is never passed to a runner.
+
+RUNNER POLICY
+-------------
+This harness does NOT start an agent. Without an OS-level sandbox that can
+enforce per-baseline filesystem boundaries, a shell template cannot guarantee
+that one agent cannot read another baseline's repo, a real user index, or
+ambient provider credentials. ``--runner`` is therefore accepted only to
+report a disabled, inspectable execution contract; it never executes a model.
+LIVE MODEL outcomes stay LIVE_MODEL_NOT_VERIFIED.
 
 Run:
     python scripts/agent_continuity_benchmark.py --workdir DIR
     python scripts/agent_continuity_benchmark.py --workdir DIR --out result.json
-    # with an authorised agent command (LIVE MODEL — only with permission):
-    python scripts/agent_continuity_benchmark.py --workdir DIR \
-        --runner 'my-agent --prompt-file {prompt} --out {repo}'
 """
 
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -53,10 +64,13 @@ from voyager.continuity import build_continuation_bundle  # noqa: E402
 from voyager.model import new_event, new_session  # noqa: E402
 from voyager.store import Store  # noqa: E402
 
+SCHEMA = "agent-continuity-benchmark-v2"
 BASELINES = ("no_history", "raw_history", "latest_summary", "sessionflow_bundle")
-DEFAULT_BUDGET = 4000  # equal token budget across all four variants
+MODES = ("oracle_conditioned", "explicit_goal_continuation", "realistic_work_discovery")
+DEFAULT_BUDGET = 4000
+EXTERNAL_GOAL_MARKER = "EXTERNAL GOAL:"
+THREAD_ID_MARKER = "EXPLICIT THREAD ID:"
 
-# Outcome metrics. With no live model these are all LIVE_MODEL_NOT_VERIFIED.
 OUTCOME_METRICS = (
     "used_sessionflow",
     "found_correct_workthread",
@@ -71,50 +85,47 @@ OUTCOME_METRICS = (
     "failure_type",
 )
 
+# Allow-list for a future, externally sandboxed runner. No provider config,
+# token, SSH agent, or real HOME is inherited.
+RUNNER_ENV_ALLOWLIST = (
+    "PATH", "PATHEXT", "SYSTEMROOT", "COMSPEC", "OS",
+    "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
+)
+
+
+class BenchmarkContractError(RuntimeError):
+    """The benchmark layout or runner request violates its own contract."""
+
+
+class LiveRunnerDisabled(BenchmarkContractError):
+    """Live execution needs an OS sandbox this harness does not provide."""
+
+
+def _mkdir_empty(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, exist_ok=True)
+
 
 # ---------------------------------------------------------------------------
-# Task construction. The requirement is ONLY in the prior sessions; the repo
-# and the visible tests start green and contain no hint of the change.
+# Synthetic task construction. Private grader data is NEVER under agent_root.
 # ---------------------------------------------------------------------------
-def build_task(workdir: Path, task_id: str = "T1") -> Dict[str, Any]:
-    """Create one synthetic software task under `workdir`.
-
-    Returns a manifest describing the repo, the hidden tests, the prior-agent
-    sessions, the goal and the correct WorkThread. No real data is touched.
-    """
-    workdir = Path(workdir)
-    repo = workdir / "repo"
-    tests_dir = repo / "tests"
-    tests_dir.mkdir(parents=True, exist_ok=True)
-
-    # Visible starting code + a green test. Nothing here reveals the task.
+def _write_repo_template(repo: Path) -> None:
+    (repo / "tests").mkdir(parents=True, exist_ok=True)
     (repo / "calc.py").write_text(
         "def add(a, b):\n    return a + b\n", encoding="utf-8")
-    (tests_dir / "test_visible.py").write_text(
+    (repo / "tests" / "test_visible.py").write_text(
         "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
         encoding="utf-8")
 
-    # Hidden acceptance test — the incoming agent never sees this file. It is
-    # stored beside the workdir, not inside the repo.
-    hidden = workdir / "hidden_tests"
-    hidden.mkdir(parents=True, exist_ok=True)
-    hidden_test = hidden / "test_hidden.py"
-    hidden_test.write_text(
-        "from calc import add\n\n\ndef test_add_three_args():\n"
-        "    # Requirement came ONLY from the prior session:\n"
-        "    # 'make add() accept a third clamp argument, default 10'.\n"
-        "    assert add(1, 2) == 3\n"
-        "    assert add(1, 9, 5) == 5\n"
-        "    assert add(1, 2) == 3\n",
-        encoding="utf-8")
 
-    # Synthetic prior-agent sessions. The requirement and a contradiction live
-    # here; a second WorkThread is a decoy. source_missing exercises retention.
-    db = workdir / "index.db"
+def _write_index(db: Path, repo: Path) -> None:
+    """Build the same synthetic sessions/threads, scoped to `repo`."""
+    db.parent.mkdir(parents=True, exist_ok=True)
     store = Store(db)
     store.con.commit()
     sid = "codex:calc-task"
-    src = workdir / "calc.jsonl"
+    src = db.parent / "calc.jsonl"
     src.write_text("{}\n", encoding="utf-8")
     events = [
         new_event(sid=sid, ts=1_700_000_000, seq=0, kind="user",
@@ -131,9 +142,8 @@ def build_task(workdir: Path, task_id: str = "T1") -> Dict[str, Any]:
         message_count=3, tool_count=1, can_resume=False, metadata={}, raw_metadata={})
     store.replace_session(row, events, "codex", src)
 
-    # A contradicting earlier session (kept; never silently deleted).
     sid_old = "claude:calc-old"
-    src_old = workdir / "calc-old.jsonl"
+    src_old = db.parent / "calc-old.jsonl"
     src_old.write_text("{}\n", encoding="utf-8")
     ev_old = [new_event(sid=sid_old, ts=1_699_000_000, seq=0, kind="assistant",
                         content="OLD: maybe clamp default should be 100")]
@@ -146,39 +156,63 @@ def build_task(workdir: Path, task_id: str = "T1") -> Dict[str, Any]:
     store.q("UPDATE sessions SET source_state='SOURCE_MISSING' WHERE id=?", (sid_old,))
     store.con.commit()
 
-    correct_tid = store.thread_create(repo_root=str(repo), title="calc clamp",
-                                      goal="extend add() with a clamp argument")
-    store.thread_attach(correct_tid, sid)
-    store.thread_attach(correct_tid, sid_old)
-    # A decoy WorkThread whose title suggests a different goal.
-    decoy_tid = store.thread_create(repo_root=str(repo), title="unrelated docs cleanup",
-                                    goal="rewrite README")
+    correct = store.thread_create(repo_root=str(repo), title="calc clamp",
+                                  goal="extend add() with a clamp argument")
+    store.thread_attach(correct, sid)
+    store.thread_attach(correct, sid_old)
+    decoy = store.thread_create(repo_root=str(repo), title="unrelated docs cleanup",
+                                goal="rewrite README")
     store.con.commit()
     store.close()
+    return {"correct_thread_id": correct, "decoy_thread_id": decoy}
+
+
+def build_task(workdir: Path, task_id: str = "T1") -> Dict[str, Any]:
+    """Create one synthetic task with private grader data and a repo template."""
+    workdir = Path(workdir)
+    private = workdir / "private"
+    _mkdir_empty(private)
+    repo_template = private / "repo_template"
+    _write_repo_template(repo_template)
+
+    hidden_dir = private / "hidden_tests"
+    hidden_dir.mkdir(parents=True, exist_ok=True)
+    hidden_test = hidden_dir / "test_hidden.py"
+    hidden_test.write_text(
+        "from calc import add\n\n\ndef test_add_three_args():\n"
+        "    assert add(1, 2) == 3\n"
+        "    assert add(1, 9, 5) == 5\n",
+        encoding="utf-8")
+
+    index_db = private / "index.db"
+    threads = _write_index(index_db, repo_template)
 
     manifest = {
+        "schema": SCHEMA,
         "task_id": task_id,
-        "repo": str(repo),
+        "repo_template": str(repo_template),
         "hidden_test": str(hidden_test),
-        "index_db": str(db),
+        "index_db": str(index_db),
+        "private_root": str(private),
         "goal": "extend add() with an optional third argument clamp, default 10",
-        "correct_thread_id": correct_tid,
-        "decoy_thread_id": decoy_tid,
-        "session_ids": [sid, sid_old],
         "required_fact": "clamp, default 10",
+        "session_ids": ["codex:calc-task", "claude:calc-old"],
+        **threads,
     }
-    (workdir / "task_manifest.json").write_text(
+    (private / "task_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     return manifest
 
 
-def _build_contexts(workdir: Path, manifest: Dict[str, Any]) -> Dict[str, str]:
-    """Prepare the four context variants from the synthetic index."""
-    db = Path(manifest["index_db"])
-    store = Store(db)
-    sids = manifest["session_ids"]
-    rows = [store.session(s)[0] for s in sids]
-
+# ---------------------------------------------------------------------------
+# Context construction: oracle inputs are mode-dependent, never implicit.
+# ---------------------------------------------------------------------------
+def build_contexts(workdir: Path, manifest: Dict[str, Any],
+                   mode: str) -> Dict[str, str]:
+    if mode not in MODES:
+        raise BenchmarkContractError("unknown evaluation mode: " + mode)
+    store = Store(Path(manifest["index_db"]))
+    rows = [store.session(s)[0] for s in manifest["session_ids"]]
     raw = "\n".join(
         str(e["content"] or "") + " " + str(e["command"] or "")
         for r in rows for e in store.events(r["id"]))
@@ -188,13 +222,16 @@ def _build_contexts(workdir: Path, manifest: Dict[str, Any]) -> Dict[str, str]:
         for e in store.events(latest["id"]))
     naive = " ".join("%s:%s" % (r["provider"], r["title"]) for r in rows)
 
-    from voyager.store import Store as _S  # noqa: F401  (explicit for clarity)
-    thread = store.thread_get(manifest["correct_thread_id"])
-    bundle = build_continuation_bundle(
-        store, rows, goal=manifest["goal"], thread=thread)
+    # Only oracle_conditioned gets the goal and the correct thread. Other modes
+    # must discover or receive those facts from the same external prompt.
+    thread = None
+    goal = None
+    if mode == "oracle_conditioned":
+        goal = manifest["goal"]
+        thread = store.thread_get(manifest["correct_thread_id"])
+    bundle = build_continuation_bundle(store, rows, goal=goal, thread=thread)
     packed, _ = apply_budget(bundle, parse_budget(str(DEFAULT_BUDGET)))
     store.close()
-
     return {
         "no_history": "",
         "raw_history": raw,
@@ -203,148 +240,254 @@ def _build_contexts(workdir: Path, manifest: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def _write_prompts(workdir: Path, manifest: Dict[str, Any],
-                   contexts: Dict[str, str]) -> Dict[str, str]:
-    """Write one prompt file per baseline; the hidden answer is never included."""
-    prompts: Dict[str, str] = {}
-    for name, ctx in contexts.items():
-        p = workdir / ("prompt_%s.txt" % name)
-        text = (
-            "You are continuing work in the repo at %s.\n"
-            "Continue the existing task. Do not invent a new one.\n\n" % manifest["repo"]
-        )
-        if ctx:
-            text += "<prior-context>\n%s\n</prior-context>\n\n" % ctx
-        else:
-            text += "(no prior context provided)\n\n"
-        text += "The current test suite is green. Make the needed change.\n"
-        p.write_text(text, encoding="utf-8")
-        prompts[name] = str(p)
-    return prompts
+def write_prompt(agent_root: Path, manifest: Dict[str, Any], mode: str,
+                 name: str, context: str, repo: Path) -> Path:
+    lines = ["You are continuing work in the repo at %s." % repo]
+    if mode == "oracle_conditioned":
+        lines += [
+            "EVALUATION MODE: ORACLE_CONDITIONED (context-quality only).",
+            EXTERNAL_GOAL_MARKER + " " + manifest["goal"],
+            THREAD_ID_MARKER + " " + manifest["correct_thread_id"],
+            "This run must NOT be counted as autonomous work discovery.",
+        ]
+    elif mode == "explicit_goal_continuation":
+        lines += [
+            "EVALUATION MODE: EXPLICIT_GOAL_CONTINUATION.",
+            EXTERNAL_GOAL_MARKER + " " + manifest["goal"],
+            "No WorkThread id is supplied; discover it if your tools allow it.",
+        ]
+    else:
+        lines += [
+            "EVALUATION MODE: REALISTIC_WORK_DISCOVERY.",
+            "No external goal or WorkThread id is supplied.",
+            "Discover the unfinished task from the repository and available history.",
+        ]
+    lines.append("")
+    if context:
+        lines += ["<prior-context>", context, "</prior-context>"]
+    else:
+        lines.append("(no prior context provided)")
+    lines += ["", "The current test suite is green. Make the needed change."]
+    path = agent_root / ("prompt_%s.txt" % name)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
-# ---------------------------------------------------------------------------
-# Executor. Default is DRY-RUN: build + prepare + evaluate, but no agent is
-# launched. A real model needs an explicit, authorised command template and is
-# recorded as LIVE MODEL with its own result — never mixed with dry-run data.
-# ---------------------------------------------------------------------------
-def evaluate_repo(repo: Path, hidden_test: Path, python: str) -> Dict[str, Any]:
-    """Run the visible + hidden tests against whatever code is in `repo`.
+def prepare_baseline(workdir: Path, manifest: Dict[str, Any], mode: str,
+                     name: str, context: str) -> Dict[str, Any]:
+    """Give one baseline an independent repo, prompt, home and index."""
+    agent_root = workdir / "baselines" / mode / name / "agent"
+    _mkdir_empty(agent_root)
+    repo = agent_root / "repo"
+    shutil.copytree(manifest["repo_template"], repo)
+    home = agent_root / "home"
+    db = home / ".voyager" / "index.db"
+    threads = _write_index(db, repo)
+    if threads["correct_thread_id"] != manifest["correct_thread_id"]:
+        # Thread ids are generated per index; the harness records the local
+        # id for evaluation but never exposes it in a prompt outside oracle.
+        pass
+    prompt = write_prompt(agent_root, manifest, mode, name, context, repo)
+    tmp = agent_root / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    return {
+        "agent_root": str(agent_root),
+        "repo": str(repo),
+        "prompt": str(prompt),
+        "home": str(home),
+        "index_db": str(db),
+        "correct_thread_id": threads["correct_thread_id"],
+    }
 
-    This is the independent verdict. It uses the hidden test the incoming agent
-    never saw, plus the visible tests, and returns a boolean pass plus counts.
-    """
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "VOYAGER_NO_SYNC": "1"}
-    # Copy the hidden test into the repo just for the run, then leave it: the
-    # repo is synthetic and disposable under `workdir`.
-    target = repo / "tests" / "test_hidden.py"
-    target.write_text(hidden_test.read_text(encoding="utf-8"), encoding="utf-8")
+
+def _runner_env(agent_root: Path) -> Dict[str, str]:
+    env = {k: os.environ[k] for k in RUNNER_ENV_ALLOWLIST if k in os.environ}
+    home = str(agent_root / "home")
+    tmp = str(agent_root / "tmp")
+    env.update({
+        "HOME": home,
+        "USERPROFILE": home,
+        "APPDATA": str(agent_root / "home" / "AppData"),
+        "LOCALAPPDATA": str(agent_root / "home" / "AppData" / "Local"),
+        "XDG_CONFIG_HOME": str(agent_root / "home" / ".config"),
+        "XDG_DATA_HOME": str(agent_root / "home" / ".local"),
+        "XDG_CACHE_HOME": str(agent_root / "home" / ".cache"),
+        "TMP": tmp,
+        "TEMP": tmp,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "VOYAGER_NO_SYNC": "1",
+    })
+    return env
+
+
+def runner_contract(template: str, layout: Dict[str, Any],
+                    workdir: Path) -> Dict[str, Any]:
+    """Describe, but never execute, a requested runner."""
+    if "{prompt}" not in template or "{repo}" not in template:
+        raise BenchmarkContractError(
+            "runner template must contain both {prompt} and {repo}")
+    private = Path(manifest_private_root(workdir))
+    for needle in (str(private), "test_hidden.py", "task_manifest.json"):
+        if needle in template:
+            raise BenchmarkContractError(
+                "runner template may not reference private grader data")
+    agent_root = Path(layout["agent_root"])
+    argv = shlex.split(template.format(prompt=layout["prompt"], repo=layout["repo"]))
+    return {
+        "status": "DISABLED",
+        "reason": "NO_OS_SANDBOX",
+        "cwd": layout["repo"],
+        "argv": argv,
+        "env_keys": sorted(_runner_env(agent_root)),
+        "forbidden_env_omitted": [
+            "HOME(real)", "USERPROFILE(real)", "APPDATA(real)", "LOCALAPPDATA(real)",
+            "SSH_AUTH_SOCK", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+            "CODEX_*", "CLAUDE_*", "DSH_*", "WORKBUDDY_*",
+        ],
+        "private_grader_root": str(private),
+        "other_baseline_repos readable": "NOT PREVENTED without OS sandbox",
+    }
+
+
+def manifest_private_root(workdir: Path) -> str:
+    return str(Path(workdir) / "private")
+
+
+def classify_outcome(runner_returncode: Optional[int],
+                     verdict: Dict[str, Any]) -> Dict[str, Any]:
+    """Runner failure and acceptance-test failure are different outcomes."""
+    if runner_returncode is None or runner_returncode != 0:
+        return {
+            "final_code_meets_goal": False,
+            "independent_tests_pass": False,
+            "failure_type": "runner_error",
+            "runner_returncode": runner_returncode,
+        }
+    passed = bool(verdict.get("independent_tests_pass"))
+    return {
+        "final_code_meets_goal": passed,
+        "independent_tests_pass": passed,
+        "failure_type": None if passed else "tests_failed",
+        "runner_returncode": runner_returncode,
+    }
+
+
+def evaluate_repo(repo: Path, hidden_test: Path, python: str,
+                  eval_root: Path) -> Dict[str, Any]:
+    """Evaluate a finished repo with hidden tests copied OUTSIDE agent_root."""
+    eval_repo = Path(eval_root) / (Path(repo).name + "__eval")
+    _mkdir_empty(eval_repo)
+    shutil.copytree(repo, eval_repo, dirs_exist_ok=True)
+    target = eval_repo / "tests" / "test_hidden.py"
+    target.write_text(Path(hidden_test).read_text(encoding="utf-8"), encoding="utf-8")
+    env = {
+        **os.environ,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "VOYAGER_NO_SYNC": "1",
+    }
     try:
         proc = subprocess.run(
             [python, "-m", "pytest", "-q", "tests"],
-            cwd=str(repo), env=env, capture_output=True, text=True, timeout=120)
-        out = proc.stdout + "\n" + proc.stderr
+            cwd=str(eval_repo), env=env, capture_output=True,
+            text=True, timeout=120)
         return {
             "independent_tests_pass": proc.returncode == 0,
             "returncode": proc.returncode,
-            "output_tail": out[-800:],
+            "eval_repo": str(eval_repo),
+            "output_tail": (proc.stdout + "\n" + proc.stderr)[-800:],
         }
-    except Exception as e:  # noqa: BLE001 - a broken runner is a result, not a crash
+    except Exception as e:  # evaluation failure is not a pass
         return {
             "independent_tests_pass": False,
             "returncode": None,
+            "eval_repo": str(eval_repo),
             "output_tail": "evaluation error: %s" % e,
         }
 
 
 def _not_verified_row() -> Dict[str, Any]:
-    row = {m: "LIVE_MODEL_NOT_VERIFIED" for m in OUTCOME_METRICS}
-    return row
+    return {m: "LIVE_MODEL_NOT_VERIFIED" for m in OUTCOME_METRICS}
 
 
 def run_level2(workdir: Path, runner: Optional[str] = None,
                python: Optional[str] = None) -> Dict[str, Any]:
-    """Build one task, prepare four contexts, optionally run an authorised agent.
-
-    With no `runner`, everything up to evaluation is real and reproducible, and
-    all agent-outcome metrics are LIVE_MODEL_NOT_VERIFIED. With a `runner`, the
-    command template is expanded with {prompt}, {repo} and executed once per
-    baseline; only then are outcome metrics filled from the real run.
-    """
+    """Build all modes/baselines, but never launch an agent."""
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     py = python or sys.executable
     manifest = build_task(workdir)
-    contexts = _build_contexts(workdir, manifest)
-    prompts = _write_prompts(workdir, manifest, contexts)
+    private = Path(manifest["private_root"])
+    eval_root = private / "eval"
+    eval_root.mkdir(parents=True, exist_ok=True)
 
-    # Sanity: Level 2 must be a real task — hidden test FAILS on the green
-    # starting repo (the requirement is not inferable from visible code).
-    # The sanity check runs in a COPY so the agent repos stay pristine.
-    import shutil
-    sanity_repo = workdir / "sanity_repo"
+    sanity_repo = private / "sanity_repo"
     if sanity_repo.exists():
         shutil.rmtree(sanity_repo)
-    shutil.copytree(manifest["repo"], sanity_repo)
-    sanity = evaluate_repo(sanity_repo, Path(manifest["hidden_test"]), py)
+    shutil.copytree(manifest["repo_template"], sanity_repo)
+    sanity = evaluate_repo(sanity_repo, Path(manifest["hidden_test"]), py, eval_root)
 
-    results: Dict[str, Any] = {}
-    mode = "LIVE_MODEL" if runner else "DRY_RUN"
-    for name in BASELINES:
-        row: Dict[str, Any] = {
-            "context_tokens": estimate_tokens(contexts[name]),
-            "prompt_file": prompts[name],
-            "evaluation": _not_verified_row(),
+    runner_plan: Optional[Dict[str, Any]] = None
+    if runner:
+        first = prepare_baseline(workdir, manifest, MODES[0], BASELINES[0], "")
+        runner_plan = runner_contract(runner, first, workdir)
+
+    modes: Dict[str, Any] = {}
+    for mode in MODES:
+        contexts = build_contexts(workdir, manifest, mode)
+        rows: Dict[str, Any] = {}
+        for name in BASELINES:
+            layout = prepare_baseline(workdir, manifest, mode, name, contexts[name])
+            prompt_text = Path(layout["prompt"]).read_text(encoding="utf-8")
+            hidden_token = Path(manifest["hidden_test"]).read_text(encoding="utf-8")
+            answer_line = [ln for ln in hidden_token.splitlines() if "assert add(1, 9, 5)" in ln]
+            if answer_line and answer_line[0] in prompt_text:
+                raise BenchmarkContractError("hidden answer leaked into " + name)
+            rows[name] = {
+                "context_tokens": estimate_tokens(contexts[name]),
+                "prompt_file": layout["prompt"],
+                "layout": layout,
+                "external_goal_supplied": EXTERNAL_GOAL_MARKER in prompt_text,
+                "thread_id_supplied": THREAD_ID_MARKER in prompt_text,
+                "evaluation": _not_verified_row(),
+                "runner": {"status": "NOT_EXECUTED", "reason": "LIVE_RUNNER_DISABLED"},
+            }
+        modes[mode] = {
+            "counted_for": {
+                "oracle_conditioned": "context_quality_only",
+                "explicit_goal_continuation": "explicit_goal_continuation",
+                "realistic_work_discovery": "work_discovery",
+            }[mode],
+            "external_goal": mode in ("oracle_conditioned", "explicit_goal_continuation"),
+            "explicit_thread": mode == "oracle_conditioned",
+            "baselines": rows,
         }
-        if runner:
-            repo = workdir / ("repo_%s" % name)
-            if repo.exists():
-                shutil.rmtree(repo)
-            shutil.copytree(manifest["repo"], repo)
-            cmd = runner.format(prompt=prompts[name], repo=str(repo))
-            import time
-            t0 = time.time()
-            try:
-                proc = subprocess.run(
-                    shlex.split(cmd), capture_output=True, text=True, timeout=900)
-                verdict = evaluate_repo(repo, Path(manifest["hidden_test"]), py)
-                row["evaluation"] = {
-                    "used_sessionflow": None,  # filled by a run-specific probe
-                    "found_correct_workthread": None,
-                    "restored_correct_goal": None,
-                    "fabricated_task": None,
-                    "used_historical_evidence": None,
-                    "final_code_meets_goal": verdict["independent_tests_pass"],
-                    "independent_tests_pass": verdict["independent_tests_pass"],
-                    "tool_call_count": None,
-                    "token_spend": None,
-                    "elapsed_seconds": round(time.time() - t0, 2),
-                    "failure_type": None if verdict["independent_tests_pass"]
-                                    else "tests_failed",
-                    "agent_stdout_tail": proc.stdout[-800:],
-                    "agent_stderr_tail": proc.stderr[-800:],
-                }
-            except Exception as e:  # noqa: BLE001
-                row["evaluation"] = {
-                    **_not_verified_row(),
-                    "failure_type": "runner_error",
-                    "error": str(e),
-                }
-        results[name] = row
 
     return {
-        "schema": "agent-continuity-benchmark-v1",
-        "mode": mode,
-        "live_model_authorised": bool(runner),
-        "note": ("DRY-RUN: task + contexts + independent evaluator are real; "
-                 "no agent was launched, every outcome metric is "
-                 "LIVE_MODEL_NOT_VERIFIED."
-                 if not runner else
-                 "LIVE MODEL: an authorised runner was executed per baseline."),
+        "schema": SCHEMA,
+        "mode": "DRY_RUN",
+        "live_model_authorised": False,
+        "note": ("No agent was launched. Live execution is disabled because an "
+                 "OS sandbox is required to prevent cross-baseline/real-index "
+                 "access. All agent outcomes are LIVE_MODEL_NOT_VERIFIED."),
         "task": manifest,
         "sanity_hidden_test_fails_on_start": (sanity["independent_tests_pass"] is False),
         "sanity_detail": sanity,
-        "baselines": results,
+        "modes": modes,
+        "runner": runner_plan or {
+            "status": "NO_RUNNER_REQUESTED",
+            "live_execution_supported": False,
+            "reason": "NO_OS_SANDBOX",
+        },
+        "isolation": {
+            "private_grader_root": str(private),
+            "hidden_test_under_agent_root": False,
+            "manifest_under_agent_root": False,
+            "per_baseline_repo": True,
+            "per_baseline_home": True,
+            "os_sandbox": False,
+            "live_runner_disabled": True,
+        },
         "no_llm_in_harness": True,
         "no_real_user_data": True,
     }
@@ -356,12 +499,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="isolated scratch dir for the synthetic task")
     ap.add_argument("--out", default=None, help="write structured JSON here")
     ap.add_argument("--runner", default=None,
-                    help="authorised agent command template with {prompt} and "
-                         "{repo}; omit for DRY-RUN (no live model)")
+                    help="inspect a runner contract only; NO agent is launched")
     ap.add_argument("--python", default=None,
                     help="python with pytest for the independent evaluator")
     args = ap.parse_args(argv)
-
     result = run_level2(Path(args.workdir), args.runner, args.python)
     payload = json.dumps(result, indent=2, ensure_ascii=False)
     if args.out:

@@ -83,7 +83,8 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-19-reproducible-continuity-benchmark.md](audits/2026-11-19-reproducible-continuity-benchmark.md) | EXPERIMENT_REPORT | maintainer | maintained — in-repo synthetic harness: six metrics, four baselines + equal budget, hold-out I, quality gates |
 | [audits/2026-11-19-context-intelligence-experiment.md](audits/2026-11-19-context-intelligence-experiment.md) | DESIGN | maintainer | frozen — ADR: equal-budget command down-weight experiment; marginal gain, no product ranking change |
 | [audits/2026-11-20-extension-host-e2e-gate.md](audits/2026-11-20-extension-host-e2e-gate.md) | AUDIT | maintainer | frozen — Core #59 real Extension Host blocked in sandbox (no GUI); isolated harness prepared, executable-contract defects corrected, host run still NOT VERIFIED |
-| [audits/2026-11-20-agent-continuity-benchmark.md](audits/2026-11-20-agent-continuity-benchmark.md) | EXPERIMENT_REPORT | maintainer | maintained — Level 2 agent-continuity harness; DRY-RUN real, agent outcome LIVE MODEL NOT VERIFIED |
+| [audits/2026-11-20-agent-continuity-benchmark.md](audits/2026-11-20-agent-continuity-benchmark.md) | EXPERIMENT_REPORT | maintainer | historical — v1 Level 2 harness DRY-RUN; superseded in part by the v2 fairness correction below |
+| [audits/2026-11-20-level2-fairness-correction.md](audits/2026-11-20-level2-fairness-correction.md) | AUDIT | maintainer | maintained — v2 modes, private grader tree, per-baseline isolation and disabled live runner; no LIVE MODEL claim |
 
 ## Performance evidence
 
