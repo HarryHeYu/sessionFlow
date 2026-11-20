@@ -1,0 +1,17 @@
+{
+  "name": "voyager-e2e-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated real Extension Host harness for the voyager VS Code extension.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node --check ./run-test.mjs && node --check ./suite/index.js",
+    "test": "node ./run-test.mjs"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0"
+  }
+}

@@ -72,3 +72,41 @@ transcript in Core #59. Only then may the issue's E2E items be marked VERIFIED.
 No Core API, Store schema, Bridge schema, or shipped behaviour changed. No
 real user session, index, home, or VS Code profile was read or written. No GUI
 window was started. No VSIX built, no Marketplace publish, no tag/release.
+
+## 7. Post-merge executable-contract corrections
+
+A follow-up static audit of the harness itself found five real defects that the
+first report did not catch:
+
+1. `vscode-extension/e2e/` had no `package.json`, although the README told
+   operators to run `npm install && npm test` there. The dependency existed
+   only in prose.
+2. `@vscode/test-electron` was not declared. Its documented API is
+   `runTests({ extensionDevelopmentPath, extensionTestsPath, launchArgs,
+   extensionTestsEnv })`, and `extensionTestsPath` must name a runner module
+   that exports `run()`. The launcher passed a directory instead of
+   `suite/index.js`.
+3. The launcher isolated only `HOME` and `USERPROFILE`. On Windows, Python also
+   resolves user site from `APPDATA` / `LOCALAPPDATA`, and the child inherited
+   ambient `TMP`/`TEMP` and XDG locations.
+4. It set `VOYAGER_PYTHON`, but the shipped client reads the
+   `voyager.pythonPath` setting. The suite never applied it, and never applied
+   `voyager.repoPath`; `VOYAGER_E2E_INDEX` was likewise unconsumed.
+5. The host-side suite opened one `WebviewPanel` and printed
+   "REAL HOST E2E", which overstated a lifecycle smoke test as all three
+   read-only workflows.
+
+Corrections: added a private `package.json` + lockfile pinning
+`@vscode/test-electron` 3.1.0 (Node >= 22), added `npm run check`; resolved
+`E2E_PYTHON` once and applied it plus the synthetic workspace through
+workspace configuration; isolated the full environment; pointed
+`extensionTestsPath` at `suite/index.js`; added `E2E_VSCODE_EXECUTABLE` for a
+local 1.147.0 build while keeping the pinned default `1.95.0` (both satisfy
+the manifest's `^1.80.0` engine range); and relabelled the automated result as
+"REAL HOST SMOKE (automated subset)". The three workflows remain a manual
+checklist and **NOT VERIFIED**.
+
+New gate: `tests/test_vscode_e2e_contract.py`. Red baseline before the fix was
+5 failed / 1 passed; after the fix, 35 passed together with `test_docs.py`.
+`npm run check` also caught a real block-comment syntax error in the rewritten
+launcher. No GUI was started, so the real-host rows remain unchanged.

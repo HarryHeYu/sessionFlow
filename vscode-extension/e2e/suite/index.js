@@ -6,11 +6,13 @@
  * authored this file (launching a VS Code window is prohibited there — Core
  * #59 Environment note).
  *
- * Automated here (host-side contract): the extension is discoverable,
- * activates, every contributed command has a handler, and a real WebviewPanel
- * opens and closes without throwing. NOT automated (honest boundary): the
- * webview inline JS renders in a real iframe and needs an operator to click
- * through the manual checklist in ../README.md. No DOM assertion is faked.
+ * Automated here (host-side smoke subset): the extension is discoverable and
+ * activates, every contributed command has a handler, the launcher-provided
+ * isolated Python/repo/index are actually applied, and one real WebviewPanel
+ * opens and closes without throwing. NOT automated: the three read-only
+ * workflows in a real iframe, host→webview message delivery, race handling,
+ * one-click switch, and bridge-child cleanup. Those remain a manual operator
+ * checklist in ../README.md and Core #59.
  */
 const vscode = require('vscode');
 
@@ -48,16 +50,40 @@ async function run() {
     });
   }
 
-  await check('opens a real WebviewPanel and closes it', async () => {
+  // The launcher resolves the real Python executable and writes the synthetic
+  // workspace/index paths into the isolated host environment. Apply them as
+  // workspace settings before any bridge is spawned.
+  const py = process.env.VOYAGER_E2E_PYTHON;
+  const workspace = process.env.VOYAGER_E2E_WORKSPACE;
+  const index = process.env.VOYAGER_E2E_INDEX;
+  await check('launcher supplied isolated Python, workspace and index', () => {
+    if (!py || !workspace || !index) {
+      throw new Error('missing VOYAGER_E2E_PYTHON/WORKSPACE/INDEX');
+    }
+  });
+  await check('extension uses the isolated Python and repo path', async () => {
+    const cfg = vscode.workspace.getConfiguration('voyager');
+    await cfg.update('pythonPath', py, vscode.ConfigurationTarget.Workspace);
+    await cfg.update('repoPath', workspace, vscode.ConfigurationTarget.Workspace);
+    const applied = vscode.workspace.getConfiguration('voyager');
+    if (applied.get('pythonPath') !== py) throw new Error('pythonPath not applied');
+    if (applied.get('repoPath') !== workspace) throw new Error('repoPath not applied');
+  });
+  await check('synthetic index exists inside the isolated home', async () => {
+    await vscode.workspace.fs.stat(vscode.Uri.file(index));
+  });
+
+  await check('one real WebviewPanel opens and closes (smoke only)', async () => {
     await vscode.commands.executeCommand('voyager.openSelector');
     await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
   });
 
   const failed = results.filter((r) => !r.ok);
-  console.log('\nREAL HOST E2E (automated host-side subset): ' +
+  console.log('\nREAL HOST SMOKE (automated subset): ' +
     (results.length - failed.length) + '/' + results.length + ' passed');
+  console.log('This is NOT a three-workflow E2E verdict. See README checklist.');
   if (failed.length) {
-    throw new Error(failed.length + ' real-host checks failed');
+    throw new Error(failed.length + ' real-host smoke checks failed');
   }
 }
 

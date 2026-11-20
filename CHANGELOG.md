@@ -75,6 +75,8 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ### Fixed
 
+- **The Extension Host harness now has a real npm and launch contract.** `vscode-extension/e2e/` gained a private `package.json` + lockfile pinning `@vscode/test-electron` 3.1.0, `npm run check` and `npm test`; `extensionTestsPath` now points at the `run()`-exporting `suite/index.js` module. The launcher resolves `E2E_PYTHON` to an absolute executable, applies it and the synthetic workspace through `voyager.pythonPath` / `voyager.repoPath`, and isolates `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, XDG and TMP for the seed, host and spawned core child. The automated host check is honestly labelled a smoke subset, not a three-workflow E2E. `tests/test_vscode_e2e_contract.py` records a 5-red/1-green baseline before the fix and passes after it; the real GUI host remains NOT VERIFIED in the sandbox. See `docs/audits/2026-11-20-extension-host-e2e-gate.md`.
+
 - **One malformed request can no longer kill the stdio API bridge.** The
   request envelope is validated before op dispatch: a non-object request, a
   non-string `op` and a non-object `params` now receive a JSON error response.

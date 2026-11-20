@@ -1,58 +1,74 @@
-# Real Extension Host E2E harness — Core #59
+# Real Extension Host smoke harness — Core #59
 
 > **Status: NOT VERIFIED in the sandbox that authored this harness.** Launching
 > a VS Code window is prohibited there (see Core #59 "Environment note"). This
 > directory is a ready-to-run harness for an **authorised machine with a GUI**.
-> It does not claim the Extension Host run happened. The seed step was executed
-> here (synthetic, isolated); the GUI launch was not.
+> The synthetic seed and static/startup contract tests run here; the GUI launch
+> did not. Automated coverage is a **host-side smoke subset**, not a three-panel
+> workflow E2E.
 
-## Why this exists
-
-The three read-only surfaces (Selector / Timeline / Composer) and the stdio
-bridge have unit + DOM-stub coverage, but a headless DOM-script run is not a
-real Extension Host run. Core #59 tracks the residue: activation, WebviewPanel
-lifecycle, command palette, host→webview message delivery, and child-process
-cleanup. This harness executes those in a real, **isolated** Extension Host.
-
-## What is verified vs not
+## What is actually covered
 
 | Layer | Where | Status here |
 |---|---|---|
-| Synthetic index seed (4 sessions, 2 WorkThreads, SOURCE_MISSING) | `seed_index.py` | **executed** (synthetic DB, isolated path) |
-| Harness script syntax (`node --check`) | `run-test.mjs`, `suite/index.js` | **passed** |
-| Extension activates + commands registered + WebviewPanel opens/closes | `suite/index.js` in a real host | **NOT VERIFIED** (no GUI in sandbox) |
-| In-iframe DOM: A→B→A race, generation echo, error/empty states, one-click switch command text | manual checklist below | **NOT VERIFIED** |
+| Synthetic index seed (4 sessions, 2 WorkThreads, `SOURCE_MISSING`) | `seed_index.py` | **executed** (synthetic DB, isolated path) |
+| Static npm/start contract tests | `tests/test_vscode_e2e_contract.py` | **passed** (no GUI) |
+| Extension activates, commands registered, one WebviewPanel opens/closes | `suite/index.js` in a real host | **NOT VERIFIED** (no GUI in sandbox) |
+| Real iframe rendering, host→webview delivery, A→B→A race, error/empty states, switch command text, bridge-child cleanup | manual checklist below | **NOT VERIFIED** |
 
-Do not promote any "NOT VERIFIED" row to PASS without a recorded transcript
-from the authorised machine (acceptance #1 of Core #59).
+Do not promote any NOT VERIFIED row to PASS without a recorded transcript from
+the authorised machine (Core #59 acceptance #1). Opening one `WebviewPanel`
+proves lifecycle/activation only; it is a **smoke only** check.
+
+## Install and run (authorised GUI machine only)
+
+The harness has its own npm manifest and lockfile; `npm ci` installs the real
+`@vscode/test-electron` dependency pinned at `3.1.0`. That package requires
+Node >= 22 (the authoring machine has Node v22.22.2).
+
+```bash
+cd E:/code/voyager/vscode-extension/e2e
+npm ci
+npm run check
+E2E_PYTHON=<absolute-python-with-voyager> E2E_TMPDIR=E:/some/scratch npm test
+```
+
+`npm test` runs `node ./run-test.mjs`, which **launches a real VS Code
+Extension Development Host**. It is not headless and must not be run in CI or
+an unattended sandbox. `@vscode/test-electron` uses `extensionTestsPath` to
+load `suite/index.js`, whose exported `run()` executes inside that host.
+
+Optional version selection:
+
+```bash
+VSCODE_VERSION=1.147.0 E2E_PYTHON=<python> npm test
+E2E_VSCODE_EXECUTABLE="C:/path/to/Code.exe" E2E_PYTHON=<python> npm test
+```
+
+The default `VSCODE_VERSION` is `1.95.0`. The extension manifest declares
+`"vscode": "^1.80.0"`, so both the pinned default and the locally observed
+VS Code 1.147.0 satisfy the engine range. `E2E_VSCODE_EXECUTABLE` bypasses the
+download and uses an explicitly named build; no GUI was started in the
+authoring sandbox to compare rendering between versions.
 
 ## Isolation — never touches the developer's profile
 
 `run-test.mjs` creates one throwaway temp root (override with `E2E_TMPDIR`)
-containing: a fresh `user-data-dir`, `extensions-dir`, a synthetic `HOME` with
-`~/.voyager/index.db`, an empty synthetic workspace, and no real session data.
-It redirects `HOME`/`USERPROFILE`/`VOYAGER_PYTHON` for both the launcher and the
-spawned `python -m voyager.api serve`. `--disable-extensions` prevents loading
-the developer's installed extensions. Nothing here scans a real provider.
+containing:
 
-## Run (on an authorised GUI machine)
+- fresh `user-data-dir` and `extensions-dir`;
+- isolated `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME`,
+  `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `TMP` and `TEMP`;
+- synthetic `HOME/.voyager/index.db` seeded by `seed_index.py`;
+- an empty synthetic workspace and no real session data.
 
-Prerequisites: a Python with the Core installed (`pip install -e <repo>`),
-Node 22+, and a network path for `@vscode/test-electron` to fetch a pinned
-VS Code build (or set `VSCODE_VERSION` to an already-cached version).
+It resolves `E2E_PYTHON` once, passes the resolved executable to the host, and
+`suite/index.js` writes it to `voyager.pythonPath` plus the synthetic workspace
+to `voyager.repoPath`. Setting `VOYAGER_PYTHON` alone does not configure the
+client. `--disable-extensions` prevents loading installed extensions; the
+extension under development remains active. Nothing scans a real provider.
 
-```bash
-cd E:/code/voyager/vscode-extension/e2e
-npm install                     # @vscode/test-electron (+ types)
-E2E_PYTHON=<python-with-voyager> npm test
-# optional: E2E_TMPDIR=E:/some/scratch VSCODE_VERSION=1.95.0 ...
-```
-
-The launcher seeds the index, starts the isolated host, runs `suite/index.js`,
-then removes the temp root. It prints `Extension Host E2E: PASS` only if every
-host-side assertion passed.
-
-## Manual acceptance checklist (in-iframe, operator)
+## Manual acceptance checklist (authorised operator)
 
 Open the three panels from the command palette and confirm, against the
 synthetic index:
@@ -76,13 +92,16 @@ synthetic index:
    pending requests reject, a later request spawns a fresh child; closing the
    panel and deactivating the extension leave no orphan process or timer.
 
-Record the transcript (commands + assertions + outcomes) in Core #59.
+Record the transcript (commands + assertions + outcomes) in Core #59. Only a
+recorded transcript can close the real-host items.
 
 ## Files
 
+- `package.json` / `package-lock.json` — real npm contract for this harness.
 - `seed_index.py` — synthetic index builder (executed here, isolated).
 - `run-test.mjs` — isolated Extension Host launcher.
-- `suite/index.js` — host-side test module (CommonJS, real `vscode` API).
+- `suite/index.js` — host-side CommonJS runner exporting `run()`.
 - `README.md` — this file.
 
-No VSIX is produced by this harness, and nothing is published to Marketplace.
+No VSIX is produced by this harness, nothing is published to Marketplace, and
+no extension is installed into the developer's daily VS Code profile.
