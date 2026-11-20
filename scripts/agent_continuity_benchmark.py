@@ -37,12 +37,12 @@ LIVE MODEL outcomes stay LIVE_MODEL_NOT_VERIFIED.
 Run:
     python scripts/agent_continuity_benchmark.py --workdir DIR
     python scripts/agent_continuity_benchmark.py --workdir DIR --out result.json
+    python scripts/agent_continuity_benchmark.py --workdir DIR --task T2
 """
 
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 import os
 import shlex
@@ -109,59 +109,202 @@ def _mkdir_empty(path: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # Synthetic task construction. Private grader data is NEVER under agent_root.
+# T1 keeps the historical calc scenario byte-for-byte. T2/T3 are independent
+# code tasks with different modules, requirements and hidden acceptance tests.
 # ---------------------------------------------------------------------------
-def _write_repo_template(repo: Path) -> None:
-    (repo / "tests").mkdir(parents=True, exist_ok=True)
-    (repo / "calc.py").write_text(
-        "def add(a, b):\n    return a + b\n", encoding="utf-8")
-    (repo / "tests" / "test_visible.py").write_text(
-        "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
-        encoding="utf-8")
+TASK_SPECS: Dict[str, Dict[str, Any]] = {
+    "T1": {
+        "files": {
+            "calc.py": "def add(a, b):\n    return a + b\n",
+            "tests/test_visible.py": (
+                "from calc import add\n\n\ndef test_add():\n"
+                "    assert add(1, 2) == 3\n"),
+        },
+        "hidden_test": (
+            "from calc import add\n\n\ndef test_add_three_args():\n"
+            "    assert add(1, 2) == 3\n"
+            "    assert add(1, 9, 5) == 5\n"),
+        "hidden_answer_line": "    assert add(1, 9, 5) == 5",
+        "goal": "extend add() with an optional third argument clamp, default 10",
+        "required_fact": "clamp, default 10",
+        "sessions": [
+            {
+                "sid": "codex:calc-task", "provider": "codex",
+                "native_id": "calc-task", "source_file": "calc.jsonl",
+                "title": "calc clamp work", "started": 1_700_000_000,
+                "updated": 1_700_000_030, "message_count": 3, "tool_count": 1,
+                "events": [
+                    {"ts": 1_700_000_000, "kind": "user",
+                     "content": "GOAL: extend add() with an optional third argument clamp, default 10"},
+                    {"ts": 1_700_000_010, "kind": "assistant",
+                     "content": "NEXT: add a third positional `clamp=10`; cap the sum at clamp"},
+                    {"ts": 1_700_000_020, "kind": "tool_call", "content": "",
+                     "command": "pytest -q", "exit_code": 0},
+                ],
+            },
+            {
+                "sid": "claude:calc-old", "provider": "claude",
+                "native_id": "calc-old", "source_file": "calc-old.jsonl",
+                "title": "old clamp idea", "started": 1_699_000_000,
+                "updated": 1_699_000_010, "message_count": 1, "tool_count": 0,
+                "source_missing": True,
+                "events": [
+                    {"ts": 1_699_000_000, "kind": "assistant",
+                     "content": "OLD: maybe clamp default should be 100"},
+                ],
+            },
+        ],
+        "thread_title": "calc clamp",
+        "thread_goal": "extend add() with a clamp argument",
+        "decoy_title": "unrelated docs cleanup",
+        "decoy_goal": "rewrite README",
+    },
+    "T2": {
+        "files": {
+            "textutil.py": (
+                "def normalize(value):\n    return value.strip()\n"),
+            "tests/test_visible.py": (
+                "from textutil import normalize\n\n\ndef test_normalize():\n"
+                "    assert normalize('  Hi ') == 'Hi'\n"),
+        },
+        "hidden_test": (
+            "from textutil import normalize\n\n\ndef test_normalize_case_option():\n"
+            "    assert normalize('  Hi ') == 'Hi'\n"
+            "    assert normalize('  Hi ', keep_case=True) == 'Hi'\n"),
+        "hidden_answer_line": "    assert normalize('  Hi ', keep_case=True) == 'Hi'",
+        "goal": "extend normalize() with keep_case=False; lower-case by default",
+        "required_fact": "keep_case, default False",
+        "sessions": [
+            {
+                "sid": "codex:textutil-task", "provider": "codex",
+                "native_id": "textutil-task", "source_file": "textutil.jsonl",
+                "title": "textutil case work", "started": 1_700_100_000,
+                "updated": 1_700_100_030, "message_count": 3, "tool_count": 1,
+                "events": [
+                    {"ts": 1_700_100_000, "kind": "user",
+                     "content": "GOAL: extend normalize() with keep_case=False; lower-case by default"},
+                    {"ts": 1_700_100_010, "kind": "assistant",
+                     "content": "NEXT: add keep_case=False; when false return value.strip().lower()"},
+                    {"ts": 1_700_100_020, "kind": "tool_call", "content": "",
+                     "command": "pytest -q", "exit_code": 0},
+                ],
+            },
+            {
+                "sid": "claude:textutil-old", "provider": "claude",
+                "native_id": "textutil-old", "source_file": "textutil-old.jsonl",
+                "title": "old case idea", "started": 1_699_100_000,
+                "updated": 1_699_100_010, "message_count": 1, "tool_count": 0,
+                "source_missing": True,
+                "events": [
+                    {"ts": 1_699_100_000, "kind": "assistant",
+                     "content": "OLD: maybe always lower-case even when keep_case is true"},
+                ],
+            },
+        ],
+        "thread_title": "textutil case option",
+        "thread_goal": "add keep_case to normalize()",
+        "decoy_title": "unrelated docs cleanup",
+        "decoy_goal": "rewrite README",
+    },
+    "T3": {
+        "files": {
+            "ledger.py": (
+                "def total(entries):\n"
+                "    return sum(entry['amount'] for entry in entries)\n"),
+            "tests/test_visible.py": (
+                "from ledger import total\n\n\ndef test_total():\n"
+                "    assert total([{'amount': 2}, {'amount': 3}]) == 5\n"),
+        },
+        "hidden_test": (
+            "from ledger import total\n\n\ndef test_total_ignores_bad_entries():\n"
+            "    assert total([{'amount': 10}, {'amount': -3}, "
+            "{'amount': 'x'}]) == 10\n"),
+        "hidden_answer_line": "    assert total([{'amount': 10}, {'amount': -3}, {'amount': 'x'}]) == 10",
+        "goal": "make total() ignore negative amounts and non-numeric values",
+        "required_fact": "ignore negative amounts and non-numeric values",
+        "sessions": [
+            {
+                "sid": "codex:ledger-task", "provider": "codex",
+                "native_id": "ledger-task", "source_file": "ledger.jsonl",
+                "title": "ledger validation work", "started": 1_700_200_000,
+                "updated": 1_700_200_030, "message_count": 3, "tool_count": 1,
+                "events": [
+                    {"ts": 1_700_200_000, "kind": "user",
+                     "content": "GOAL: make total() ignore negative amounts and non-numeric values"},
+                    {"ts": 1_700_200_010, "kind": "assistant",
+                     "content": "NEXT: skip entries whose amount is negative or not an int/float"},
+                    {"ts": 1_700_200_020, "kind": "tool_call", "content": "",
+                     "command": "pytest -q", "exit_code": 0},
+                ],
+            },
+            {
+                "sid": "claude:ledger-old", "provider": "claude",
+                "native_id": "ledger-old", "source_file": "ledger-old.jsonl",
+                "title": "old ledger idea", "started": 1_699_200_000,
+                "updated": 1_699_200_010, "message_count": 1, "tool_count": 0,
+                "source_missing": True,
+                "events": [
+                    {"ts": 1_699_200_000, "kind": "assistant",
+                     "content": "OLD: maybe subtract negative amounts to correct the total"},
+                ],
+            },
+        ],
+        "thread_title": "ledger validation",
+        "thread_goal": "skip invalid ledger amounts",
+        "decoy_title": "unrelated docs cleanup",
+        "decoy_goal": "rewrite README",
+    },
+}
 
 
-def _write_index(db: Path, repo: Path) -> None:
-    """Build the same synthetic sessions/threads, scoped to `repo`."""
+def _write_repo_template(repo: Path, spec: Dict[str, Any]) -> None:
+    for rel, content in spec["files"].items():
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def _write_index(db: Path, repo: Path,
+                 spec: Dict[str, Any]) -> Dict[str, str]:
+    """Build the task's synthetic sessions/threads, scoped to `repo`."""
     db.parent.mkdir(parents=True, exist_ok=True)
     store = Store(db)
     store.con.commit()
-    sid = "codex:calc-task"
-    src = db.parent / "calc.jsonl"
-    src.write_text("{}\n", encoding="utf-8")
-    events = [
-        new_event(sid=sid, ts=1_700_000_000, seq=0, kind="user",
-                  content="GOAL: extend add() with an optional third argument clamp, default 10"),
-        new_event(sid=sid, ts=1_700_000_010, seq=1, kind="assistant",
-                  content="NEXT: add a third positional `clamp=10`; cap the sum at clamp"),
-        new_event(sid=sid, ts=1_700_000_020, seq=2, kind="tool_call",
-                  content="", command="pytest -q", exit_code=0),
-    ]
-    row = new_session(
-        id=sid, provider="codex", native_session_id="calc-task",
-        title="calc clamp work", started_at=1_700_000_000,
-        updated_at=1_700_000_030, cwd=str(repo), repo_root=str(repo),
-        message_count=3, tool_count=1, can_resume=False, metadata={}, raw_metadata={})
-    store.replace_session(row, events, "codex", src)
-
-    sid_old = "claude:calc-old"
-    src_old = db.parent / "calc-old.jsonl"
-    src_old.write_text("{}\n", encoding="utf-8")
-    ev_old = [new_event(sid=sid_old, ts=1_699_000_000, seq=0, kind="assistant",
-                        content="OLD: maybe clamp default should be 100")]
-    row_old = new_session(
-        id=sid_old, provider="claude", native_session_id="calc-old",
-        title="old clamp idea", started_at=1_699_000_000,
-        updated_at=1_699_000_010, cwd=str(repo), repo_root=str(repo),
-        message_count=1, can_resume=False, metadata={}, raw_metadata={})
-    store.replace_session(row_old, ev_old, "claude", src_old)
-    store.q("UPDATE sessions SET source_state='SOURCE_MISSING' WHERE id=?", (sid_old,))
+    for session in spec["sessions"]:
+        sid = session["sid"]
+        src = db.parent / session["source_file"]
+        src.write_text("{}\n", encoding="utf-8")
+        events = []
+        for seq, raw in enumerate(session["events"]):
+            kwargs: Dict[str, Any] = {
+                "sid": sid, "ts": raw["ts"], "seq": seq,
+                "kind": raw["kind"], "content": raw.get("content", ""),
+            }
+            for optional in ("command", "exit_code"):
+                if optional in raw:
+                    kwargs[optional] = raw[optional]
+            events.append(new_event(**kwargs))
+        row = new_session(
+            id=sid, provider=session["provider"],
+            native_session_id=session["native_id"], title=session["title"],
+            started_at=session["started"], updated_at=session["updated"],
+            cwd=str(repo), repo_root=str(repo),
+            message_count=session["message_count"],
+            tool_count=session["tool_count"], can_resume=False,
+            metadata={}, raw_metadata={})
+        store.replace_session(row, events, session["provider"], src)
+        if session.get("source_missing"):
+            store.q(
+                "UPDATE sessions SET source_state='SOURCE_MISSING' WHERE id=?",
+                (sid,))
     store.con.commit()
 
-    correct = store.thread_create(repo_root=str(repo), title="calc clamp",
-                                  goal="extend add() with a clamp argument")
-    store.thread_attach(correct, sid)
-    store.thread_attach(correct, sid_old)
-    decoy = store.thread_create(repo_root=str(repo), title="unrelated docs cleanup",
-                                goal="rewrite README")
+    correct = store.thread_create(
+        repo_root=str(repo), title=spec["thread_title"], goal=spec["thread_goal"])
+    for session in spec["sessions"]:
+        store.thread_attach(correct, session["sid"])
+    decoy = store.thread_create(
+        repo_root=str(repo), title=spec["decoy_title"], goal=spec["decoy_goal"])
     store.con.commit()
     store.close()
     return {"correct_thread_id": correct, "decoy_thread_id": decoy}
@@ -169,34 +312,34 @@ def _write_index(db: Path, repo: Path) -> None:
 
 def build_task(workdir: Path, task_id: str = "T1") -> Dict[str, Any]:
     """Create one synthetic task with private grader data and a repo template."""
+    if task_id not in TASK_SPECS:
+        raise BenchmarkContractError("unknown task id: " + task_id)
+    spec = TASK_SPECS[task_id]
     workdir = Path(workdir)
     private = workdir / "private"
     _mkdir_empty(private)
     repo_template = private / "repo_template"
-    _write_repo_template(repo_template)
+    _write_repo_template(repo_template, spec)
 
     hidden_dir = private / "hidden_tests"
     hidden_dir.mkdir(parents=True, exist_ok=True)
     hidden_test = hidden_dir / "test_hidden.py"
-    hidden_test.write_text(
-        "from calc import add\n\n\ndef test_add_three_args():\n"
-        "    assert add(1, 2) == 3\n"
-        "    assert add(1, 9, 5) == 5\n",
-        encoding="utf-8")
+    hidden_test.write_text(spec["hidden_test"], encoding="utf-8")
 
     index_db = private / "index.db"
-    threads = _write_index(index_db, repo_template)
+    threads = _write_index(index_db, repo_template, spec)
 
     manifest = {
         "schema": SCHEMA,
         "task_id": task_id,
         "repo_template": str(repo_template),
         "hidden_test": str(hidden_test),
+        "hidden_answer_line": spec["hidden_answer_line"],
         "index_db": str(index_db),
         "private_root": str(private),
-        "goal": "extend add() with an optional third argument clamp, default 10",
-        "required_fact": "clamp, default 10",
-        "session_ids": ["codex:calc-task", "claude:calc-old"],
+        "goal": spec["goal"],
+        "required_fact": spec["required_fact"],
+        "session_ids": [s["sid"] for s in spec["sessions"]],
         **threads,
     }
     (private / "task_manifest.json").write_text(
@@ -286,7 +429,7 @@ def prepare_baseline(workdir: Path, manifest: Dict[str, Any], mode: str,
     shutil.copytree(manifest["repo_template"], repo)
     home = agent_root / "home"
     db = home / ".voyager" / "index.db"
-    threads = _write_index(db, repo)
+    threads = _write_index(db, repo, TASK_SPECS[manifest["task_id"]])
     local_id = threads["correct_thread_id"]
     store = Store(db)
     try:
@@ -484,12 +627,13 @@ def _not_verified_row() -> Dict[str, Any]:
 
 
 def run_level2(workdir: Path, runner: Optional[str] = None,
-               python: Optional[str] = None) -> Dict[str, Any]:
-    """Build all modes/baselines, but never launch an agent."""
+               python: Optional[str] = None,
+               task_id: str = "T1") -> Dict[str, Any]:
+    """Build all modes/baselines for one task, but never launch an agent."""
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     py = python or sys.executable
-    manifest = build_task(workdir)
+    manifest = build_task(workdir, task_id=task_id)
     private = Path(manifest["private_root"])
     eval_root = private / "eval"
     eval_root.mkdir(parents=True, exist_ok=True)
@@ -515,7 +659,8 @@ def run_level2(workdir: Path, runner: Optional[str] = None,
             layout = prepare_baseline(workdir, manifest, mode, name, contexts[name])
             prompt_text = Path(layout["prompt"]).read_text(encoding="utf-8")
             hidden_token = Path(manifest["hidden_test"]).read_text(encoding="utf-8")
-            answer_line = [ln for ln in hidden_token.splitlines() if "assert add(1, 9, 5)" in ln]
+            answer_line = [ln for ln in hidden_token.splitlines()
+                           if ln == manifest["hidden_answer_line"]]
             if answer_line and answer_line[0] in prompt_text:
                 raise BenchmarkContractError("hidden answer leaked into " + name)
             rows[name] = {
@@ -572,13 +717,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--workdir", required=True,
                     help="isolated scratch dir for the synthetic task")
+    ap.add_argument("--task", default="T1", choices=sorted(TASK_SPECS),
+                    help="synthetic task id (T1 calc, T2 textutil, T3 ledger)")
     ap.add_argument("--out", default=None, help="write structured JSON here")
     ap.add_argument("--runner", default=None,
                     help="inspect a runner contract only; NO agent is launched")
     ap.add_argument("--python", default=None,
                     help="python with pytest for the independent evaluator")
     args = ap.parse_args(argv)
-    result = run_level2(Path(args.workdir), args.runner, args.python)
+    result = run_level2(Path(args.workdir), args.runner, args.python, args.task)
     payload = json.dumps(result, indent=2, ensure_ascii=False)
     if args.out:
         Path(args.out).write_text(payload + "\n", encoding="utf-8")

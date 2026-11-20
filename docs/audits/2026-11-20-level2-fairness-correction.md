@@ -106,3 +106,18 @@ Three v2 implementation details could still mislead a reviewer even while no mod
 | Private-path string checks looked like a security boundary; runner failures were collapsed into one label. | Variant private paths passed the contract while the contract claimed no live execution boundary; `classify_outcome()` had no spawn/timeout/evaluator classes. | Contract fields now say `LINT_ONLY_NOT_SECURITY_BOUNDARY` / `live_execution_supported: false`; failure classes are explicit and consumed by the evaluator verdict. |
 
 No OS sandbox appeared and no live runner was enabled. The evidence class remains **DRY_RUN / LIVE_MODEL_NOT_VERIFIED**, not real agent success.
+
+## 7. Independent synthetic tasks
+
+T1 remains the historical `calc.add()` scenario and reproduces the published context sizes exactly: `0/46/47/550` in Oracle and `0/46/47/372` in the two non-Oracle modes. Two independent tasks were added without changing the Level 1 scorer:
+
+| Task | Module | Hidden requirement | Hidden failure on start |
+|---|---|---|---|
+| `T2` | `textutil.normalize()` | add `keep_case=False`; lower-case by default | unexpected keyword argument |
+| `T3` | `ledger.total()` | ignore negative and non-numeric amounts | hidden assertion fails |
+
+`build_task(workdir, task_id)` selects a task spec; each spec owns its repo files, visible test, hidden test, hidden-answer key, session content, thread title and decoy. The CLI exposes `--task T1|T2|T3`; default is T1 so earlier measurements stay comparable. `run_level2()` accepts `task_id` and applies the same three modes and four baselines to the selected task.
+
+Quality gates now have 25 checks: T2/T3 build green visible repos, fail their own hidden tests, contain no `calc.py`, and expose their task-specific hidden-answer key; T2 also runs through all three modes and four baselines in DRY-RUN. The harness still launches no model and reports no completion rate.
+
+Runner isolation remains **BLOCKED** with the explicit probe in `docs/audits/2026-11-20-runner-isolation-gate.md`.
