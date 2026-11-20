@@ -272,7 +272,9 @@ def test_eval_repos_are_unique_per_mode_baseline_and_run(mod, scratch_root):
 def test_private_path_string_check_is_lint_only(mod, result):
     layout = result["modes"]["oracle_conditioned"]["baselines"]["no_history"]["layout"]
     private = result["isolation"]["private_grader_root"]
-    variant = private.replace("\\", "/").lower()
+    # A different spelling must not be mistaken for an isolation guarantee.
+    # On Windows the case differs; on POSIX the separators differ.
+    variant = private.replace("\\", "/").replace("/", "\\").lower()
     contract = mod.runner_contract(
         "my-agent --private-root '" + variant + "' --prompt-file {prompt} --repo {repo}",
         layout, pathlib.Path(private).parent)
