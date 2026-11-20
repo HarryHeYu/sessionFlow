@@ -37,12 +37,12 @@ LIVE MODEL outcomes stay LIVE_MODEL_NOT_VERIFIED.
 Run:
     python scripts/agent_continuity_benchmark.py --workdir DIR
     python scripts/agent_continuity_benchmark.py --workdir DIR --out result.json
+    python scripts/agent_continuity_benchmark.py --workdir DIR --task T2
 """
 
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 import os
 import shlex

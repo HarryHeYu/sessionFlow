@@ -85,6 +85,7 @@ true on a date; it is not a description of the product and is not updated.
 | [audits/2026-11-20-extension-host-e2e-gate.md](audits/2026-11-20-extension-host-e2e-gate.md) | AUDIT | maintainer | frozen — Core #59 real Extension Host blocked in sandbox (no GUI); isolated harness prepared, executable-contract defects corrected, host run still NOT VERIFIED |
 | [audits/2026-11-20-agent-continuity-benchmark.md](audits/2026-11-20-agent-continuity-benchmark.md) | EXPERIMENT_REPORT | maintainer | historical — v1 Level 2 harness DRY-RUN; superseded in part by the v2 fairness correction below |
 | [audits/2026-11-20-level2-fairness-correction.md](audits/2026-11-20-level2-fairness-correction.md) | AUDIT | maintainer | maintained — v2 modes, private grader tree, per-baseline isolation and disabled live runner; no LIVE MODEL claim |
+| [audits/2026-11-20-runner-isolation-gate.md](audits/2026-11-20-runner-isolation-gate.md) | AUDIT | maintainer | frozen — 2026-11-20 isolation capability probe: WSL/container/VM/remote options all BLOCKED; live runner remains disabled |
 
 ## Performance evidence
 
