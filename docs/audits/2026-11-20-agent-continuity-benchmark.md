@@ -1,5 +1,7 @@
 # Continuity benchmark — Level 2 Agent Effectiveness harness — 2026-11-20
 
+> **Correction (same date):** the v1 harness described below mixed Oracle goal/thread inputs with work discovery and kept grader data in the shared work tree. It is superseded by the v2 fairness correction in `docs/audits/2026-11-20-level2-fairness-correction.md`. The v1 DRY-RUN numbers below remain historical context-construction observations and are NOT autonomous discovery results.
+
 > **Honest status: harness delivered and DRY-RUN verified; LIVE MODEL NOT VERIFIED.**
 > No agent was launched, no paid call made, no completion rate invented. This
 > extends Core PR #64's Level 1 harness; it does not rewrite its scorer.
