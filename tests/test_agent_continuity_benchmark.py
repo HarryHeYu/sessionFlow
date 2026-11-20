@@ -167,6 +167,48 @@ def test_dry_run_marks_all_outcomes_not_verified(result, mod):
             assert row["runner"]["status"] == "NOT_EXECUTED"
 
 
+@pytest.mark.parametrize("task_id", ["T1", "T2", "T3"])
+def test_hidden_answer_key_matches_the_task(mod, scratch_root, task_id):
+    task = mod.build_task(scratch_root / ("answer-key-" + task_id),
+                          task_id=task_id)
+    hidden = pathlib.Path(task["hidden_test"]).read_text(encoding="utf-8")
+    visible = "".join(mod.TASK_SPECS[task_id]["files"].values())
+    assert task["hidden_answer_line"] in hidden, task_id
+    assert task["hidden_answer_line"] not in visible, task_id
+
+
+@pytest.mark.parametrize("task_id", ["T2", "T3"])
+def test_independent_synthetic_tasks_build_and_fail_hidden(mod, scratch_root, task_id):
+    task = mod.build_task(scratch_root / ("independent-" + task_id),
+                          task_id=task_id)
+    assert task["task_id"] == task_id
+    repo = pathlib.Path(task["repo_template"])
+    assert not (repo / "calc.py").exists(), task_id
+    visible = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "tests"],
+        cwd=repo, capture_output=True, text=True)
+    assert visible.returncode == 0, visible.stdout
+
+    hidden = pathlib.Path(task["hidden_test"])
+    hidden_text = hidden.read_text(encoding="utf-8")
+    assert "assert add(1, 9, 5)" not in hidden_text, task_id
+    eval_root = pathlib.Path(task["private_root"]) / "eval"
+    eval_root.mkdir(parents=True, exist_ok=True)
+    verdict = mod.evaluate_repo(
+        repo, hidden, sys.executable, eval_root,
+        mode="task-sanity", baseline=task_id, run_id="build")
+    assert verdict["independent_tests_pass"] is False, task_id
+
+
+def test_run_level2_accepts_an_independent_task(mod, scratch_root):
+    result = mod.run_level2(scratch_root / "independent-t2-level2", task_id="T2")
+    assert result["task"]["task_id"] == "T2"
+    assert result["sanity_hidden_test_fails_on_start"] is True
+    assert set(result["modes"]) == set(mod.MODES)
+    for mode in result["modes"].values():
+        assert set(mode["baselines"]) == set(mod.BASELINES)
+
+
 def test_live_runner_is_disabled_but_contract_is_inspectable(runner_result):
     runner = runner_result["runner"]
     assert runner["status"] == "DISABLED"
