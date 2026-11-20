@@ -241,13 +241,17 @@ def build_contexts(workdir: Path, manifest: Dict[str, Any],
 
 
 def write_prompt(agent_root: Path, manifest: Dict[str, Any], mode: str,
-                 name: str, context: str, repo: Path) -> Path:
+                 name: str, context: str, repo: Path,
+                 oracle_thread_id: Optional[str] = None) -> Path:
     lines = ["You are continuing work in the repo at %s." % repo]
     if mode == "oracle_conditioned":
+        if not oracle_thread_id:
+            raise BenchmarkContractError(
+                "oracle_conditioned needs the baseline-local WorkThread id")
         lines += [
             "EVALUATION MODE: ORACLE_CONDITIONED (context-quality only).",
             EXTERNAL_GOAL_MARKER + " " + manifest["goal"],
-            THREAD_ID_MARKER + " " + manifest["correct_thread_id"],
+            THREAD_ID_MARKER + " " + oracle_thread_id,
             "This run must NOT be counted as autonomous work discovery.",
         ]
     elif mode == "explicit_goal_continuation":
@@ -283,11 +287,18 @@ def prepare_baseline(workdir: Path, manifest: Dict[str, Any], mode: str,
     home = agent_root / "home"
     db = home / ".voyager" / "index.db"
     threads = _write_index(db, repo)
-    if threads["correct_thread_id"] != manifest["correct_thread_id"]:
-        # Thread ids are generated per index; the harness records the local
-        # id for evaluation but never exposes it in a prompt outside oracle.
-        pass
-    prompt = write_prompt(agent_root, manifest, mode, name, context, repo)
+    local_id = threads["correct_thread_id"]
+    store = Store(db)
+    try:
+        thread = store.thread_get(local_id)
+        if thread is None or len(store.thread_members(local_id)) != 2:
+            raise BenchmarkContractError(
+                "baseline index has no usable local WorkThread: " + local_id)
+    finally:
+        store.close()
+    prompt = write_prompt(
+        agent_root, manifest, mode, name, context, repo,
+        oracle_thread_id=local_id if mode == "oracle_conditioned" else None)
     tmp = agent_root / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
     return {
@@ -331,12 +342,15 @@ def runner_contract(template: str, layout: Dict[str, Any],
     for needle in (str(private), "test_hidden.py", "task_manifest.json"):
         if needle in template:
             raise BenchmarkContractError(
-                "runner template may not reference private grader data")
+                "runner template contains an obvious private grader reference; "
+                "this lint check is not an isolation boundary")
     agent_root = Path(layout["agent_root"])
     argv = shlex.split(template.format(prompt=layout["prompt"], repo=layout["repo"]))
     return {
         "status": "DISABLED",
         "reason": "NO_OS_SANDBOX",
+        "live_execution_supported": False,
+        "private_path_check": "LINT_ONLY_NOT_SECURITY_BOUNDARY",
         "cwd": layout["repo"],
         "argv": argv,
         "env_keys": sorted(_runner_env(agent_root)),
@@ -354,29 +368,75 @@ def manifest_private_root(workdir: Path) -> str:
     return str(Path(workdir) / "private")
 
 
+RUNNER_STATUSES = (
+    "completed", "spawn_failed", "timeout", "evaluator_failed",
+)
+
+
 def classify_outcome(runner_returncode: Optional[int],
-                     verdict: Dict[str, Any]) -> Dict[str, Any]:
-    """Runner failure and acceptance-test failure are different outcomes."""
-    if runner_returncode is None or runner_returncode != 0:
-        return {
-            "final_code_meets_goal": False,
-            "independent_tests_pass": False,
-            "failure_type": "runner_error",
-            "runner_returncode": runner_returncode,
-        }
-    passed = bool(verdict.get("independent_tests_pass"))
-    return {
-        "final_code_meets_goal": passed,
-        "independent_tests_pass": passed,
-        "failure_type": None if passed else "tests_failed",
+                     verdict: Dict[str, Any],
+                     runner_status: str = "completed") -> Dict[str, Any]:
+    """Classify runner, evaluator and hidden-test failures separately.
+
+    ``runner_status`` is supplied by the future OS-sandboxed runner.  This
+    dry-run harness never launches that runner, but the contract must exist
+    before live execution is enabled so a crashed agent can never be scored as
+    a successful continuation.
+    """
+    if runner_status not in RUNNER_STATUSES:
+        raise BenchmarkContractError("unknown runner status: " + runner_status)
+    base: Dict[str, Any] = {
+        "runner_status": runner_status,
         "runner_returncode": runner_returncode,
     }
 
+    def failed(failure_type: str) -> Dict[str, Any]:
+        return {
+            **base,
+            "final_code_meets_goal": False,
+            "independent_tests_pass": False,
+            "failure_type": failure_type,
+        }
+
+    if runner_status == "spawn_failed":
+        return failed("runner_spawn_failed")
+    if runner_status == "timeout":
+        return failed("runner_timeout")
+    if runner_status == "evaluator_failed" or verdict.get("evaluator_failed") is True:
+        return failed("evaluator_failed")
+    if runner_returncode is None:
+        return failed("runner_error")
+    if runner_returncode != 0:
+        return failed("runner_failed")
+
+    passed = bool(verdict.get("independent_tests_pass"))
+    return {
+        **base,
+        "final_code_meets_goal": passed,
+        "independent_tests_pass": passed,
+        "failure_type": "success" if passed else "hidden_tests_failed",
+    }
+
+
+def _safe_component(value: Any) -> str:
+    text = str(value)
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_"
+                   for ch in text)[:80]
+
 
 def evaluate_repo(repo: Path, hidden_test: Path, python: str,
-                  eval_root: Path) -> Dict[str, Any]:
-    """Evaluate a finished repo with hidden tests copied OUTSIDE agent_root."""
-    eval_repo = Path(eval_root) / (Path(repo).name + "__eval")
+                  eval_root: Path, mode: str = "unspecified",
+                  baseline: str = "unspecified",
+                  run_id: str = "adhoc") -> Dict[str, Any]:
+    """Evaluate a finished repo with hidden tests copied OUTSIDE agent_root.
+
+    Each mode/baseline/run gets its own evaluation directory.  Reusing a
+    directory would let a later run's copied repo overwrite evidence from an
+    earlier run, which makes concurrent or repeated comparisons misleading.
+    """
+    scope = "_".join(
+        _safe_component(x) for x in (run_id, mode, baseline))
+    eval_repo = Path(eval_root) / (scope + "__eval")
     _mkdir_empty(eval_repo)
     shutil.copytree(repo, eval_repo, dirs_exist_ok=True)
     target = eval_repo / "tests" / "test_hidden.py"
@@ -391,15 +451,28 @@ def evaluate_repo(repo: Path, hidden_test: Path, python: str,
             [python, "-m", "pytest", "-q", "tests"],
             cwd=str(eval_repo), env=env, capture_output=True,
             text=True, timeout=120)
+        passed = proc.returncode == 0
+        verdict: Dict[str, Any] = {
+            "independent_tests_pass": passed,
+            "verdict_status": "passed" if passed else "hidden_tests_failed",
+        }
         return {
-            "independent_tests_pass": proc.returncode == 0,
+            **verdict,
+            "failure_type": classify_outcome(
+                proc.returncode, verdict)["failure_type"],
             "returncode": proc.returncode,
             "eval_repo": str(eval_repo),
             "output_tail": (proc.stdout + "\n" + proc.stderr)[-800:],
         }
     except Exception as e:  # evaluation failure is not a pass
-        return {
+        verdict = {
             "independent_tests_pass": False,
+            "verdict_status": "evaluator_failed",
+            "evaluator_failed": True,
+        }
+        return {
+            **verdict,
+            "failure_type": "evaluator_failed",
             "returncode": None,
             "eval_repo": str(eval_repo),
             "output_tail": "evaluation error: %s" % e,
@@ -425,7 +498,9 @@ def run_level2(workdir: Path, runner: Optional[str] = None,
     if sanity_repo.exists():
         shutil.rmtree(sanity_repo)
     shutil.copytree(manifest["repo_template"], sanity_repo)
-    sanity = evaluate_repo(sanity_repo, Path(manifest["hidden_test"]), py, eval_root)
+    sanity = evaluate_repo(
+        sanity_repo, Path(manifest["hidden_test"]), py, eval_root,
+        mode="sanity", baseline="hidden_test", run_id="dryrun")
 
     runner_plan: Optional[Dict[str, Any]] = None
     if runner:

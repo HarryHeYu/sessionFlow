@@ -44,7 +44,7 @@ workdir/
     tmp/
 ```
 
-`hidden_tests/test_hidden.py` and `task_manifest.json` are never inside an `agent/` root. Evaluation copies the hidden test into `private/eval/<repo>__eval`, not into the agent's repo. Tests assert path separation and that an edit to one baseline's `calc.py` does not appear in any other baseline.
+`hidden_tests/test_hidden.py` and `task_manifest.json` are never inside an `agent/` root. Evaluation copies the hidden test into `private/eval/<run>_<mode>_<baseline>__eval`, not into the agent's repo. The run/mode/baseline key prevents a later comparison from overwriting an earlier evaluation directory. Tests assert path separation and that an edit to one baseline's `calc.py` does not appear in any other baseline.
 
 ### Runner policy
 
@@ -55,7 +55,7 @@ workdir/
 - removed: real profile variables, `SSH_AUTH_SOCK`, provider tokens, `CODEX_*`, `CLAUDE_*`, `DSH_*`, `WORKBUDDY_*`, ambient `VOYAGER_*`;
 - OS-level per-baseline filesystem boundary: **absent**.
 
-Because a shell template cannot stop one agent from reading a sibling repo or a real index, live execution is disabled (`NO_OS_SANDBOX`). `classify_outcome()` keeps `runner_error` separate from `tests_failed`; a non-zero runner never becomes task success.
+Because a shell template cannot stop one agent from reading a sibling repo or a real index, live execution is disabled (`NO_OS_SANDBOX`). Any obvious private-path string in a template is rejected only as a lint warning; it is explicitly **not** an isolation boundary and variant spellings are not treated as protection. `classify_outcome()` keeps `runner_spawn_failed`, `runner_timeout`, `runner_failed`, `evaluator_failed` and `hidden_tests_failed` separate from `success`; a non-zero or crashed runner never becomes task success.
 
 ## 3. Measurements (DRY-RUN, executed)
 
@@ -69,23 +69,40 @@ Because a shell template cannot stop one agent from reading a sibling repo or a 
 
 ## 4. Tests
 
-`tests/test_agent_continuity_benchmark.py` now has 15 gates covering:
+`tests/test_agent_continuity_benchmark.py` now has 19 gates covering:
 
 - green starting repo and failing hidden test;
 - three modes / four baselines and non-pooled labels;
 - removal of Oracle goal/thread changes discovery signals;
 - identical explicit goal across baselines and no thread id outside Oracle;
+- Oracle prompt uses the baseline-local WorkThread id even when the private
+  manifest id differs;
 - private grader data outside every agent root;
 - per-baseline repo/home independence and no cross-baseline edit pollution;
 - no hidden answer in any prompt;
 - DRY-RUN marks every outcome NOT VERIFIED;
 - runner is disabled but its cwd/env contract is inspectable;
-- runner templates cannot name private grader data;
-- runner errors are not success;
-- scorer signature has no method/baseline name.
+- obvious private grader references are rejected as lint, explicitly not as an
+  isolation boundary;
+- evaluation directories are unique per run id / mode / baseline;
+- runner failure classes (spawn, timeout, evaluator, non-zero exit, hidden tests)
+  are distinct and never become success;
+- scorer verdict is independent of method/baseline labels.
 
-Result: **15 passed**. The old v1 harness was separately reproduced as the defect table in section 1.
+Result: **19 passed**. The old v1 harness was separately reproduced as the defect table in section 1. Four post-merge mutations (baseline-local Oracle id, unique eval dir, failure labels, lint marker) each turn their matching gate red.
 
 ## 5. Unchanged boundaries
 
 Level 1 `scripts/continuity_benchmark.py` and its historical 0/17/11/24 result are untouched. No Store or Bridge schema change, no provider added, no real session/index/home read, no model launched, no Tag or Release. Real agent effectiveness, paid-model runs and a true OS-level sandbox remain **NOT VERIFIED / NOT AVAILABLE**.
+
+## 6. R4 post-merge correctness correction
+
+Three v2 implementation details could still mislead a reviewer even while no model was launched:
+
+| Finding | Red evidence | Correction |
+|---|---|---|
+| Oracle prompt used `manifest.correct_thread_id` from the private index, but each baseline rebuilds its own index and gets a new id. | Force all thread ids to differ: the Oracle prompt named `thr_forced_0001` while the baseline store only had `thr_forced_0003`. | `write_prompt()` receives the baseline-local id; `prepare_baseline()` verifies it exists and has two members before use. |
+| Every evaluation copied to `repo__eval`, so a second mode/baseline/run could overwrite the first. | Four label combinations produced the same `repo_template__eval` path. | `evaluate_repo()` keys the copy by run id, mode and baseline; tests assert four distinct paths. |
+| Private-path string checks looked like a security boundary; runner failures were collapsed into one label. | Variant private paths passed the contract while the contract claimed no live execution boundary; `classify_outcome()` had no spawn/timeout/evaluator classes. | Contract fields now say `LINT_ONLY_NOT_SECURITY_BOUNDARY` / `live_execution_supported: false`; failure classes are explicit and consumed by the evaluator verdict. |
+
+No OS sandbox appeared and no live runner was enabled. The evidence class remains **DRY_RUN / LIVE_MODEL_NOT_VERIFIED**, not real agent success.
