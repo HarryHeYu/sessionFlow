@@ -93,6 +93,8 @@ git archive <previous-tag> | tar -x -C "$SCRATCH/prev"
 `PYTHONPATH`: with it in place, bulk `unlink()` raises and tests fail for a reason
 that has nothing to do with the code.
 
+The 1.6.0 Core candidate is prepared at commit `913be97` (CI 10/10) but is **not tagged**. Published install commands stay on `v1.5.0` until the pre-tag pin patch in step 3 below. Do not read the candidate note in the READMEs as a release announcement.
+
 Release mechanics — the `release` workflow is **automatic**:
 
 `on: push: tags: v*` runs `.github/workflows/release.yml`. It checks out the
