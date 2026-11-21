@@ -21,9 +21,9 @@ is one client of it, and the core is a general-purpose local tool.)
 |---|---|
 | **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
 | **Why use it** | Your history is split across nine formats. sessionFlow makes it one thing you can search, summarize, export and continue — and every claim in a continuation bundle names the event it came from, so you can check it. |
-| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"` — [details](#install) |
+| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
-| **Current release** | [v1.5.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.5.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **Current release** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Community** | Listed in the third-party [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/data/plugins/HarryHeYu__dsh-sessionflow.yml) directory — a listing, not a certification |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
@@ -123,10 +123,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 
 # or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
@@ -134,12 +134,12 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@v1.5.0` pins a release tag, which is what makes a reinstall reproducible
-and is what the DSH plugin's own error messages recommend. Drop the `@v1.5.0`
+The `@v1.6.0` pins a release tag, which is what makes a reinstall reproducible
+and is what the DSH plugin's own error messages recommend. Drop the `@v1.6.0`
 to follow `main` instead. Check the installed version with:
 
 ```sh
-voyager --version        # must print 1.5.0
+voyager --version        # must print 1.6.0
 ```
 
 > **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
@@ -147,23 +147,21 @@ voyager --version        # must print 1.5.0
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
 
-> **`v1.5.0` is the current release.** Two changes: the **Evidence Verify API
-> op** (`evidence_verify`) — the machine surface for the five verification
-> verdicts, by @SunnyRad — and **strict machine-derived repo scope**: a sibling
-> directory's WorkThread (`E:/x/demo-old` while working in `E:/x/demo`) can no
-> longer be adopted as the current work by `status` / `current_work` / hooks /
-> the launcher. Upgrade with `@v1.5.0` (see above); the changes are listed
-> under `[1.5.0]` in `CHANGELOG.md`. Native resume for OpenCode is still not
-> implemented (`NOT_FOUND`), and the DSH plugin remains at v1.2.0 with its six
-> tools — its seventh tool lands with plugin v1.3.0.
+> **`v1.6.0` is the current release.** It adds `merge --repo`, a read-only
+> `voyager preview`, the WorkBuddy read-only provider and the VS Code WorkThread
+> Selector, on top of v1.5.0's additive `evidence_verify` op and strict
+> machine-derived repo scope. Upgrade with `@v1.6.0` (see above); the user-facing
+> changes are listed under `[1.6.0]` in `CHANGELOG.md` and
+> `docs/releases/v1.6.0.md`. The released DSH plugin pairing remains v1.3.0
+> against Core v1.5.0; plugin v1.4.0 is prepared for Core 1.6.0.
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"          # core
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"          # core
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + MCP server
 ```
 
 Working on Voyager itself:
