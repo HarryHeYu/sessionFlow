@@ -464,6 +464,22 @@ class TestMaintenanceGuide(unittest.TestCase):
         missing = [pair for pair in historical if pair not in pairs]
         self.assertEqual(missing, [], "historical compatibility rows were removed")
 
+    def test_header_names_the_published_release(self):
+        """The install command must name a tag that actually exists."""
+        published = self.rows()[0][0][1:]
+        en = (ROOT / "README.md").read_text(encoding="utf-8")
+        zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+        for text, marker in ((en, "Current release"), (zh, "当前版本")):
+            line = next((l for l in text.splitlines() if marker in l), "")
+            found = re.search(r"releases/tag/v(\d+\.\d+\.\d+)", line)
+            self.assertIsNotNone(found, "current-release row must link a tag")
+            self.assertEqual(found.group(1), published,
+                             "README must not advertise an untagged candidate")
+        for text in (en, zh):
+            pins = set(re.findall(r"sessionFlow\.git@v(\d+\.\d+\.\d+)", text))
+            self.assertEqual(pins, {published},
+                             "install pins must use the published release")
+
     def test_indexing_and_native_resume_are_not_conflated(self):
         text = self.GUIDE.read_text(encoding="utf-8")
         self.assertIn(
