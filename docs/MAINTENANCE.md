@@ -31,12 +31,13 @@ known, what is supported, and what a maintainer should check.
 | Python | 3.10 – 3.13 (CI covers all four on both OS families) |
 | OS | Windows, Linux. macOS is supported by the code and the path handling but is **not in CI**. |
 | Agents indexed | Codex, Claude Code, DSH, Grok CLI, ZCode, Kiro, Cursor, Antigravity, OpenCode, WorkBuddy |
-| Distribution | GitHub tag install (`@v1.5.0`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
+| Distribution | GitHub tag install (`@v1.6.0`). **Not on PyPI** — the name `voyager` there is an unrelated library. |
 
 ## Compatibility Matrix
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
+| 1.6.0 (candidate) | 1.4.0 (candidate) | 1 | prepared on main, not tagged; additive `merge --repo`, read-only `preview`, WorkBuddy provider and VS Code Selector; no Store/Bridge schema change |
 | v1.5.0 | v1.3.0 | 1 | **current pairing** (Core release 2026-11-14; plugin release 2026-11-15); seventh tool `sessionflow_evidence_verify` ships in plugin v1.3.0 through the additive Core `evidence_verify` op; bridge schema unchanged |
 | v1.5.0 | v1.2.0 | 1 | historical pairing after Core v1.5.0 before plugin v1.3.0; six tools, no seventh tool; index and bridge schema unchanged |
 | v1.4.1 | v1.2.0 | 1 | released 2026-11-14 (patch); plugin v1.2.0 needs no upgrade — no new op, no schema change |
