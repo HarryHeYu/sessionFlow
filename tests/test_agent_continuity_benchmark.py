@@ -376,3 +376,91 @@ def test_no_llm_no_real_data_declaration(result):
     assert result["no_real_user_data"] is True
     assert result["isolation"]["os_sandbox"] is False
     assert result["isolation"]["live_runner_disabled"] is True
+
+
+# ---------------------------------------------------------------------------
+# R5 ground-truth and verdict-provenance gates.
+# ---------------------------------------------------------------------------
+
+def _evaluate_with_source(mod, scratch_root, name, task_id, source_files):
+    """Evaluate a candidate implementation against one task's hidden test."""
+    task = mod.build_task(scratch_root / name, task_id=task_id)
+    repo = pathlib.Path(task["repo_template"])
+    for rel, text in source_files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    eval_root = pathlib.Path(task["private_root"]) / "eval"
+    eval_root.mkdir(parents=True, exist_ok=True)
+    visible = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "tests/test_visible.py"],
+        cwd=str(repo), capture_output=True, text=True)
+    verdict = mod.evaluate_repo(
+        repo, pathlib.Path(task["hidden_test"]), sys.executable, eval_root,
+        mode="ground-truth", baseline=task_id, run_id=name)
+    return task, verdict, visible.returncode
+
+
+def test_t2_requirement_and_visible_test_are_consistent(mod, scratch_root):
+    task = mod.build_task(scratch_root / "t2-consistency", task_id="T2")
+    hidden = pathlib.Path(task["hidden_test"]).read_text(encoding="utf-8")
+    visible = mod.TASK_SPECS["T2"]["files"]["tests/test_visible.py"]
+    assert "assert normalize('  Hi ') == 'Hi'" in visible
+    assert "assert normalize('  Hi ') == 'Hi'" in hidden
+    assert "assert normalize('  Hi ', keep_case=False) == 'hi'" in hidden
+    assert "keep_case, default True" in task["required_fact"]
+
+
+def test_t2_noop_parameter_cannot_pass(mod, scratch_root):
+    noop = "def normalize(value, keep_case=True):\n    return value.strip()\n"
+    _, verdict, visible_rc = _evaluate_with_source(
+        mod, scratch_root, "t2-noop", "T2", {"textutil.py": noop})
+    assert visible_rc == 0
+    assert verdict["independent_tests_pass"] is False
+
+
+def test_t2_real_implementation_passes_both_suites(mod, scratch_root):
+    impl = ("def normalize(value, keep_case=True):\n"
+            "    stripped = value.strip()\n"
+            "    return stripped if keep_case else stripped.lower()\n")
+    task, verdict, visible_rc = _evaluate_with_source(
+        mod, scratch_root, "t2-real", "T2", {"textutil.py": impl})
+    hidden = pathlib.Path(task["hidden_test"]).read_text(encoding="utf-8")
+    assert task["hidden_answer_line"] in hidden
+    assert visible_rc == 0
+    assert verdict["independent_tests_pass"] is True
+    assert verdict["failure_type"] == "success"
+
+
+def test_t1_hidden_test_enforces_default_clamp(mod, scratch_root):
+    task = mod.build_task(scratch_root / "t1-default", task_id="T1")
+    hidden = pathlib.Path(task["hidden_test"]).read_text(encoding="utf-8")
+    assert "assert add(8, 9) == 10" in hidden
+    wrong = "def add(a, b, clamp=5):\n    return min(a + b, clamp)\n"
+    _, verdict, visible_rc = _evaluate_with_source(
+        mod, scratch_root, "t1-wrong-default", "T1", {"calc.py": wrong})
+    assert visible_rc == 0
+    assert verdict["independent_tests_pass"] is False
+
+
+def test_evaluator_does_not_report_pytest_code_as_runner_code(mod, scratch_root):
+    task = mod.build_task(scratch_root / "verdict-provenance")
+    hidden = pathlib.Path(task["hidden_test"])
+    eval_root = pathlib.Path(task["private_root"]) / "eval"
+    eval_root.mkdir(parents=True, exist_ok=True)
+    verdict = mod.evaluate_repo(
+        pathlib.Path(task["repo_template"]), hidden, sys.executable, eval_root,
+        mode="verdict", baseline="T1", run_id="provenance")
+    assert verdict["independent_tests_pass"] is False
+    assert verdict["failure_type"] == "hidden_tests_failed"
+    assert verdict["runner_returncode"] is None
+    assert verdict["runner_status"] == "NOT_EXECUTED"
+    assert verdict["evaluator_returncode"] == 1
+
+
+def test_classify_outcome_keeps_runner_and_evaluator_codes_apart(mod):
+    verdict = mod.classify_outcome(
+        0, {"independent_tests_pass": True, "evaluator_returncode": 1})
+    assert verdict["failure_type"] == "success"
+    assert verdict["runner_returncode"] == 0
+    assert verdict["evaluator_returncode"] == 1

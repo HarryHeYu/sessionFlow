@@ -121,3 +121,15 @@ T1 remains the historical `calc.add()` scenario and reproduces the published con
 Quality gates now have 25 checks: T2/T3 build green visible repos, fail their own hidden tests, contain no `calc.py`, and expose their task-specific hidden-answer key; T2 also runs through all three modes and four baselines in DRY-RUN. The harness still launches no model and reports no completion rate.
 
 Runner isolation remains **BLOCKED** with the explicit probe in `docs/audits/2026-11-20-runner-isolation-gate.md`.
+
+## 8. R5 ground-truth and verdict-provenance correction
+
+Two remaining correctness defects were closed before any real Agent run:
+
+| Finding | Red evidence | Correction |
+|---|---|---|
+| T2 goal said "lower-case by default" while the visible test expected `'Hi'`; the hidden test only checked `keep_case=True`, so `def normalize(v, keep_case=True): return v.strip()` passed both suites. | That no-op implementation scored `independent_tests_pass: True` on the starting repo. | Goal and required fact are now backward-compatible (`keep_case=True` default); hidden test requires `normalize('  Hi ', keep_case=False) == 'hi'`. The no-op implementation now fails; a real implementation passes both suites. |
+| `evaluate_repo()` passed the pytest return code into `classify_outcome()` as `runner_returncode`, so a failing hidden test was labelled `runner_failed`. | Starting repo's hidden failure produced `failure_type: runner_failed`. | Evaluator result and Runner result are separate: pytest code is only `evaluator_returncode`; the outcome carries `runner_returncode: None`, `runner_status: NOT_EXECUTED`, and `failure_type: hidden_tests_failed`. `classify_outcome()` now preserves both codes distinctly. |
+| T1's hidden test did not pin the documented default clamp. | `def add(a, b, clamp=5): return min(a + b, clamp)` passed the visible test and the old hidden test. | Added `assert add(8, 9) == 10` so a wrong default fails. |
+
+Baseline: 5 failed / 26 passed. After the fix: **31 passed**. Four minimal mutations (remove T2's new hidden assertion, drop `evaluator_returncode` propagation, relabel evaluator failure as `runner_failed`, remove T1's default assertion) each turn the matching gate red. Level 1 results, Store/Bridge schema, product behaviour and live-model status are unchanged.
