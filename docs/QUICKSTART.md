@@ -153,10 +153,14 @@ produces a file. So pick the task first, with commands that only read:
 voyager thread list                  # active WorkThreads
 voyager thread show <thread>         # members, lease, pending attaches
 voyager thread summarize <thread>    # one brief across every agent
+voyager preview --thread <thread>    # the actual handoff bundle, still read-only
 ```
 
-`thread summarize` is the preview: the title, the agents that worked there, what
-each of them last said, and the open items — all read-only.
+`thread summarize` is a short brief. `voyager preview` compiles the **same
+bundle** that `continue` would hand off, but takes no lease, writes no file and
+launches nothing. If you have more than one active WorkThread, run
+`voyager preview --repo .` first: it lists every candidate and labels the shown
+one a default instead of silently choosing for you.
 
 On the **demo** index those three work, but `continue --thread` does not: the
 demo's sessions have no transcript files on disk, so they count as retained
