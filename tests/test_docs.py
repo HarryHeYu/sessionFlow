@@ -284,6 +284,28 @@ class TestInstallInstructions(unittest.TestCase):
         self.assertTrue("github.com/HarryHeYu/sessionFlow" in quickstart,
                         "QUICKSTART no longer points at the repository for install")
 
+    def test_quickstart_install_pins_the_current_release(self):
+        """A new user copies the pin from either page; they must agree.
+
+        v1.5.0 shipped with the Quickstart still saying v1.3.1.  A reader who
+        followed it installed an older core (no ``evidence_verify`` op) and
+        hit a seventh-tool failure with no explanation.  Release notes are
+        frozen history; this is a *maintained* guide, so its pin tracks README.
+        """
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        current = re.search(r"Current release.*?tag/v(\d+\.\d+\.\d+)", readme)
+        self.assertIsNotNone(current, "README must name the current release tag")
+        quickstart = (ROOT / "docs" / "QUICKSTART.md").read_text(encoding="utf-8")
+        pins = set(re.findall(r"sessionFlow\.git@v(\d+\.\d+\.\d+)", quickstart))
+        self.assertEqual(pins, {current.group(1)},
+                         "QUICKSTART install pin must match README's current release")
+        # The maintained pairing is plugin v1.3.0, which has seven tools; the
+        # seventh (evidence_verify) is exactly why the pin above is v1.5.0.
+        self.assertIn("seven tools", quickstart.lower(),
+                      "QUICKSTART must describe the seven-tool plugin")
+        self.assertIn("sessionflow_evidence_verify", quickstart,
+                      "QUICKSTART must list the seventh tool")
+
 
 class TestAgentSkill(unittest.TestCase):
     """The CI skill must be discoverable and well-formed.
