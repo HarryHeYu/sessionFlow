@@ -26,9 +26,9 @@ is one client of it, and the core is a general-purpose local tool.)
 | **Current release** | [v1.5.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.5.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Community** | Listed in the third-party [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/data/plugins/HarryHeYu__dsh-sessionflow.yml) directory — a listing, not a certification |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
+| **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 
 > **Unreleased candidate:** Core 1.6.0 is prepared on `main` at commit `913be97` (CI 10/10). It has **no tag and no Release**. The install commands above deliberately stay on `v1.5.0`; verify the candidate from that commit or its locally built wheel/sdist, never from a `v1.6.0` tag.
-| **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 
 ### Three things it is for
 
