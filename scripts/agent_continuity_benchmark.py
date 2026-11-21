@@ -109,7 +109,8 @@ def _mkdir_empty(path: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # Synthetic task construction. Private grader data is NEVER under agent_root.
-# T1 keeps the historical calc scenario byte-for-byte. T2/T3 are independent
+# T1 keeps the historical calc scenario's context/session text unchanged; its
+# hidden assertions additionally pin the default clamp. T2/T3 are independent
 # code tasks with different modules, requirements and hidden acceptance tests.
 # ---------------------------------------------------------------------------
 TASK_SPECS: Dict[str, Dict[str, Any]] = {
@@ -123,7 +124,8 @@ TASK_SPECS: Dict[str, Dict[str, Any]] = {
         "hidden_test": (
             "from calc import add\n\n\ndef test_add_three_args():\n"
             "    assert add(1, 2) == 3\n"
-            "    assert add(1, 9, 5) == 5\n"),
+            "    assert add(1, 9, 5) == 5\n"
+            "    assert add(8, 9) == 10\n"),
         "hidden_answer_line": "    assert add(1, 9, 5) == 5",
         "goal": "extend add() with an optional third argument clamp, default 10",
         "required_fact": "clamp, default 10",
@@ -170,10 +172,12 @@ TASK_SPECS: Dict[str, Dict[str, Any]] = {
         "hidden_test": (
             "from textutil import normalize\n\n\ndef test_normalize_case_option():\n"
             "    assert normalize('  Hi ') == 'Hi'\n"
-            "    assert normalize('  Hi ', keep_case=True) == 'Hi'\n"),
-        "hidden_answer_line": "    assert normalize('  Hi ', keep_case=True) == 'Hi'",
-        "goal": "extend normalize() with keep_case=False; lower-case by default",
-        "required_fact": "keep_case, default False",
+            "    assert normalize('  Hi ', keep_case=True) == 'Hi'\n"
+            "    assert normalize('  Hi ', keep_case=False) == 'hi'\n"),
+        "hidden_answer_line": "    assert normalize('  Hi ', keep_case=False) == 'hi'",
+        "goal": ("extend normalize() with keep_case=True by default; "
+                 "pass keep_case=False to lower-case the result"),
+        "required_fact": "keep_case, default True, lower-case when False",
         "sessions": [
             {
                 "sid": "codex:textutil-task", "provider": "codex",
@@ -182,9 +186,9 @@ TASK_SPECS: Dict[str, Dict[str, Any]] = {
                 "updated": 1_700_100_030, "message_count": 3, "tool_count": 1,
                 "events": [
                     {"ts": 1_700_100_000, "kind": "user",
-                     "content": "GOAL: extend normalize() with keep_case=False; lower-case by default"},
+                     "content": "GOAL: extend normalize() with keep_case=True by default; pass keep_case=False to lower-case the result"},
                     {"ts": 1_700_100_010, "kind": "assistant",
-                     "content": "NEXT: add keep_case=False; when false return value.strip().lower()"},
+                     "content": "NEXT: add keep_case=True; when false return value.strip().lower()"},
                     {"ts": 1_700_100_020, "kind": "tool_call", "content": "",
                      "command": "pytest -q", "exit_code": 0},
                 ],
@@ -531,6 +535,7 @@ def classify_outcome(runner_returncode: Optional[int],
     base: Dict[str, Any] = {
         "runner_status": runner_status,
         "runner_returncode": runner_returncode,
+        "evaluator_returncode": verdict.get("evaluator_returncode"),
     }
 
     def failed(failure_type: str) -> Dict[str, Any]:
@@ -576,6 +581,10 @@ def evaluate_repo(repo: Path, hidden_test: Path, python: str,
     Each mode/baseline/run gets its own evaluation directory.  Reusing a
     directory would let a later run's copied repo overwrite evidence from an
     earlier run, which makes concurrent or repeated comparisons misleading.
+
+    The pytest exit code is reported ONLY as ``evaluator_returncode``.  No
+    Agent Runner has executed here, so ``runner_returncode`` stays None and
+    ``runner_status`` stays NOT_EXECUTED; the two codes must never be conflated.
     """
     scope = "_".join(
         _safe_component(x) for x in (run_id, mode, baseline))
@@ -595,28 +604,27 @@ def evaluate_repo(repo: Path, hidden_test: Path, python: str,
             cwd=str(eval_repo), env=env, capture_output=True,
             text=True, timeout=120)
         passed = proc.returncode == 0
-        verdict: Dict[str, Any] = {
+        # The pytest exit code belongs to the evaluator, never to the Agent
+        # Runner.  No runner has executed in this dry-run.
+        return {
             "independent_tests_pass": passed,
             "verdict_status": "passed" if passed else "hidden_tests_failed",
-        }
-        return {
-            **verdict,
-            "failure_type": classify_outcome(
-                proc.returncode, verdict)["failure_type"],
-            "returncode": proc.returncode,
+            "failure_type": "success" if passed else "hidden_tests_failed",
+            "evaluator_returncode": proc.returncode,
+            "runner_returncode": None,
+            "runner_status": "NOT_EXECUTED",
             "eval_repo": str(eval_repo),
             "output_tail": (proc.stdout + "\n" + proc.stderr)[-800:],
         }
     except Exception as e:  # evaluation failure is not a pass
-        verdict = {
+        return {
             "independent_tests_pass": False,
             "verdict_status": "evaluator_failed",
-            "evaluator_failed": True,
-        }
-        return {
-            **verdict,
             "failure_type": "evaluator_failed",
-            "returncode": None,
+            "evaluator_failed": True,
+            "evaluator_returncode": None,
+            "runner_returncode": None,
+            "runner_status": "NOT_EXECUTED",
             "eval_repo": str(eval_repo),
             "output_tail": "evaluation error: %s" % e,
         }
