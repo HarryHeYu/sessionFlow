@@ -894,6 +894,84 @@ def _continuity_status_enum(disc: dict) -> str:
     return "READY"
 
 
+def cmd_preview(args) -> int:
+    """Read-only Handoff Preview for the three user questions.
+
+    This is the CLI spelling of the API's ``continue_context`` op.  It compiles
+    exactly the bundle ``continue`` would hand off, but deliberately performs
+    none of ``continue``'s writes: no scan, no lease, no pending attach, no
+    bundle file and no launch.  Ambiguity is surfaced rather than silently
+    resolved, so a user can choose a WorkThread before committing to an act.
+    """
+    from .api import continue_context, thread_detail
+
+    refs = None
+    raw_refs = getattr(args, "from_sessions", None)
+    if raw_refs:
+        refs = [r.strip() for r in raw_refs.split(",") if r.strip()]
+    out = continue_context(
+        db=_db_path_arg(args),
+        session_refs=refs,
+        thread_id=getattr(args, "thread", None),
+        repo=getattr(args, "repo", None),
+        goal=getattr(args, "goal", None),
+        budget=getattr(args, "budget", None),
+        target=getattr(args, "to", None),
+    )
+    if not isinstance(out, dict) or out.get("error"):
+        print(out.get("error") if isinstance(out, dict) else "preview failed",
+              file=sys.stderr)
+        return 2
+
+    # `continue_context` deliberately keeps its response shape stable: it
+    # reports ambiguity and scope, not a second copy of thread metadata.  The
+    # CLI preview needs that metadata to be a useful chooser, so read it from
+    # the existing thread_detail op instead of changing the API contract.
+    if getattr(args, "thread", None):
+        detail = thread_detail(_db_path_arg(args), args.thread)
+        if detail.get("thread"):
+            out["selected_thread"] = detail["thread"]
+            out.setdefault("members", detail.get("members", []))
+            out.setdefault("lease", detail.get("lease"))
+
+    out["read_only"] = True
+    out["writes_if_committed"] = (
+        "voyager continue will take a lease, write a bundle file, record a "
+        "pending attach and (unless --no-launch is given) launch the target.")
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+        return 0
+
+    print("READ ONLY Handoff Preview — no lease was taken, nothing was written or launched.")
+    if out.get("repo_scope"):
+        print("selection: " + str(out["repo_scope"].get("selection_reason", "")))
+    if out.get("thread_ambiguous"):
+        print("AMBIGUOUS: {0} active WorkThreads; the shown thread is only a "
+              "default.".format(len(out.get("thread_candidates") or [])))
+        for c in out.get("thread_candidates") or []:
+            print("  {0}  {1}  {2}".format(c.get("id"), c.get("title"),
+                                           c.get("goal") or ""))
+        print("choose one with: voyager preview --thread <id>   (then continue --thread <id>)")
+    chosen = out.get("thread") or out.get("selected_thread") or out.get("session") or {}
+    if chosen:
+        print("thread   : {0}".format(chosen.get("title") or chosen.get("id")))
+        print("goal     : {0}".format(chosen.get("goal") or chosen.get("title") or "?"))
+        print("repo     : {0}".format(chosen.get("repo_root") or chosen.get("repo") or "?"))
+        print("target   : {0}".format(getattr(args, "to", None) or "default"))
+    members = out.get("members") or []
+    missing = [m for m in members if m.get("source_state") == "SOURCE_MISSING"]
+    if missing:
+        print("sources  : {0} retained session(s) are SOURCE_MISSING".format(len(missing)))
+    print("budget   : {0} (est. {1} tokens)".format(
+        out.get("budget"), out.get("estimated_tokens")))
+    if out.get("dropped"):
+        print("dropped  : {0}".format(", ".join(map(str, out["dropped"]))))
+    if out.get("bundle"):
+        print("\n" + out["bundle"])
+    print("\n" + out["writes_if_committed"])
+    return 0
+
+
 def cmd_status(args) -> int:
     """Phase I: show the automatic-continuity state for the current repo."""
     import json as _json
@@ -2562,6 +2640,18 @@ def main(argv=None) -> int:
     # already means serve -- accepted so the documented form works.
     sp.add_argument("verb", nargs="?", choices=["serve"], help=argparse.SUPPRESS)
     sp.set_defaults(func=cmd_api)
+
+    sp = sub.add_parser("preview", parents=[common],
+                        help="read-only Handoff Preview: show what would be handed off")
+    sp.add_argument("--thread", help="preview a specific WorkThread")
+    sp.add_argument("--from", dest="from_sessions",
+                    help="comma-separated session ids/prefixes to preview")
+    sp.add_argument("--repo", help="resolve the current WorkThread by repo")
+    sp.add_argument("--goal", help="goal used to rank the previewed evidence")
+    sp.add_argument("--to", help="target agent for the preview")
+    sp.add_argument("--budget", help="compact|balanced|full|auto|Nk|<int>")
+    sp.add_argument("--json", action="store_true", help="machine-readable preview")
+    sp.set_defaults(func=cmd_preview)
 
     sp = sub.add_parser("status", parents=[common],
                         help="automatic-continuity state for the current repo")
