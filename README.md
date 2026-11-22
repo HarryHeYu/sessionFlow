@@ -28,7 +28,7 @@ is one client of it, and the core is a general-purpose local tool.)
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 
-> **Unreleased candidate:** Core 1.6.0 is prepared on `main` at commit `913be97` (CI 10/10). It has **no tag and no Release**. The install commands above deliberately stay on `v1.5.0`; verify the candidate from that commit or its locally built wheel/sdist, never from a `v1.6.0` tag.
+> **Unreleased candidate:** Core 1.6.0 is prepared on `release/1.6.0-prep`. It has **no tag and no Release**. The install commands above deliberately stay on `v1.5.0`; verify the candidate from that branch or its locally built wheel/sdist, never from a `v1.6.0` tag.
 
 ### Three things it is for
 
@@ -136,12 +136,13 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@v1.6.0` pins a release tag, which is what makes a reinstall reproducible
-and is what the DSH plugin's own error messages recommend. Drop the `@v1.6.0`
-to follow `main` instead. Check the installed version with:
+The `@v1.5.0` pins the currently published release tag, which is what makes a
+reinstall reproducible and is what the released DSH plugin recommends. Drop the
+`@v1.5.0` to follow `main` (which carries the 1.6.0 candidate) instead. Check the
+installed version with:
 
 ```sh
-voyager --version        # must print 1.6.0
+voyager --version        # must print 1.5.0
 ```
 
 > **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
@@ -149,13 +150,12 @@ voyager --version        # must print 1.6.0
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
 
-> **`v1.6.0` is the current release.** It adds `merge --repo`, a read-only
+> **Core 1.6.0 is an unreleased candidate** on `release/1.6.0-prep`; the current
+> published release is **v1.5.0**. 1.6.0 adds `merge --repo`, a read-only
 > `voyager preview`, the WorkBuddy read-only provider and the VS Code WorkThread
-> Selector, on top of v1.5.0's additive `evidence_verify` op and strict
-> machine-derived repo scope. Upgrade with `@v1.6.0` (see above); the user-facing
-> changes are listed under `[1.6.0]` in `CHANGELOG.md` and
-> `docs/releases/v1.6.0.md`. The released DSH plugin pairing remains v1.3.0
-> against Core v1.5.0; plugin v1.4.0 is prepared for Core 1.6.0.
+> Selector on top of v1.5.0. The change list is under `[1.6.0]` in `CHANGELOG.md`
+> and `docs/releases/v1.6.0.md`; the released DSH plugin pairing stays v1.3.0
+> against Core v1.5.0, and plugin v1.4.0 is prepared alongside this candidate.
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:

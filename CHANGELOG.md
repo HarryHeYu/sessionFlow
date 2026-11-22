@@ -3,7 +3,7 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
-## [Unreleased]
+## [1.6.0] — 2026-11-22
 
 ### Added
 

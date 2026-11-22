@@ -24,7 +24,7 @@
 | **当前版本** | [v1.5.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.5.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
 
-> **未发布候选版：** Core 1.6.0 在 `main` 的提交 `913be97` 上准备（CI 10/10），**尚无 Tag、也无 Release**。上面的安装命令仍然固定 `v1.5.0`；验证候选代码请使用该提交或本地构建的 wheel/sdist，不要假设存在 `v1.6.0` Tag。
+> **未发布候选版：** Core 1.6.0 在 `release/1.6.0-prep` 分支上准备，**尚无 Tag、也无 Release**。上面的安装命令仍然固定 `v1.5.0`；验证候选代码请使用该分支或本地构建的 wheel/sdist，不要假设存在 `v1.6.0` Tag。
 
 ### 它主要解决三件事
 
@@ -121,8 +121,9 @@ python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFl
 所以裸跑 `pip install voyager` 会装错项目 —— 请一律使用上面的 `@ git+…` 形式。
 改用正式包名的进度见 `CHANGELOG.md`。
 
-`@v1.6.0` 是发布 tag，重装才能装到同一份代码，插件报错信息里推荐的也是它；
-去掉 `@v1.6.0` 就是跟 `main` 走。确认装到的版本：
+`@v1.5.0` 是当前已发布版本的 tag，重装才能装到同一份代码，已发布的插件报错
+信息里推荐的也是它；去掉 `@v1.5.0` 就是跟 `main` 走（其中含 1.6.0 候选版）。
+确认装到的版本：
 
 ```sh
 voyager --version        # 应当输出 1.5.0
@@ -132,12 +133,11 @@ voyager --version        # 应当输出 1.5.0
 > 唯一区别是新版本给自己加了一个索引。回滚同样安全——v1.1.0 读同一个库，
 > 只是忽略那个多出来的索引。
 
-> **`v1.6.0` 是当前的正式版本。** 它在 v1.5.0 的加性 `evidence_verify` op
-> 与严格机器推导仓库范围之上，新增 `merge --repo`、只读 `voyager preview`、
-> WorkBuddy 只读 Provider 与 VS Code WorkThread Selector。用 `@v1.6.0`
-> 升级（见上）；用户可见改动见 `CHANGELOG.md` 的 `[1.6.0]` 与
-> `docs/releases/v1.6.0.md`。已发布的 DSH 插件组合仍是 Core v1.5.0 +
-> 插件 v1.3.0；插件 v1.4.0 是为 Core 1.6.0 准备的候选版。
+> **Core 1.6.0 是 `release/1.6.0-prep` 上的未发布候选版**；当前已发布版本仍是
+> **v1.5.0**。1.6.0 在 v1.5.0 之上新增 `merge --repo`、只读 `voyager preview`、
+> WorkBuddy 只读 Provider 与 VS Code WorkThread Selector。改动清单见 `CHANGELOG.md`
+> 的 `[1.6.0]` 与 `docs/releases/v1.6.0.md`。已发布的 DSH 插件组合仍是 Core v1.5.0
+> + 插件 v1.3.0；插件 v1.4.0 与本候选版配套准备。
 
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
