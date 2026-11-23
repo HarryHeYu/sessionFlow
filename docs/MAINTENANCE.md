@@ -1,4 +1,4 @@
-# Maintenance Guide — sessionFlow v1.5.0
+# Maintenance Guide — sessionFlow v1.6.0
 
 Post-release reference. Nothing here starts new development; it records what is
 known, what is supported, and what a maintainer should check.
@@ -37,8 +37,8 @@ known, what is supported, and what a maintainer should check.
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| 1.6.0 (candidate) | 1.4.0 (candidate) | 1 | prepared on `release/1.6.0-prep`, not tagged; additive `merge --repo`, read-only `preview`, WorkBuddy provider and VS Code Selector; no Store/Bridge schema change |
-| v1.5.0 | v1.3.0 | 1 | **current pairing** (Core release 2026-11-14; plugin release 2026-11-15); seventh tool `sessionflow_evidence_verify` ships in plugin v1.3.0 through the additive Core `evidence_verify` op; bridge schema unchanged |
+| v1.6.0 | v1.4.0 | 1 | **current released pairing** (tag `v1.6.0`); plugin v1.4.0 has seven tools; additive `merge --repo`, read-only `preview`, WorkBuddy provider and VS Code Selector; no Store/Bridge schema change |
+| v1.5.0 | v1.3.0 | 1 | previous stable pairing (Core release 2026-11-14; plugin release 2026-11-15); seventh tool `sessionflow_evidence_verify` ships in plugin v1.3.0 through the additive Core `evidence_verify` op; bridge schema unchanged |
 | v1.5.0 | v1.2.0 | 1 | historical pairing after Core v1.5.0 before plugin v1.3.0; six tools, no seventh tool; index and bridge schema unchanged |
 | v1.4.1 | v1.2.0 | 1 | released 2026-11-14 (patch); plugin v1.2.0 needs no upgrade — no new op, no schema change |
 | v1.4.0 | v1.2.0 | 1 | released 2026-11-13; plugin v1.2.0 needs no upgrade — no new op, no seventh tool |
@@ -93,7 +93,7 @@ git archive <previous-tag> | tar -x -C "$SCRATCH/prev"
 `PYTHONPATH`: with it in place, bulk `unlink()` raises and tests fail for a reason
 that has nothing to do with the code.
 
-The 1.6.0 Core candidate is prepared on branch `release/1.6.0-prep` but is **not tagged**. Published install commands stay on `v1.5.0` until the pre-tag pin patch in step 3 below. Do not read the candidate note in the READMEs as a release announcement.
+Core 1.6.0 is **tagged and published** as `v1.6.0`; the published install commands below pin that immutable tag. The steps that follow describe how a *future* release is prepared from a candidate branch — they are the maintained procedure, not a statement that 1.6.0 is unpublished.
 
 Release mechanics — the `release` workflow is **automatic**:
 
@@ -177,8 +177,8 @@ kind of operation and `continue` is a write.
 
 ```sh
 # --- stage 1: synthetic only, nothing real is opened ---
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
-voyager --version        # must print 1.5.0
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
+voyager --version        # must print 1.6.0
 voyager demo             # seeds ~/.voyager/demo.db, separate from the real index
 voyager --db ~/.voyager/demo.db search "authentication"
 voyager --db ~/.voyager/demo.db show codex:demo-auth-01

@@ -17,7 +17,7 @@ see your agents. Step 4 is the first one that opens your own session files.
 ## 1. Install the core (1 min)
 
 ```sh
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 ```
 
 `[all]` pulls in the DSH (`zstandard`) and MCP (`mcp`) extras. Drop it for a bare
@@ -26,7 +26,7 @@ build; drop it to follow `main`. No `pipx`? Use pip — `python -m pip` on
 Windows, where `pip` is often not on `PATH`:
 
 ```sh
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 ```
 
 **Not on PyPI.** The `voyager` name there is an unrelated library, so a bare
@@ -416,7 +416,8 @@ calling the install healthy. Run `scan` (or `demo`) first.
   stronger on some agents than others. See the platform table in the README.
 
 Version relationship: the core and the plugin are **versioned independently** —
-this page installs core **v1.6.0**, and the prepared plugin candidate is **v1.4.0**. They
+this page installs the published core **v1.6.0**, and the corresponding published
+plugin is **v1.4.0**. They
 are not required to share a number; what binds them is **bridge schema 1**, which
 the plugin declares and the core reports (`voyager integration-info --json`). A
 newer core that kept the schema would need no plugin release, and the plugin

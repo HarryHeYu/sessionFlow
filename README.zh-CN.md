@@ -19,12 +19,12 @@
 |---|---|
 | **是什么** | 在编码 Agent 已经写到磁盘上的会话历史之上，加一层本地索引 + 接续层。 |
 | **为什么用** | 你的历史分散在九种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
-| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"` —— [详见](#安装) |
+| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"` —— [详见](#安装) |
 | **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
-| **当前版本** | [v1.5.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.5.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **当前版本** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
 
-> **未发布候选版：** Core 1.6.0 在 `release/1.6.0-prep` 分支上准备，**尚无 Tag、也无 Release**。上面的安装命令仍然固定 `v1.5.0`；验证候选代码请使用该分支或本地构建的 wheel/sdist，不要假设存在 `v1.6.0` Tag。
+> **当前正式版：** Core 1.6.0 已作为 `v1.6.0` Tag 发布，并附 wheel 与 sdist 资产。上面的安装命令安装的就是这个不可变 Tag。仍在开发中的改动位于 `main` 或候选分支，不会在此处被当作已发布版本。
 
 ### 它主要解决三件事
 
@@ -111,40 +111,39 @@ JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成*
 
 ```sh
 # 用 pipx 装成独立 CLI（推荐，不用折腾虚拟环境）
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 
 # 或者用 pip 装到用户目录（Windows 上用 `python -m pip`，`pip` 常常不在 PATH 里）
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 ```
 
 **Voyager 没有发布到 PyPI。** PyPI 上的 `voyager` 是一个毫不相干的最近邻搜索库，
 所以裸跑 `pip install voyager` 会装错项目 —— 请一律使用上面的 `@ git+…` 形式。
 改用正式包名的进度见 `CHANGELOG.md`。
 
-`@v1.5.0` 是当前已发布版本的 tag，重装才能装到同一份代码，已发布的插件报错
-信息里推荐的也是它；去掉 `@v1.5.0` 就是跟 `main` 走（其中含 1.6.0 候选版）。
+`@v1.6.0` 是当前已发布版本的 tag，重装才能装到同一份代码，已发布的插件报错
+信息里推荐的也是它；去掉 `@v1.6.0` 就是跟 `main` 走（其中可能含尚未发布的改动）。
 确认装到的版本：
 
 ```sh
-voyager --version        # 应当输出 1.5.0
+voyager --version        # 应当输出 1.6.0
 ```
 
 > **从 v1.2.0（或 v1.1.0）升级不需要迁移。** 索引原样读取：不改任何行，
 > 唯一区别是新版本给自己加了一个索引。回滚同样安全——v1.1.0 读同一个库，
 > 只是忽略那个多出来的索引。
 
-> **Core 1.6.0 是 `release/1.6.0-prep` 上的未发布候选版**；当前已发布版本仍是
-> **v1.5.0**。1.6.0 在 v1.5.0 之上新增 `merge --repo`、只读 `voyager preview`、
-> WorkBuddy 只读 Provider 与 VS Code WorkThread Selector。改动清单见 `CHANGELOG.md`
-> 的 `[1.6.0]` 与 `docs/releases/v1.6.0.md`。已发布的 DSH 插件组合仍是 Core v1.5.0
-> + 插件 v1.3.0；插件 v1.4.0 与本候选版配套准备。
+> **Core 1.6.0 是当前已发布版本**。1.6.0 在 v1.5.0 之上新增 `merge --repo`、
+> 只读 `voyager preview`、WorkBuddy 只读 Provider 与 VS Code WorkThread Selector。
+> 改动清单见 `CHANGELOG.md` 的 `[1.6.0]` 与 `docs/releases/v1.6.0.md`。对应的 DSH
+> 插件正式版为 v1.4.0；插件 v1.3.0 仍与 Core v1.5.0 配套。
 
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"          # 核心
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"          # 核心
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + MCP server
 ```
 
 想改 Voyager 本身：

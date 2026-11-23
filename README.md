@@ -21,14 +21,14 @@ is one client of it, and the core is a general-purpose local tool.)
 |---|---|
 | **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
 | **Why use it** | Your history is split across nine formats. sessionFlow makes it one thing you can search, summarize, export and continue — and every claim in a continuation bundle names the event it came from, so you can check it. |
-| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"` — [details](#install) |
+| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"` — [details](#install) |
 | **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
-| **Current release** | [v1.5.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.5.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **Current release** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Community** | Listed in the third-party [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/data/plugins/HarryHeYu__dsh-sessionflow.yml) directory — a listing, not a certification |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 
-> **Unreleased candidate:** Core 1.6.0 is prepared on `release/1.6.0-prep`. It has **no tag and no Release**. The install commands above deliberately stay on `v1.5.0`; verify the candidate from that branch or its locally built wheel/sdist, never from a `v1.6.0` tag.
+> **Current release:** Core 1.6.0 is published as tag `v1.6.0` with wheel and sdist assets. The pins above install that immutable tag. Work still in development lives on `main` or a candidate branch and is never represented here as the published release.
 
 ### Three things it is for
 
@@ -125,10 +125,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 
 # or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
@@ -136,13 +136,13 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@v1.5.0` pins the currently published release tag, which is what makes a
+The `@v1.6.0` pins the currently published release tag, which is what makes a
 reinstall reproducible and is what the released DSH plugin recommends. Drop the
-`@v1.5.0` to follow `main` (which carries the 1.6.0 candidate) instead. Check the
+`@v1.6.0` to follow `main` (which may carry unpublished changes) instead. Check the
 installed version with:
 
 ```sh
-voyager --version        # must print 1.5.0
+voyager --version        # must print 1.6.0
 ```
 
 > **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
@@ -150,20 +150,19 @@ voyager --version        # must print 1.5.0
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
 
-> **Core 1.6.0 is an unreleased candidate** on `release/1.6.0-prep`; the current
-> published release is **v1.5.0**. 1.6.0 adds `merge --repo`, a read-only
-> `voyager preview`, the WorkBuddy read-only provider and the VS Code WorkThread
-> Selector on top of v1.5.0. The change list is under `[1.6.0]` in `CHANGELOG.md`
-> and `docs/releases/v1.6.0.md`; the released DSH plugin pairing stays v1.3.0
-> against Core v1.5.0, and plugin v1.4.0 is prepared alongside this candidate.
+> **Core 1.6.0 is the current published release.** It adds `merge --repo`, a
+> read-only `voyager preview`, the WorkBuddy read-only provider and the VS Code
+> WorkThread Selector on top of v1.5.0. The change list is under `[1.6.0]` in
+> `CHANGELOG.md` and `docs/releases/v1.6.0.md`; the corresponding DSH plugin
+> release is v1.4.0, while plugin v1.3.0 remains paired with Core v1.5.0.
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"          # core
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"          # core
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + MCP server
 ```
 
 Working on Voyager itself:
