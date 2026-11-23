@@ -1554,6 +1554,13 @@ def handoff_thread(
         res["lease_token"] = lease_token = lease["lease_token"]
         res["lease_holder"] = target
 
+    def release_lease(reason: str) -> None:
+        """Give back the single-writer lease when a handoff write fails."""
+        if tid and lease_token:
+            store.thread_lease_release(tid, lease_token, reason=reason)
+            res["lease_token"] = None
+            res["lease_holder"] = None
+
     # -- same-provider native resume (D7 priority) -------------------------
     resumable = [m for m in members
                  if target and m["provider"] == target
@@ -1642,12 +1649,21 @@ def handoff_thread(
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
+        release_lease("bundle-dir-failed")
         res["action"] = "error"
         res["error"] = "cannot create bundle directory {0}: {1}".format(
             out.parent, e.strerror or e)
         res["exit_code"] = 2
         return res
-    _write_atomic(out, packed)
+    try:
+        _write_atomic(out, packed)
+    except OSError as e:
+        release_lease("bundle-write-failed")
+        res["action"] = "error"
+        res["error"] = "cannot write bundle {0}: {1}".format(
+            out, e.strerror or e)
+        res["exit_code"] = 2
+        return res
     res["bundle_path"] = res["context_path"] = str(out.resolve())
     res["context_chars"] = len(packed)
 

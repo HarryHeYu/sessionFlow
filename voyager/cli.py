@@ -2543,10 +2543,11 @@ def main(argv=None) -> int:
 
     # voyager demo — synthetic five-minute first run (no real agents needed)
     sp = sub.add_parser(
-        "demo", help="seed a synthetic demo index and show what to try next")
+        "demo", help="seed a synthetic demo index and show what to try next",
+        parents=[common])
     def _cmd_demo(args) -> int:
         from .demo import main as demo_main
-        return demo_main()
+        return demo_main(getattr(args, "db", None))
     sp.set_defaults(func=_cmd_demo)
 
     # voyager verify [provider] [--all] [--verbose] [--json] [--matrix]

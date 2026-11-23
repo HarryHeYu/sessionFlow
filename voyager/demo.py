@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .model import new_event, new_session
 from .store import Store
@@ -139,9 +139,9 @@ def default_index() -> Path:
     return default_db_path().parent / DEMO_DB_NAME
 
 
-def run() -> int:
+def run(index: Optional[Path] = None) -> int:
     """The `voyager demo` verb: seed, then tell the user what to try."""
-    index = default_index()
+    index = Path(index) if index else default_index()
     tid = build(index)
     rel = index
     try:
@@ -169,9 +169,9 @@ def run() -> int:
     return 0
 
 
-def main() -> int:
+def main(index: Optional[Path] = None) -> int:
     try:
-        return run()
+        return run(index)
     except Exception as e:                       # a demo must never explode
         print(f"demo failed: {e}", file=sys.stderr)
         return 1
