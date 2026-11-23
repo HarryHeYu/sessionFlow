@@ -3,6 +3,14 @@
 All notable changes to Voyager are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are dated.
 
+## [Unreleased]
+
+### Fixed
+
+- A failed Continuation Bundle write no longer leaves a WorkThread leased to a handoff that never happened. Both failures to create the output directory and failures from the atomic writer now release the single-writer lease, clear the returned token and record no pending attach, so the next legal handoff is not refused. Regression tests cover mkdir failure, atomic write failure and a successful retry without `thread unlock --steal`.
+
+- `voyager demo --db PATH` now honours the global database override on either side of the subcommand. The demo seeds exactly the requested index and prints commands pointing at it, instead of silently writing the default `demo.db` under the real home directory.
+
 ## [1.6.0] — 2026-11-22
 
 ### Added
