@@ -37,7 +37,7 @@ known, what is supported, and what a maintainer should check.
 
 | Core | Plugin | Bridge schema | Notes |
 |---|---|---|---|
-| 1.6.0 (candidate) | 1.4.0 (candidate) | 1 | prepared on main, not tagged; additive `merge --repo`, read-only `preview`, WorkBuddy provider and VS Code Selector; no Store/Bridge schema change |
+| 1.6.0 (candidate) | 1.4.0 (candidate) | 1 | prepared on `release/1.6.0-prep`, not tagged; additive `merge --repo`, read-only `preview`, WorkBuddy provider and VS Code Selector; no Store/Bridge schema change |
 | v1.5.0 | v1.3.0 | 1 | **current pairing** (Core release 2026-11-14; plugin release 2026-11-15); seventh tool `sessionflow_evidence_verify` ships in plugin v1.3.0 through the additive Core `evidence_verify` op; bridge schema unchanged |
 | v1.5.0 | v1.2.0 | 1 | historical pairing after Core v1.5.0 before plugin v1.3.0; six tools, no seventh tool; index and bridge schema unchanged |
 | v1.4.1 | v1.2.0 | 1 | released 2026-11-14 (patch); plugin v1.2.0 needs no upgrade — no new op, no schema change |
@@ -93,7 +93,7 @@ git archive <previous-tag> | tar -x -C "$SCRATCH/prev"
 `PYTHONPATH`: with it in place, bulk `unlink()` raises and tests fail for a reason
 that has nothing to do with the code.
 
-The 1.6.0 Core candidate is prepared at commit `913be97` (CI 10/10) but is **not tagged**. Published install commands stay on `v1.5.0` until the pre-tag pin patch in step 3 below. Do not read the candidate note in the READMEs as a release announcement.
+The 1.6.0 Core candidate is prepared on branch `release/1.6.0-prep` but is **not tagged**. Published install commands stay on `v1.5.0` until the pre-tag pin patch in step 3 below. Do not read the candidate note in the READMEs as a release announcement.
 
 Release mechanics — the `release` workflow is **automatic**:
 
