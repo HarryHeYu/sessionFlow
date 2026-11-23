@@ -69,31 +69,22 @@ jobs:
           exit $rc
 
       - name: Release metadata consistency
-        # pyproject, CHANGELOG, README (both languages), release notes and git
-        # tags must name the same release. Fails the job on drift.
+        # Two-phase release (docs/MAINTENANCE.md): a candidate commit may bump
+        # pyproject/CHANGELOG/release notes to the next version while README
+        # pins stay on the newest tag that ACTUALLY exists. check_consistency.py
+        # is the single invariant for BOTH phases: README pins and the current
+        # release row must name a real, newest released tag. That directly
+        # forbids a phantom pin (installing vX.Y.Z before vX.Y.Z is tagged).
         #
-        # check_consistency.py is deliberately unchanged: it always requires
-        # README pins to name a REAL released tag. But a tag must be created on
-        # the tree whose README already says "install v<version>", so during
-        # the short untagged release-candidate window that strict check cannot
-        # pass. Use the pre-tag gate instead: it runs the SAME
-        # check_consistency.check() with the pending tag simulated, then adds
-        # pin/version/tag-absence assertions. Once the tag exists, the strict
-        # command runs again, unchanged.
+        # At tag time the pin patch and the tag are pushed together, so the
+        # tag exists when this check runs on the tag tree and the SAME strict
+        # command passes. check_release_ready.py is the maintainer's LOCAL
+        # pre-tag gate (MAINTENANCE.md step 4); it is intentionally not a CI
+        # step, because simulating a not-yet-existing tag is exactly what let
+        # a candidate advertise an install target users cannot install.
         shell: bash
         run: |
-          VERSION="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)"/\1/p' pyproject.toml | head -1)"
-          if [ -z "$VERSION" ]; then
-            echo "cannot read version from pyproject.toml" >&2
-            exit 1
-          fi
-          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null 2>&1; then
-            echo "v${VERSION} is a real tag: strict released-tag check"
-            python scripts/check_consistency.py
-          else
-            echo "v${VERSION} is not tagged yet: pre-tag simulated-tag gate"
-            python scripts/check_release_ready.py --version "${VERSION}"
-          fi
+          python scripts/check_consistency.py
 
   core-only:
     # The core install must work with zero optional dependencies: `pip install

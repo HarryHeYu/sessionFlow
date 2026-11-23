@@ -447,11 +447,11 @@ class TestMaintenanceGuide(unittest.TestCase):
         rows = self.rows()
         self.assertTrue(rows, "no compatibility rows found in MAINTENANCE.md")
         self.assertEqual(
-            rows[0][:3], ["v1.6.0", "v1.4.0", "1"],
+            rows[0][:3], ["v1.5.0", "v1.3.0", "1"],
             "the first compatibility row must name the current released pairing")
         self.assertIn(
             "seven", rows[0][3].lower(),
-            "the current row must state that plugin v1.4.0 has seven tools")
+            "the current row must state that plugin v1.3.0 has seven tools")
 
     def test_historical_pairings_are_still_listed(self):
         pairs = {(row[0], row[1]) for row in self.rows()}

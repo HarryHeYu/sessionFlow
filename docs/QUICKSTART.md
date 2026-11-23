@@ -17,7 +17,7 @@ see your agents. Step 4 is the first one that opens your own session files.
 ## 1. Install the core (1 min)
 
 ```sh
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
 ```
 
 `[all]` pulls in the DSH (`zstandard`) and MCP (`mcp`) extras. Drop it for a bare
@@ -26,7 +26,7 @@ build; drop it to follow `main`. No `pipx`? Use pip — `python -m pip` on
 Windows, where `pip` is often not on `PATH`:
 
 ```sh
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
 ```
 
 **Not on PyPI.** The `voyager` name there is an unrelated library, so a bare

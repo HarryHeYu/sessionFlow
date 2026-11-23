@@ -19,12 +19,12 @@
 |---|---|
 | **是什么** | 在编码 Agent 已经写到磁盘上的会话历史之上，加一层本地索引 + 接续层。 |
 | **为什么用** | 你的历史分散在九种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
-| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"` —— [详见](#安装) |
+| **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"` —— [详见](#安装) |
 | **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
-| **当前版本** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **当前版本** | [v1.5.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.5.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
 
-> **未发布候选版：** Core 1.6.0 在 `release/1.6.0-prep` 分支上准备，**尚无 Tag、也无 Release**。上面的安装命令已切换为 `v1.6.0` 的待发布 pin，但 Tag 尚未推送；验证候选代码请使用该分支或本地构建的 wheel/sdist，不要假设存在可用的 `v1.6.0` Tag。
+> **未发布候选版：** Core 1.6.0 在 `release/1.6.0-prep` 分支上准备，**尚无 Tag、也无 Release**。上面的安装命令仍然固定 `v1.5.0`；验证候选代码请使用该分支或本地构建的 wheel/sdist，不要假设存在 `v1.6.0` Tag。
 
 ### 它主要解决三件事
 
@@ -111,10 +111,10 @@ JSONL。你每天都在跨这些工具干活——Voyager 把这些历史变成*
 
 ```sh
 # 用 pipx 装成独立 CLI（推荐，不用折腾虚拟环境）
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
 
 # 或者用 pip 装到用户目录（Windows 上用 `python -m pip`，`pip` 常常不在 PATH 里）
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"
 ```
 
 **Voyager 没有发布到 PyPI。** PyPI 上的 `voyager` 是一个毫不相干的最近邻搜索库，
@@ -142,9 +142,9 @@ voyager --version        # 应当输出 1.5.0
 `[all]` = DSH 支持（`zstandard`）+ MCP server（`mcp`），两者都是可选能力：
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"          # 核心
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"          # 核心
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.5.0"     # + MCP server
 ```
 
 想改 Voyager 本身：
