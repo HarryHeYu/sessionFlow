@@ -278,6 +278,10 @@ def test_continue_context_reports_ambiguity(two):
     assert out["thread_ambiguous"] is True
     assert len(out["thread_candidates"]) == 2
     assert "default" in out["thread_default_reason"]
+    # The read-only bundle has a default scope, but no field may claim that a
+    # thread was chosen by the caller.
+    assert "selected_thread" not in out
+    assert "thread" not in out
 
 
 def test_continue_context_with_a_bad_thread_is_an_error(two):

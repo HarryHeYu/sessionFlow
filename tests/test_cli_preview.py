@@ -66,6 +66,8 @@ def test_preview_json_is_read_only_and_shows_the_selected_work(tmp_path, capsys)
     assert payload["read_only"] is True
     assert payload["selected_thread"]["id"] == tid
     assert payload["selected_thread"]["goal"] == "finish strict=True"
+    assert payload["thread_requested"] == tid
+    assert "thread_ambiguous" not in payload
     assert payload["budget"] == 20000
     assert "TODO" in payload["bundle"]
     assert "pytest -q" in payload["bundle"]
@@ -77,9 +79,9 @@ def test_preview_marks_ambiguous_threads_without_pretending_to_choose(tmp_path, 
     db, tid = _fixture(tmp_path)
     store = Store(db)
     _seed(store, "codex:b1", "codex", "unrelated task", "done", 3000.0)
-    store.thread_create(repo_root="E:/proj/demo", title="other work",
-                        goal="unrelated", )
-    store.thread_attach(store.thread_find_by_members({"codex:b1"}), "codex:b1")
+    other = store.thread_create(repo_root="E:/proj/demo", title="other work",
+                                goal="unrelated")
+    store.thread_attach(other, "codex:b1")
     store.close()
 
     rc = main(["preview", "--db", str(db), "--repo", "E:/proj/demo", "--json"])
@@ -92,6 +94,20 @@ def test_preview_marks_ambiguous_threads_without_pretending_to_choose(tmp_path, 
     assert len(candidates) >= 2
     assert "default" in payload["thread_default_reason"]
     assert "not a choice" in payload["thread_default_reason"]
+    # A default preview is not an explicit selection. The JSON must not grow a
+    # selection-shaped field merely because the newest candidate was compiled.
+    assert "selected_thread" not in payload
+    assert "thread" not in payload
+
+    # Naming a thread among the candidates is an explicit choice: the ambiguity
+    # markers disappear and the chooser metadata is added instead.
+    rc = main(["preview", "--db", str(db), "--repo", "E:/proj/demo",
+               "--thread", other, "--json"])
+    chosen = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert chosen["thread_requested"] == other
+    assert chosen["selected_thread"]["id"] == other
+    assert "thread_ambiguous" not in chosen
 
 
 def test_preview_human_output_states_that_nothing_was_written(tmp_path, capsys):
