@@ -26,6 +26,7 @@ is one client of it, and the core is a general-purpose local tool.)
 | **Current release** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Community** | Listed in the third-party [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/data/plugins/HarryHeYu__dsh-sessionflow.yml) directory — a listing, not a certification |
 | **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
+| **Verification truth** | [Canonical verification matrix](docs/verification-matrix.md) separates UNIT, INTEGRATION, historical live, R16-only, BLOCKED and NOT VERIFIED claims. |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 
 > **Current release:** Core 1.6.0 is published as tag `v1.6.0` with wheel and sdist assets. The pins above install that immutable tag. Work still in development lives on `main` or a candidate branch and is never represented here as the published release.
