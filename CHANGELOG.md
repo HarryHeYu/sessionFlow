@@ -15,6 +15,8 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 - Contract tests now pin ambiguous WorkThread previews to expose `thread_ambiguous`, every candidate and an explicit default reason while carrying neither `selected_thread` nor `thread`; an explicit `--thread` still returns `selected_thread` and `thread_requested`. This documents the existing JSON contract only: no field, Bridge op or schema version changed, and no new user capability was added.
 
+- Added a canonical verification matrix, a safe manual Native Resume procedure and a privacy-safe causal continuity fixture/verifier. The matrix separates historical live, R16-only, BLOCKED and NOT VERIFIED claims; no production behaviour, schema, Bridge op or release state changed.
+
 ## [1.6.0] — 2026-11-22
 
 ### Added
