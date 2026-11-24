@@ -11,6 +11,10 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 - `voyager demo --db PATH` now honours the global database override on either side of the subcommand. The demo seeds exactly the requested index and prints commands pointing at it, instead of silently writing the default `demo.db` under the real home directory.
 
+### Changed
+
+- Contract tests now pin ambiguous WorkThread previews to expose `thread_ambiguous`, every candidate and an explicit default reason while carrying neither `selected_thread` nor `thread`; an explicit `--thread` still returns `selected_thread` and `thread_requested`. This documents the existing JSON contract only: no field, Bridge op or schema version changed, and no new user capability was added.
+
 ## [1.6.0] — 2026-11-22
 
 ### Added
