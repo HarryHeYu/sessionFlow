@@ -160,7 +160,7 @@ The next layer is a **continuity / context orchestration** layer: not only
 sessions, and let a *different* agent continue".
 
 ```
-Search past work, merge context across sessions, and continue seamlessly in any agent.
+Search past work, merge context across sessions, and continue a supported agent's work from a compiled handoff.
 ```
 
 This is a bigger product jump than adding another adapter, a TUI, or more
@@ -175,11 +175,11 @@ search. The index is the foundation; the compiler is the moat.
 | One searchable index across every AI coding agent on your machine. | One continuity layer across every AI coding agent. |
 | Session-centric (`handoff <id>`, `continue` = latest session). | Task-centric (`WorkThread` of many sessions). |
 | Conversation summary (truncate + concat). | Context synthesis (rank, dedup, resolve, budget). |
-| "Seamless session migration" (not actually possible). | Seamless **work continuation**. |
+| "Seamless session migration" (not actually possible). | Work continuation from compiled context. |
 
 Cross-agent resume cannot copy system prompts, hidden tool state, cached
 reasoning, or provider runtime. Voyager will never claim it can. What it
-*can* do is make the user experience one command:
+*can* do is make the common path a short, explicit command:
 
 ```
 voyager switch codex
