@@ -93,8 +93,8 @@ Voyager 现在是机器上所有 AI 编码 Agent 的统一**索引**。
 而是「把多个 Agent、多个 Session 的工作状态重新组织起来，让另一个 Agent 接着干」。
 
 ```
-Search past work, merge context across sessions, and continue seamlessly in any agent.
-搜索过去的工作，跨会话合并上下文，在任意 Agent 里无缝接续。
+Search past work, merge context across sessions, and continue a supported agent's work from a compiled handoff.
+搜索过去的工作，跨会话合并上下文，从编译好的 handoff 中在受支持的 Agent 里接着做。
 ```
 
 这比继续加 Adapter、TUI 或搜索更值得做。索引是地基，编译器才是壁垒。
@@ -108,11 +108,11 @@ Search past work, merge context across sessions, and continue seamlessly in any 
 | 本机所有 AI 编码 Agent 的可搜索索引 | 所有 AI 编码 Agent 之上的接续层 |
 | 以 Session 为中心（`handoff <id>`，`continue` = 最新一条） | 以任务为中心（由多个 Session 组成的 `WorkThread`） |
 | 对话摘要（截断 + 拼接） | 上下文合成（排序、去重、冲突消解、预算） |
-| 「无缝迁移 Session」（实际做不到） | 无缝的**工作接续**（work continuation） |
+| 「无缝迁移 Session」（实际做不到） | 从编译上下文继续工作（work continuation） |
 
 跨 Agent 无法搬运 system prompt、隐藏 tool state、cached reasoning、
 provider 运行时状态。Voyager 不会声称能做到 session migration。
-用户侧可以非常无缝——一条命令：
+用户侧可以简化为一条明确命令：
 
 ```
 voyager switch codex

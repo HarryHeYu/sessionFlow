@@ -4,68 +4,76 @@
 [![release](https://img.shields.io/github/v/release/HarryHeYu/sessionFlow)](https://github.com/HarryHeYu/sessionFlow/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/HarryHeYu/sessionFlow/blob/main/LICENSE)
-![platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 
-**Local session indexing and cross-agent work continuity for AI coding assistants.**
+**Continue work across AI coding agents without losing what happened before.**
 
-One local index over every AI coding agent on your machine. Search your entire
-coding history, read a project's cross-agent timeline, and hand work from one
-agent to another without losing the thread. Everything stays on your machine:
-no account, no cloud, no telemetry.
+sessionFlow is a local-first index and continuity layer over the session history your coding agents already write to disk. It is **not a memory database** and **not a cloud service**. It is also more than session search: it compiles what happened before — goal, files touched, commands run, failed attempts and open items — into context the next agent can read and check.
 
-(The CLI command is `voyager`; the GitHub project is sessionFlow. This repo is
-**not** DSH-only — the [DSH plugin](https://github.com/HarryHeYu/dsh-sessionflow)
-is one client of it, and the core is a general-purpose local tool.)
+sessionFlow itself works on local files: no account, no cloud service and no telemetry. The AI agent you choose to launch may still make its own provider calls.
 
-|  |  |
+(The CLI command is `voyager`; the GitHub project is sessionFlow. This repo is **not** DSH-only — the [DSH plugin](https://github.com/HarryHeYu/dsh-sessionflow) is one client of it, and the core is a general-purpose local tool.)
+
+## The problem
+
+You got halfway through a task in Codex, then switched to Claude Code, DSH or another agent. The next agent cannot see:
+
+- what goal you were pursuing;
+- which files were changed and why;
+- which commands and tests were already run;
+- which approaches were tried and rejected;
+- what remained unfinished.
+
+Re-explaining all of that costs time. Starting over repeats work. Plain session search can find the old transcript, but it does not turn scattered sessions into a continuation the next agent can act on.
+
+## What sessionFlow does
+
+- **Indexes local coding-agent sessions** from adapters such as Codex, Claude Code, DSH, Grok, ZCode, Cursor, Kiro, Antigravity, OpenCode and WorkBuddy.
+- **Groups related work into WorkThreads**, so several sessions and agents become one project history.
+- **Compiles continuation context** with provenance: each claim names the event it came from.
+- **Lets another agent continue** through a context package or bundle, instead of making you retype the state of the work.
+
+```mermaid
+flowchart LR
+  C["Codex"] --> A["Adapters"]
+  CL["Claude Code"] --> A
+  D["DSH"] --> A
+  G["Grok / ZCode / Cursor / Kiro / Antigravity / OpenCode / WorkBuddy"] --> A
+  A --> I[("Local SQLite index")]
+  I --> W["WorkThread"]
+  W --> B["Continuation bundle"]
+  B --> N["Next agent"]
+  U["CLI / MCP / DSH plugin / VS Code surface"] -. reads .-> I
+```
+
+## Strongest proof
+
+In a small controlled 3-task benchmark where critical requirements existed only in prior agent sessions, control agents completed 0/3 tasks; agents given sessionFlow continuation completed 2/3.
+
+Small internal sample; not statistically significant.
+
+See the [causal continuity protocol](docs/causal-continuity-benchmark.md) and the [canonical verification matrix](docs/verification-matrix.md) for exactly what was and was not verified.
+
+## 3–5 minute demo
+
+- `voyager demo` seeds a synthetic index; no real agent history or credential is needed.
+- The [public continuity proof demo](examples/continuity-proof/) shows the same idea with a clean fixture: the hidden requirement exists only in a prior session, and a deterministic verifier checks both the control and sessionFlow conditions.
+- Full commands are in the [quick start](#quick-start) and [5-minute walkthrough](docs/QUICKSTART.md).
+
+| Start here | |
 |---|---|
-| **What it is** | A local index plus a continuity layer over the session history your coding agents already write to disk. |
-| **Why use it** | Your history is split across nine formats. sessionFlow makes it one thing you can search, summarize, export and continue — and every claim in a continuation bundle names the event it came from, so you can check it. |
 | **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"` — [details](#install) |
-| **Try it (2 min)** | `voyager demo` — synthetic data, no agents needed — [quick start](#quick-start) · [5-minute walkthrough](docs/QUICKSTART.md) |
 | **Current release** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
-| **Community** | Listed in the third-party [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/data/plugins/HarryHeYu__dsh-sessionflow.yml) directory — a listing, not a certification |
-| **Known limitation** | Native resume is **not verified** end to end — see [supported platforms](#supported-platforms) |
-| **Verification truth** | [Canonical verification matrix](docs/verification-matrix.md) separates UNIT, INTEGRATION, historical live, R16-only, BLOCKED and NOT VERIFIED claims. |
+| **Verification truth** | [Canonical verification matrix](docs/verification-matrix.md) separates UNIT, INTEGRATION, historical live, R16/R17-only, BLOCKED and NOT VERIFIED claims. |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 
 > **Current release:** Core 1.6.0 is published as tag `v1.6.0` with wheel and sdist assets. The pins above install that immutable tag. Work still in development lives on `main` or a candidate branch and is never represented here as the published release.
 
-### Three things it is for
+## Verification boundary
 
-**Continue work in a different agent.** You started something in Codex; Claude
-Code should finish it. `voyager continue` compiles the goal, the files touched,
-the commands, the errors and where the work stopped into a context package the
-next agent reads — instead of you re-explaining an afternoon.
-
-**One project, several sessions.** A feature is spread over four sessions and
-three agents. `voyager merge A B C` groups them into a WorkThread, and
-`voyager thread summarize <thread>` gives you one brief across all of them —
-who contributed what, and which items are still open.
-
-**Trace a claim back to the event.** A handoff says "all 42 tests pass". Every
-claim in a bundle names the event it came from, and `voyager evidence verify`
-tells you whether that event is still the one the reference was made from. It
-does **not** decide whether the claim is true — [see below](#checking-what-a-handoff-claims).
-
-Your AI coding history is fragmented:
-
-- Codex sessions (rollout JSONL)
-- Claude Code conversations (project JSONL)
-- DSH runs (zstd JSONL)
-- ZCode / Cursor / Kiro / Grok / Antigravity (SQLite, VSCDB, JSON...)
-
-sessionFlow creates **one local index** out of all of them — pure local,
-no accounts, no cloud, no telemetry.
-
-**Search. Understand. Continue. Switch agents without losing context.**
-
-![sessionFlow demo: search, timeline, continue, doctor repair](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/assets/demo.gif)
-
-Cross-agent continuity is built in: merge context across sessions and
-continue in any agent (`voyager merge` / `switch` / `continue`) — see
-[docs/ROADMAP.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/ROADMAP.md) for the shipped scope and
-[docs/POST-1.0.md](https://github.com/HarryHeYu/sessionFlow/blob/main/docs/POST-1.0.md) for what's next.
+- **Cross-agent continuation:** LIVE VERIFIED in real Core CLI and WorkBuddy A→B/C runs (`LIVE-R16`), with historical DSH fixture runs (`LIVE-HISTORICAL`).
+- **Native Resume:** NOT VERIFIED end to end. The commands exist; authenticated provider runs were not performed here.
+- **VS Code:** package and isolated install verified (`LIVE-R16` / `INSTALL-ONLY`); full GUI activation and one-click-switch E2E are NOT VERIFIED.
+- **All provider adapters:** indexed adapters are not equally live-verified. Check the [verification matrix](docs/verification-matrix.md) before making a provider-specific claim.
 
 [中文说明](https://github.com/HarryHeYu/sessionFlow/blob/main/README.zh-CN.md)
 
@@ -82,14 +90,14 @@ sessionFlow:
   switch agents mid-work        -> voyager handoff claude --from codex
 ```
 
-Nothing is uploaded anywhere: sessionFlow reads the session files your
+sessionFlow itself does not upload session files: it reads the session files your
 agents already wrote, normalizes them into one SQLite index you can search,
 resume from, hand off to another agent, or query straight from inside an
 agent over MCP / the DSH plugin.
 
-![Voyager architecture: 9 agents, 9 storage formats, one index](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/architecture.png)
+![Voyager architecture: multiple agents, multiple storage formats, one index](https://raw.githubusercontent.com/HarryHeYu/sessionFlow/main/docs/screenshots/architecture.png)
 
-Nine agents keep nine different formats; Voyager normalizes them into one
+Agents keep their session data in different formats; Voyager normalizes them into one
 SQLite index you can search, resume from, hand off to another agent, or query
 straight from inside an agent over MCP.
 
@@ -119,8 +127,7 @@ Voyager makes that history *one* thing you can query.
   that one command or touched that one file (CJK substring search works).
 - **Real exports** — human-readable Markdown, or lossless JSON with both
   the normalized and the raw events.
-- **Resume where you left off** — Voyager knows each platform's resume
-  command and runs it for you.
+- **Native resume commands** — Voyager reports the platform's resume command. End-to-end native resume is **NOT VERIFIED**; see the [verification matrix](docs/verification-matrix.md).
 
 ## Install
 
