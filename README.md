@@ -62,13 +62,13 @@ See the [causal continuity protocol](docs/causal-continuity-benchmark.md) and th
 
 | Start here | |
 |---|---|
-| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"` — [details](#install) |
-| **Current release** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
+| **Install** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.1"` — [details](#install) |
+| **Current release** | [v1.6.1](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.1) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Verification truth** | [Canonical verification matrix](docs/verification-matrix.md) separates UNIT, INTEGRATION, historical live, R16/R17-only, BLOCKED and NOT VERIFIED claims. |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
 | **Try / feedback** | [5-minute path](docs/TRY-SESSIONFLOW.md) · [issue forms](https://github.com/HarryHeYu/sessionFlow/issues/new/choose) |
 
-> **Current release:** Core 1.6.0 is published as tag `v1.6.0` with wheel and sdist assets. The pins above install that immutable tag. Work still in development lives on `main` or a candidate branch and is never represented here as the published release.
+> **Current release:** Core 1.6.1 is published as tag `v1.6.1` with wheel and sdist assets. The pins above install that immutable tag. Work still in development lives on `main` or a candidate branch and is never represented here as the published release.
 
 ## Verification boundary
 
@@ -135,10 +135,10 @@ Voyager makes that history *one* thing you can query.
 
 ```sh
 # isolated CLI install — no virtualenv juggling (recommended)
-pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
+pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.1"
 
 # or with pip (user-level); `python -m pip` on Windows, where `pip` may not be on PATH
-python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"
+python -m pip install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.1"
 ```
 
 **Voyager is not on PyPI.** The `voyager` name there belongs to an unrelated
@@ -146,13 +146,13 @@ nearest-neighbour search library, so a bare `pip install voyager` installs the
 wrong project — always use the `@ git+…` form above. Publishing under a final
 name is tracked in `CHANGELOG.md`.
 
-The `@v1.6.0` pins the currently published release tag, which is what makes a
+The `@v1.6.1` pins the currently published release tag, which is what makes a
 reinstall reproducible and is what the released DSH plugin recommends. Drop the
-`@v1.6.0` to follow `main` (which may carry unpublished changes) instead. Check the
+`@v1.6.1` to follow `main` (which may carry unpublished changes) instead. Check the
 installed version with:
 
 ```sh
-voyager --version        # must print 1.6.0
+voyager --version        # must print 1.6.1
 ```
 
 > **Upgrading from v1.2.0 (or v1.1.0) needs no migration.** Your index is read as-is: no
@@ -160,19 +160,19 @@ voyager --version        # must print 1.6.0
 > own speed. Rolling back is safe because nothing was migrated — v1.1.0 reads
 > the same database and ignores the extra index.
 
-> **Core 1.6.0 is the current published release.** It adds `merge --repo`, a
-> read-only `voyager preview`, the WorkBuddy read-only provider and the VS Code
-> WorkThread Selector on top of v1.5.0. The change list is under `[1.6.0]` in
-> `CHANGELOG.md` and `docs/releases/v1.6.0.md`; the corresponding DSH plugin
-> release is v1.4.0, while plugin v1.3.0 remains paired with Core v1.5.0.
+> **Core 1.6.1 is the current published release.** It fixes failed-handoff
+> lease cleanup and keeps `voyager demo --db PATH` isolated, on top of the
+> v1.6.0 feature set. The change list is under `[1.6.1]` in `CHANGELOG.md`
+> and `docs/releases/v1.6.1.md`; the corresponding DSH plugin release is
+> v1.4.0, which needs no upgrade for this patch.
 
 `[all]` = DSH support (`zstandard`) + MCP server (`mcp`). The two are
 optional and only needed for those features:
 
 ```sh
-pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"          # core
-pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + DSH
-pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"     # + MCP server
+pip install "voyager @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.1"          # core
+pip install "voyager[dsh] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.1"     # + DSH
+pip install "voyager[mcp] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.1"     # + MCP server
 ```
 
 Working on Voyager itself:

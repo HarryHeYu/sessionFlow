@@ -447,7 +447,7 @@ class TestMaintenanceGuide(unittest.TestCase):
         rows = self.rows()
         self.assertTrue(rows, "no compatibility rows found in MAINTENANCE.md")
         self.assertEqual(
-            rows[0][:3], ["v1.6.0", "v1.4.0", "1"],
+            rows[0][:3], ["v1.6.1", "v1.4.0", "1"],
             "the first compatibility row must name the current released pairing")
         self.assertIn(
             "seven", rows[0][3].lower(),
