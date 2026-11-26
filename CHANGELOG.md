@@ -5,25 +5,22 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-11-26
+
 ### Added
 
 - A privacy-safe public continuity-proof demo under `examples/continuity-proof/`. It ships a synthetic prior session, deterministic setup/verifier scripts and a real Core CLI continuation generator; no credentials, real history, provider login or GUI is involved. The small scenario is explicit about its oracle boundary and is not presented as a statistical benchmark.
+- A canonical verification matrix, a safe manual Native Resume procedure and a privacy-safe causal continuity fixture/verifier. The matrix separates historical live, R16-only, BLOCKED and NOT VERIFIED claims; no production behaviour, schema, Bridge op or release state changed.
 
 ### Changed
 
 - The README first screen now leads with the cross-agent continuity value proposition, a concrete problem statement, a compact Mermaid mental model, the bounded R17 controlled result and a clear verification boundary. Privacy wording distinguishes sessionFlow itself from the agent/provider you launch.
+- Contract tests now pin ambiguous WorkThread previews to expose `thread_ambiguous`, every candidate and an explicit default reason while carrying neither `selected_thread` nor `thread`; an explicit `--thread` still returns `selected_thread` and `thread_requested`. This documents the existing JSON contract only: no field, Bridge op or schema version changed, and no new user capability was added.
 
 ### Fixed
 
 - A failed Continuation Bundle write no longer leaves a WorkThread leased to a handoff that never happened. Both failures to create the output directory and failures from the atomic writer now release the single-writer lease, clear the returned token and record no pending attach, so the next legal handoff is not refused. Regression tests cover mkdir failure, atomic write failure and a successful retry without `thread unlock --steal`.
-
 - `voyager demo --db PATH` now honours the global database override on either side of the subcommand. The demo seeds exactly the requested index and prints commands pointing at it, instead of silently writing the default `demo.db` under the real home directory.
-
-### Changed
-
-- Contract tests now pin ambiguous WorkThread previews to expose `thread_ambiguous`, every candidate and an explicit default reason while carrying neither `selected_thread` nor `thread`; an explicit `--thread` still returns `selected_thread` and `thread_requested`. This documents the existing JSON contract only: no field, Bridge op or schema version changed, and no new user capability was added.
-
-- Added a canonical verification matrix, a safe manual Native Resume procedure and a privacy-safe causal continuity fixture/verifier. The matrix separates historical live, R16-only, BLOCKED and NOT VERIFIED claims; no production behaviour, schema, Bridge op or release state changed.
 
 ## [1.6.0] — 2026-11-22
 
