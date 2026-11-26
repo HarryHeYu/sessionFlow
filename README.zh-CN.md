@@ -21,8 +21,10 @@
 | **为什么用** | 你的历史分散在九种格式里。sessionFlow 让它变成一件可以检索、总结、导出、接续的东西——而且接续包里的每一条结论都标着它出自哪个事件，可以核对。 |
 | **安装** | `pipx install "voyager[all] @ git+https://github.com/HarryHeYu/sessionFlow.git@v1.6.0"` —— [详见](#安装) |
 | **2 分钟试用** | `voyager demo` —— 合成数据，不需要任何 Agent —— [快速上手](#快速上手) · [5 分钟上手指南](docs/QUICKSTART.md) |
+| **最短试用路径** | [五分钟试用](docs/TRY-SESSIONFLOW.md) —— 先跑合成 demo，再决定是否扫描真实历史 |
 | **当前版本** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **已知限制** | Native resume **尚未**端到端验证 —— 见 [支持的平台](#支持的平台) |
+| **反馈** | [Issue 表单](https://github.com/HarryHeYu/sessionFlow/issues/new/choose) —— bug / provider 兼容 / 接续质量 / 功能建议 |
 
 > **当前正式版：** Core 1.6.0 已作为 `v1.6.0` Tag 发布，并附 wheel 与 sdist 资产。上面的安装命令安装的就是这个不可变 Tag。仍在开发中的改动位于 `main` 或候选分支，不会在此处被当作已发布版本。
 

@@ -5,6 +5,11 @@ All notable changes to Voyager are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- A short external trial path (`docs/TRY-SESSIONFLOW.md`) and a no-telemetry adoption baseline (`docs/ADOPTION.md`).
+- GitHub issue forms for provider compatibility reports and continuation quality reports, alongside the existing bug report and feature request forms.
+
 ## [1.6.1] — 2026-11-26
 
 ### Added
