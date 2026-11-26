@@ -139,3 +139,37 @@ jobs:
             python scripts/ci_report_failures.py pytest.log
           fi
           exit $rc
+
+  macos-smoke:
+    # A platform-independent wheel is not proof of macOS execution. This job
+    # verifies package install, CLI smoke and demo isolation on macOS without
+    # GUI, provider credentials or Native Resume.
+    name: macOS package smoke on py3.13
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install core only
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: CLI smoke
+        run: |
+          voyager --version
+          voyager --help
+          voyager stats --db "$RUNNER_TEMP/r19-smoke.db"
+          voyager list --db "$RUNNER_TEMP/r19-smoke.db"
+
+      - name: Demo isolation + handoff regressions
+        run: |
+          python -m pytest tests/test_demo_db_override.py tests/test_handoff_lease_cleanup.py -q
+          voyager demo --db "$RUNNER_TEMP/r19-demo.db"
+          test -f "$RUNNER_TEMP/r19-demo.db"
