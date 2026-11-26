@@ -1,0 +1,106 @@
+name: Continuation quality report
+description: Tell us what a handoff recovered, missed or repeated
+labels: ["continuity", "feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for continuation quality, not general bugs. Never paste a
+        real bundle containing source code, prompts or secrets. Describe the
+        missing fact in your own words and redact all identifiers.
+
+  - type: dropdown
+    id: source_agent
+    attributes:
+      label: Source agent
+      options:
+        - Codex
+        - Claude Code
+        - DSH
+        - Grok CLI
+        - ZCode
+        - Cursor
+        - Kiro
+        - Antigravity
+        - OpenCode
+        - WorkBuddy
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: destination_agent
+    attributes:
+      label: Destination agent
+      options:
+        - Codex
+        - Claude Code
+        - DSH
+        - Grok CLI
+        - ZCode
+        - Cursor
+        - Kiro
+        - Antigravity
+        - OpenCode
+        - WorkBuddy
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: goal_recovered
+    attributes:
+      label: Was the original goal recovered?
+      options:
+        - "Yes"
+        - "Partially"
+        - "No"
+    validations:
+      required: true
+
+  - type: textarea
+    id: recovered_facts
+    attributes:
+      label: What was recovered correctly?
+      description: Goal, constraint, file, command, failed attempt, or open item.
+    validations:
+      required: false
+
+  - type: textarea
+    id: missing_facts
+    attributes:
+      label: What key goal, file or context was lost?
+      description: Describe it without pasting sensitive source text.
+    validations:
+      required: true
+
+  - type: textarea
+    id: duplicate_work
+    attributes:
+      label: Did the next agent repeat work?
+      description: What did it redo that the prior session had already solved?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: sensitive_data_warning
+    attributes:
+      label: Did the bundle contain anything sensitive?
+      description: This helps us prioritize redaction and privacy work.
+      options:
+        - "No"
+        - "Yes — I redacted the report"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Sanitized reproduction
+      description: Commands and context shape only; no real transcript content.
+      placeholder: |
+        voyager preview --repo <redacted>
+        voyager continue --repo <redacted> --no-launch -o <redacted>
+    validations:
+      required: false

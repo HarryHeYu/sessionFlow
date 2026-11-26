@@ -58,6 +58,7 @@ See the [causal continuity protocol](docs/causal-continuity-benchmark.md) and th
 - `voyager demo` seeds a synthetic index; no real agent history or credential is needed.
 - The [public continuity proof demo](examples/continuity-proof/) shows the same idea with a clean fixture: the hidden requirement exists only in a prior session, and a deterministic verifier checks both the control and sessionFlow conditions.
 - Full commands are in the [quick start](#quick-start) and [5-minute walkthrough](docs/QUICKSTART.md).
+- The shortest safe path is [Try sessionFlow in five minutes](docs/TRY-SESSIONFLOW.md).
 
 | Start here | |
 |---|---|
@@ -65,6 +66,7 @@ See the [causal continuity protocol](docs/causal-continuity-benchmark.md) and th
 | **Current release** | [v1.6.0](https://github.com/HarryHeYu/sessionFlow/releases/tag/v1.6.0) · Python ≥ 3.10 · Windows / macOS / Linux |
 | **Verification truth** | [Canonical verification matrix](docs/verification-matrix.md) separates UNIT, INTEGRATION, historical live, R16/R17-only, BLOCKED and NOT VERIFIED claims. |
 | **Maintaining it** | [Known issues, compatibility matrix, release checklist](docs/MAINTENANCE.md) |
+| **Try / feedback** | [5-minute path](docs/TRY-SESSIONFLOW.md) · [issue forms](https://github.com/HarryHeYu/sessionFlow/issues/new/choose) |
 
 > **Current release:** Core 1.6.0 is published as tag `v1.6.0` with wheel and sdist assets. The pins above install that immutable tag. Work still in development lives on `main` or a candidate branch and is never represented here as the published release.
 
@@ -225,6 +227,10 @@ here decides that — and it is not a signature: the fingerprint is eight hex
 characters, and anyone who rewrites a transcript can recompute it. The source
 check compares `mtime` and `size`, which is not byte equality. Both limits are
 stated in the command's own output, on every path.
+
+## Feedback and adoption
+
+Use the [issue chooser](https://github.com/HarryHeYu/sessionFlow/issues/new/choose) for bugs, provider compatibility, continuation quality or feature requests. Please redact real session text and private paths. Adoption is measured without telemetry; see [docs/ADOPTION.md](docs/ADOPTION.md).
 
 ## Quick Start
 

@@ -1,0 +1,80 @@
+name: Provider compatibility
+description: Report whether a specific coding agent can be scanned or handed off
+labels: ["provider", "question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste real session text, file contents, tokens or private
+        paths. Redact paths to a template such as `~/.claude/projects/<redacted>`.
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider / tool
+      description: Which local coding agent or integration is involved?
+      options:
+        - Codex
+        - Claude Code
+        - DSH
+        - Grok CLI
+        - ZCode
+        - Cursor
+        - Kiro
+        - Antigravity
+        - OpenCode
+        - WorkBuddy
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: provider_version
+    attributes:
+      label: Provider version
+      placeholder: "e.g. DSH 0.2.2-alpha.2, Codex CLI <version>"
+    validations:
+      required: false
+
+  - type: input
+    id: session_location
+    attributes:
+      label: Session location template
+      description: Redacted path pattern only; no real project or user name.
+      placeholder: "e.g. ~/.claude/projects/<redacted>/*.jsonl"
+    validations:
+      required: false
+
+  - type: textarea
+    id: scan_result
+    attributes:
+      label: Does scan work?
+      description: Include the exact command and the sanitized output or error.
+      placeholder: |
+        voyager scan --platform claude
+        result: found N sessions / no sessions / error
+    validations:
+      required: true
+
+  - type: textarea
+    id: continuation_result
+    attributes:
+      label: Does continuation work?
+      description: Include preview and, if tried, a bundle handoff. Do not paste bundle contents with real data.
+      placeholder: |
+        voyager preview --repo <redacted>
+        voyager continue --no-launch -o <redacted-path>
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version and sessionFlow version.
+      placeholder: |
+        OS:
+        Python:
+        sessionFlow: `voyager --version`
+    validations:
+      required: true
