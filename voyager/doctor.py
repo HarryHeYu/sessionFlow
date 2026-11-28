@@ -227,6 +227,112 @@ def _open_store(db_path: Optional[Path] = None):
         return None, path
 
 
+# --- read-only schema preflight (R20/M) -------------------------------------
+#
+# `Store(path)` runs additive migrations in its constructor. That is fine for
+# normal commands but wrong for a diagnostic: a doctor run against a damaged
+# or old index used to CREATE TABLE / ALTER TABLE / backfill and then report
+# "healthy", changing the very thing it was asked to inspect. These helpers
+# use a real SQLite read-only connection so structural damage is reported
+# before any Store is opened.
+
+_REQUIRED_TABLES = ("sessions", "events", "sources", "threads",
+                   "thread_sessions", "thread_pending", "meta")
+_REQUIRED_COLUMNS = {
+    "sessions": ("source_state", "source_missing_since"),
+    "events": ("origin", "sid"),
+}
+
+
+def _open_ro_conn(path: Path) -> Optional[sqlite3.Connection]:
+    try:
+        con = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        return con
+    except sqlite3.Error:
+        return None
+
+
+def check_schema_integrity(db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Inspect schema shape with a read-only connection; never writes."""
+    out: Dict[str, Any] = {"ok": True, "path": None, "missing_tables": [],
+                           "missing_columns": [], "orphan_events": 0,
+                           "error": None}
+    path = _store_path(db_path)
+    out["path"] = str(path) if path else None
+    if not path or not path.exists():
+        out["ok"] = False
+        out["error"] = "index database not found; run `voyager scan`"
+        return out
+    con = _open_ro_conn(path)
+    if con is None:
+        out["ok"] = False
+        out["error"] = "index database cannot be opened read-only"
+        return out
+    try:
+        tables = {r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        out["missing_tables"] = [t for t in _REQUIRED_TABLES if t not in tables]
+        for table, cols in _REQUIRED_COLUMNS.items():
+            if table not in tables:
+                continue
+            present = {r[1] for r in con.execute(
+                "PRAGMA table_info({0})".format(table))}
+            for col in cols:
+                if col not in present:
+                    out["missing_columns"].append("{0}.{1}".format(table, col))
+        if "sessions" in tables and "events" in tables:
+            out["orphan_events"] = con.execute(
+                "SELECT COUNT(*) FROM events e LEFT JOIN sessions s "
+                "ON s.id=e.sid WHERE s.id IS NULL").fetchone()[0]
+    except sqlite3.Error as e:
+        out["ok"] = False
+        out["error"] = str(e)
+    finally:
+        con.close()
+    out["ok"] = not (out["missing_tables"] or out["missing_columns"]
+                     or out["error"])
+    return out
+
+
+def _schema_issues(schema: Dict[str, Any]) -> List[Issue]:
+    issues: List[Issue] = []
+    for table in schema.get("missing_tables") or []:
+        issues.append(Issue(
+            code="SCHEMA_MISSING_TABLE", severity=CRITICAL, category="store",
+            message="index table is missing: {0}".format(table),
+            evidence=str(schema.get("path") or "(no path)"),
+            suggested_action="restore the index from backup or run `voyager scan`",
+            repair_kind=READ_ONLY_DIAGNOSIS))
+    for col in schema.get("missing_columns") or []:
+        issues.append(Issue(
+            code="SCHEMA_MISSING_COLUMN", severity=CRITICAL, category="store",
+            message="index column is missing: {0}".format(col),
+            evidence=str(schema.get("path") or "(no path)"),
+            suggested_action="do not let a normal command migrate this index "
+                             "silently; restore or rebuild deliberately",
+            repair_kind=USER_DECISION_REQUIRED))
+    if schema.get("orphan_events"):
+        issues.append(Issue(
+            code="ORPHAN_EVENTS", severity=CRITICAL, category="store",
+            message="{0} event(s) reference a session that is not indexed"
+                    .format(schema["orphan_events"]),
+            evidence="left join events.sid -> sessions.id",
+            suggested_action="inspect the affected rows; doctor will not delete "
+                             "history automatically",
+            repair_kind=USER_DECISION_REQUIRED))
+    if schema.get("error") and not (schema.get("missing_tables")
+                                    or schema.get("missing_columns")):
+        issues.append(Issue(
+            code="STORE_UNAVAILABLE", severity=CRITICAL, category="store",
+            message=str(schema["error"]),
+            evidence=str(schema.get("path") or "(no path)"),
+            suggested_action="run `voyager doctor` from a healthy index or "
+                             "restore the database",
+            repair_kind=READ_ONLY_DIAGNOSIS))
+    return issues
+
+
 # --- individual checks (each returns a dict for the report) ----------------
 
 def check_store(db_path: Optional[Path] = None) -> Dict[str, Any]:
@@ -895,6 +1001,13 @@ def collect_issues(repo: Optional[str] = None,
     """
     issues: List[Issue] = []
 
+    # R20/M: refuse to open a structurally damaged index through Store, which
+    # would silently create/alter tables and then report a false clean bill.
+    schema = check_schema_integrity(db_path)
+    if not schema["ok"]:
+        return _schema_issues(schema)
+    issues.extend(_schema_issues(schema))
+
     # --- store --------------------------------------------------------------
     store_rpt = check_store(db_path)
     if not store_rpt.get("ok"):
@@ -1286,6 +1399,23 @@ def run(repo: Optional[str] = None,
     `db_path` exists because `voyager --db X doctor` has to diagnose X, not the
     default index -- the same trap the `db` subcommands had.
     """
+    # R20/M: a damaged schema must be reported, not repaired by opening it
+    # through Store. Return the normal report shape without touching the DB.
+    schema = check_schema_integrity(db_path)
+    if not schema["ok"]:
+        issues = [i.to_dict() for i in _schema_issues(schema)]
+        return {
+            "context_format": CONTEXT_FORMAT,
+            "store": {"ok": False, "path": schema.get("path"),
+                      "sessions": None, "threads": None,
+                      "error": schema.get("error") or "damaged schema"},
+            "continuity": {}, "cache": {}, "fts": {}, "retention": {},
+            "source_migration": {}, "leases": {}, "pending": {},
+            "verification": {}, "providers": {}, "issues": issues,
+            "blocking": [d for d in issues if d["kind"] == "blocking"],
+            "external": [], "non_blocking": [], "warnings": [],
+        }
+
     # Collect providers (needed for both the report and issue collection)
     providers: Dict[str, Any] = {}
     for p in PROVIDERS:
