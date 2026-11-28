@@ -256,6 +256,12 @@ def search(db: Optional[Path] = None, query: str = "", provider: Optional[str] =
     cannot return different rows for one query.  ``provider`` is a comma list;
     ``since`` / ``until`` accept ``2026-09-30`` or ``7d``.
     """
+    # R20/Q: a NUL in a JSON string reaches SQLite FTS and kills the whole
+    # `voyager api` JSON-lines process. Reject it before opening the index.
+    if not isinstance(query, str):
+        raise TypeError("query must be a string")
+    if "\x00" in query:
+        raise ValueError("query must not contain NUL")
     store = open_read(db)
     try:
         providers = [p.strip() for p in (provider or "").split(",") if p.strip()]
@@ -597,6 +603,9 @@ def handle_request(req: Dict[str, Any], db: Optional[Path] = None) -> Dict[str, 
         return {"id": rid, "result": fn(**params)}
     except (TypeError, ValueError) as e:
         return {"id": rid, "error": str(e)}
+    except Exception as e:  # R20/O: one bad request must not kill the stream
+        return {"id": rid,
+                "error": "{0}: {1}".format(type(e).__name__, e)}
 
 
 def serve(db: Optional[Path] = None) -> None:

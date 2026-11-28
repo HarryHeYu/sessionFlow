@@ -117,8 +117,14 @@ def resolve_pending_attaches(store: Store, now: Optional[float] = None,
                  if len(claims.get(c["id"], [])) == 1]
         if len(cands) == 1:
             c = cands[0]
-            store.thread_attach(pend["thread_id"], c["id"])
-            store.pending_mark(pend["rid"], "resolved", c["id"])
+            # R20/C5: one transaction, not two commits.  A crash between the
+            # old calls left an open pending row pointing at an attached
+            # session, and the candidate query excludes attached sessions, so
+            # the record was unrecoverable until TTL expiry.
+            if not store.thread_attach_resolve_pending(
+                    pend["thread_id"], c["id"], pend["rid"]):
+                stats["open"] += 1
+                continue
             # Evidence for the *second* half of the lifecycle.  The hook opened a
             # chain when the provider started; the resolution happens here, in a
             # scan, so the chain is recovered from the session id.  Without this

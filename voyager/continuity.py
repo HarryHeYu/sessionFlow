@@ -43,6 +43,11 @@ CONTINUATION_INSTRUCTION = (
 )
 
 _USER_MAX = 1200
+# R20/I-constraint: when a primary goal is supplied, the verbose user-message
+# block used to disappear from `## Goal` and survive only in the ranked-evidence
+# section, which budget packing drops/trims first. Keep a short, capped copy in
+# the highest-priority section so explicit constraints survive tight budgets.
+_GOAL_USER_MAX = 240
 _ASST_MAX = 1500
 _CMD_MAX = 300
 _MAX_COMMANDS = 30
@@ -832,6 +837,21 @@ def build_continuation_bundle(
     if goal:
         L.append(f"**Primary user goal:** {goal}")
         L.append("")
+        goal_user_msgs = []
+        for r in sorted_rows:
+            for ev in sess_events[r["id"]]:
+                if ev["kind"] == "user" and ev["content"]:
+                    goal_user_msgs.append((r, ev))
+        goal_user_msgs.sort(key=lambda pair: (pair[1]["ts"] or 0,
+                                              str(pair[0]["id"])))
+        if goal_user_msgs:
+            L.append("**Explicit user instructions from prior sessions:**")
+            L.append("")
+            for r, ev in goal_user_msgs[:8]:
+                text = str(ev["content"]).replace("\n", " ")[:_GOAL_USER_MAX]
+                L.append(
+                    f"- `{r['provider']}:{r['native_id'][:16]}`: {text}")
+            L.append("")
     else:
         # Collect user messages across sessions, then order them by *event*
         # time rather than by session order: with the session order now coming

@@ -983,6 +983,42 @@ class Store:
         self.thread_touch(tid)
         return cur2.rowcount > 0
 
+    def thread_attach_resolve_pending(self, tid: str, sid: str,
+                                      rid: int) -> bool:
+        """Attach a session and resolve its pending record in one transaction.
+
+        R20/C5: doing these as two commits left an orphan ``open`` pending row
+        when the process died between them.  The candidate query deliberately
+        excludes already-attached sessions, so that orphan could never resolve
+        again and had to wait for the 7-day TTL.  Both halves now commit or
+        roll back together.
+        """
+        import time as _time
+        self.con.execute("BEGIN IMMEDIATE")
+        try:
+            if not self.con.execute(
+                    "SELECT 1 FROM sessions WHERE id=?", (sid,)).fetchone():
+                self.con.rollback()
+                return False
+            row = self.con.execute(
+                "SELECT MAX(ord) m FROM thread_sessions WHERE thread_id=?",
+                (tid,)).fetchone()
+            nxt = (row["m"] or 0) + 1
+            now = _time.time()
+            self.con.execute(
+                "INSERT OR IGNORE INTO thread_sessions VALUES (?,?,?,?)",
+                (tid, sid, now, nxt))
+            self.con.execute(
+                "UPDATE thread_pending SET status='resolved', resolved_at=?, "
+                "resolved_sid=? WHERE rowid=?", (now, sid, rid))
+            self.con.execute(
+                "UPDATE threads SET updated_at=? WHERE id=?", (now, tid))
+            self.con.commit()
+            return True
+        except Exception:
+            self.con.rollback()
+            raise
+
     def thread_members(self, tid: str) -> List[sqlite3.Row]:
         """Member session rows in attach order; silently skips sessions that
         were pruned from the index."""
