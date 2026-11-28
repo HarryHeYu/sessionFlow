@@ -257,12 +257,14 @@ def check_schema_integrity(db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Inspect schema shape with a read-only connection; never writes."""
     out: Dict[str, Any] = {"ok": True, "path": None, "missing_tables": [],
                            "missing_columns": [], "orphan_events": 0,
-                           "error": None}
+                           "error": None, "db_missing": False}
     path = _store_path(db_path)
     out["path"] = str(path) if path else None
     if not path or not path.exists():
-        out["ok"] = False
-        out["error"] = "index database not found; run `voyager scan`"
+        # A missing index is a normal diagnostic state, not structural damage.
+        # Keep the full doctor report intact; check_store() already reports
+        # STORE_UNAVAILABLE for this case.
+        out["db_missing"] = True
         return out
     con = _open_ro_conn(path)
     if con is None:

@@ -70,3 +70,23 @@ def test_orphan_events_are_detected(monkeypatch):
     codes = [i.code for i in doctor._schema_issues(schema)]
     assert "ORPHAN_EVENTS" in codes
     con.close()
+
+
+def test_missing_index_keeps_full_doctor_report(monkeypatch):
+    """A missing DB is not structural damage; doctor must stay complete."""
+    class MissingPath:
+        def exists(self):
+            return False
+
+        def __str__(self):
+            return "fake://missing"
+
+    monkeypatch.setattr(doctor, "_store_path", lambda db=None: MissingPath())
+    schema = doctor.check_schema_integrity()
+    assert schema["ok"] is True
+    assert schema["db_missing"] is True
+
+    report = doctor.run()
+    assert set(report["providers"]) == set(doctor.PROVIDERS)
+    codes = {i["code"] for i in report["issues"]}
+    assert "STORE_UNAVAILABLE" in codes
